@@ -1,4 +1,4 @@
-From 4874f491377c9d25450608f386bd3bd136d9ba91 Mon Sep 17 00:00:00 2001
+From c812bacd1d12733318279f27aa4a034802cc0a8c Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Tue, 29 Sep 2026 19:03:50 -0400
 Subject: [PATCH] ntdll: Enable hardware TSO on every thread on arm64 macOS.
@@ -11,9 +11,9 @@ on each thread before it first runs Windows code; it fails harmlessly
 without the entitlement.
 ---
  dlls/ntdll/unix/server.c       |  2 ++
- dlls/ntdll/unix/signal_arm64.c | 23 +++++++++++++++++++++++
+ dlls/ntdll/unix/signal_arm64.c | 24 ++++++++++++++++++++++++
  dlls/ntdll/unix/unix_private.h |  2 ++
- 3 files changed, 27 insertions(+)
+ 3 files changed, 28 insertions(+)
 
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
 index 0ea41af7b6..c58238c265 100644
@@ -36,7 +36,7 @@ index 0ea41af7b6..c58238c265 100644
      }
      else if (data->start)
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index e8f18db6f7..660591888b 100644
+index e8f18db6f7..b8a2bb606b 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -29,6 +29,9 @@
@@ -49,7 +49,7 @@ index e8f18db6f7..660591888b 100644
  #include <pthread.h>
  #include <signal.h>
  #include <stdlib.h>
-@@ -1702,6 +1705,26 @@ void enable_custom_x18_abi(void)
+@@ -1702,6 +1705,27 @@ void enable_custom_x18_abi(void)
      }
      if (pset && pget && !pget()) pset( true );
  }
@@ -68,7 +68,8 @@ index e8f18db6f7..660591888b 100644
 +
 +    if (!initialized)
 +    {
-+        pset = dlsym( RTLD_DEFAULT, "thread_set_x86_64_compat" );
++        const char *env = getenv( "HADRON_HARDWARE_TSO" );
++        if (!env || strcmp( env, "0" )) pset = dlsym( RTLD_DEFAULT, "thread_set_x86_64_compat" );
 +        initialized = 1;
 +    }
 +    if (pset && pset( 1 )) pset = NULL;  /* not entitled: don't retry on every thread */

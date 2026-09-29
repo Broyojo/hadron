@@ -1,4 +1,4 @@
-From d881c920bf48dd2390c53b76fa6635c887073c4a Mon Sep 17 00:00:00 2001
+From cd82ead30c5901100826c0e2361fa0c655a6ac2f Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Tue, 29 Sep 2026 19:03:51 -0400
 Subject: [PATCH] Windows/UnixLib: Use thread_set_x86_64_compat for hardware
@@ -8,14 +8,22 @@ Apple silicon provides TSO per thread through the x86_64 compat mode
 (requires the cross-architecture entitlement). Report it to FEX so the
 JIT relies on hardware ordering instead of emulating it.
 ---
- Source/Windows/UnixLib/FEXUnixLib.cpp | 18 ++++++++++++++++++
- 1 file changed, 18 insertions(+)
+ Source/Windows/UnixLib/FEXUnixLib.cpp | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
 
 diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
-index 7e59d1dea..610be6340 100644
+index 7e59d1dea..738f1fb0a 100644
 --- a/Source/Windows/UnixLib/FEXUnixLib.cpp
 +++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
-@@ -8,6 +8,9 @@
+@@ -1,5 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ #include <cstdint>
++#include <cstring>
++#include <cstdlib>
+ #include <type_traits>
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -8,6 +10,9 @@
  #ifdef __linux__
  #include <sys/prctl.h>
  #endif
@@ -25,7 +33,7 @@ index 7e59d1dea..610be6340 100644
  #include <unistd.h>
  
  #include "FEXUnixLib.h"
-@@ -58,6 +61,20 @@ static int prctl(int, ...) {
+@@ -58,6 +63,21 @@ static int prctl(int, ...) {
  }
  #endif
  
@@ -37,7 +45,8 @@ index 7e59d1dea..610be6340 100644
 +
 +static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
 +  auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
-+  if (!thread_set_x86_64_compat) {
++  const char* Env = getenv("HADRON_HARDWARE_TSO");
++  if (!thread_set_x86_64_compat || (Env && !strcmp(Env, "0"))) {
 +    return STATUS_NOT_SUPPORTED;
 +  }
 +  return thread_set_x86_64_compat(Args->Enable) == KERN_SUCCESS ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
@@ -46,7 +55,7 @@ index 7e59d1dea..610be6340 100644
  static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
    auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
    if (Args->Enable) {
-@@ -71,6 +88,7 @@ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
+@@ -71,6 +91,7 @@ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
    prctl(PR_SET_MEM_MODEL, PR_SET_MEM_MODEL_DEFAULT, 0, 0, 0);
    return STATUS_SUCCESS;
  }
