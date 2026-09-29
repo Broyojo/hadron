@@ -1,0 +1,135 @@
+From 438bfee8ee4de042945e393b8699d4cf9853e332 Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Tue, 29 Sep 2026 18:58:19 -0400
+Subject: [PATCH] FEXCore: Use 64K guard regions for JIT buffers.
+
+Add FEX_GUARD_SIZE and use it for the temporary code buffer guard and the
+call-ret stack. On hosts with pages larger than 4K (16K on Apple Silicon
+macOS) a 4K guard page that shares a host page with usable memory is
+mapped accessible, so a JIT buffer overflow went undetected. Size the
+usable range to end on a guard-size boundary so the guard covers whole
+host pages.
+---
+ FEXCore/Source/Interface/Core/JIT/JIT.cpp                 | 8 +++++---
+ FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h       | 6 +++---
+ FEXCore/include/FEXCore/Utils/TypeDefines.h               | 4 ++++
+ .../LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp      | 2 +-
+ Source/Windows/Common/CallRetStack.h                      | 5 +----
+ Source/Windows/Common/JITGuardPage.h                      | 4 ++--
+ 6 files changed, 16 insertions(+), 13 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index ef7e33299..4d084df4a 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -913,14 +913,16 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+   CodeData.EntryPoints.clear();
+ 
+   // Fairly excessive buffer range to make sure we don't overflow
+-  // One page baseline, plus SSANodeMultipler bytes, plus another page for guard page.
+-  const uint32_t DesiredBufferRange = AlignUp(FEXCore::Utils::FEX_PAGE_SIZE * 2 + SSACount * SSANodeMultiplier, FEXCore::Utils::FEX_PAGE_SIZE);
++  // One page baseline, plus SSANodeMultipler bytes, then a guard region. The usable range ends on a
++  // guard-size boundary so the guard covers whole host pages.
++  const uint32_t DesiredBufferRange = AlignUp(FEXCore::Utils::FEX_PAGE_SIZE + SSACount * SSANodeMultiplier, FEXCore::Utils::FEX_GUARD_SIZE) +
++                                      FEXCore::Utils::FEX_GUARD_SIZE;
+ 
+   // JIT output is first written to a temporary buffer and later relocated to the CodeBuffer.
+   // This minimizes lock contention of CodeBufferWriteMutex.
+   auto TempCodeBufferInfo = TempCodeBufferAllocator.ReownOrClaimBufferWithSize(DesiredBufferRange);
+   auto TempCodeBuffer = TempCodeBufferInfo.Ptr;
+-  const uint32_t UsableBufferRange = TempCodeBufferInfo.Size - FEXCore::Utils::FEX_PAGE_SIZE;
++  const uint32_t UsableBufferRange = TempCodeBufferInfo.Size - FEXCore::Utils::FEX_GUARD_SIZE;
+ 
+   SetBuffer(TempCodeBuffer, UsableBufferRange);
+ 
+diff --git a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
+index 69e410c1f..bdcfd22a8 100644
+--- a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
++++ b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
+@@ -405,7 +405,7 @@ private:
+ /**
+  * @brief Thread pool allocator that allocates and frees objects that uses mmap, with a guard page.
+  *
+- * The last page of the size provided has the guard.
++ * The last FEX_GUARD_SIZE bytes of the size provided are the guard.
+  */
+ class PooledAllocatorVirtualWithGuard final : public IntrusivePooledAllocator {
+ public:
+@@ -420,8 +420,8 @@ public:
+ private:
+   void* Alloc(size_t Size) override {
+     auto Ptr = FEXCore::Allocator::VirtualAlloc(Size);
+-    uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, FEXCore::Utils::FEX_PAGE_SIZE);
+-    if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
++    uintptr_t LastPageAddr = reinterpret_cast<uintptr_t>(Ptr) + Size - FEXCore::Utils::FEX_GUARD_SIZE;
++    if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_GUARD_SIZE,
+                                             FEXCore::Allocator::ProtectOptions::None)) {
+       LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
+     }
+diff --git a/FEXCore/include/FEXCore/Utils/TypeDefines.h b/FEXCore/include/FEXCore/Utils/TypeDefines.h
+index ec03ac6cd..9162f9d86 100644
+--- a/FEXCore/include/FEXCore/Utils/TypeDefines.h
++++ b/FEXCore/include/FEXCore/Utils/TypeDefines.h
+@@ -7,6 +7,10 @@ namespace FEXCore::Utils {
+ // To work around build systems that build on a 16k/64k page size, define our page size here
+ // Don't use the system provided PAGE_SIZE define because of this.
+ constexpr size_t FEX_PAGE_SIZE = 4096;
++// Size and alignment for guard regions. Hosts with pages larger than 4K (16K on Apple Silicon)
++// emulate 4K guest pages, and a guard smaller than a host page ends up mapped accessible, so
++// use the Windows allocation granularity, a multiple of any supported host page size.
++constexpr size_t FEX_GUARD_SIZE = 0x10000;
+ constexpr size_t FEX_PAGE_SHIFT = 12;
+ constexpr size_t FEX_PAGE_MASK = ~(FEX_PAGE_SIZE - 1);
+ } // namespace FEXCore::Utils
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
+index 6d6c899f7..724821768 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
+@@ -578,7 +578,7 @@ bool SignalDelegator::HandleFrontendSIGSEGV(FEXCore::Core::InternalThreadState*
+ #ifdef ARCHITECTURE_arm64
+   if (Signal == SIGSEGV && SigInfo.si_code == SEGV_ACCERR && Thread->JITGuardPage &&
+       SigInfo.si_addr >= reinterpret_cast<void*>(Thread->JITGuardPage) &&
+-      SigInfo.si_addr < reinterpret_cast<void*>(Thread->JITGuardPage + FEXCore::Utils::FEX_PAGE_SIZE)) {
++      SigInfo.si_addr < reinterpret_cast<void*>(Thread->JITGuardPage + FEXCore::Utils::FEX_GUARD_SIZE)) {
+     FEXCore::UncheckedLongJump::ManuallyLoadJumpBuf(Thread->RestartJump, Thread->JITGuardOverflowArgument,
+                                                     ArchHelpers::Context::GetArmGPRs(UContext), ArchHelpers::Context::GetArmFPRs(UContext),
+                                                     ArchHelpers::Context::GetArmPc(UContext));
+diff --git a/Source/Windows/Common/CallRetStack.h b/Source/Windows/Common/CallRetStack.h
+index c7c1fb01e..ece1b5e05 100644
+--- a/Source/Windows/Common/CallRetStack.h
++++ b/Source/Windows/Common/CallRetStack.h
+@@ -7,10 +7,7 @@
+ #include <FEXCore/Debug/InternalThreadState.h>
+ 
+ namespace FEX::Windows::CallRetStack {
+-// Guard regions must cover whole host pages or they are silently mapped writable. Hosts with
+-// pages larger than 4K (16K on Apple Silicon macOS) emulate 4K Windows pages, so use the
+-// allocation granularity, which is a multiple of any supported host page size.
+-static constexpr uint64_t GuardSize = 0x10000;
++static constexpr uint64_t GuardSize = FEXCore::Utils::FEX_GUARD_SIZE;
+ 
+ struct CallRetStackInfo {
+   uint64_t AllocationBase;
+diff --git a/Source/Windows/Common/JITGuardPage.h b/Source/Windows/Common/JITGuardPage.h
+index 007d49892..36c4d35dd 100644
+--- a/Source/Windows/Common/JITGuardPage.h
++++ b/Source/Windows/Common/JITGuardPage.h
+@@ -5,13 +5,13 @@
+ 
+ namespace FEX::Windows::JITGuardPage {
+ static constexpr bool IsAddressInJITGuardPage(uintptr_t GuardPage, uintptr_t Address) {
+-  return GuardPage != 0 && Address >= GuardPage && Address < GuardPage + FEXCore::Utils::FEX_PAGE_SIZE;
++  return GuardPage != 0 && Address >= GuardPage && Address < GuardPage + FEXCore::Utils::FEX_GUARD_SIZE;
+ }
+ 
+ static_assert(!IsAddressInJITGuardPage(0, 0));
+ static_assert(IsAddressInJITGuardPage(0x1000, 0x1000));
+ static_assert(IsAddressInJITGuardPage(0x1000, 0x1fff));
+-static_assert(!IsAddressInJITGuardPage(0x1000, 0x2000));
++static_assert(!IsAddressInJITGuardPage(0x1000, 0x1000 + FEXCore::Utils::FEX_GUARD_SIZE));
+ 
+ static inline bool HandleJITGuardPage(FEXCore::Core::InternalThreadState* Thread, void* Address, uint64_t* GPRs, __uint128_t* FPRs, uint64_t* PC) {
+   if (IsAddressInJITGuardPage(Thread->JITGuardPage, reinterpret_cast<uintptr_t>(Address))) {
+-- 
+2.54.0 (Apple Git-157)
+

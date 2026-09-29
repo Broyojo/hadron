@@ -5,6 +5,7 @@
 # Usage: scripts/play <appid> <path/to/game.exe> [game args...]
 #
 # Only an allowlist of environment variables reaches the game: host secrets never do.
+# HADRON_LOG=1 writes module load addresses and errors to build/logs/ for crash analysis.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
@@ -15,11 +16,19 @@ pgrep -q steam_osx || echo "warning: Mac Steam doesn't seem to be running" >&2
 
 winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
 PREFIX="${WINEPREFIX:-$ROOT/prefix/release}"
+debug="${WINEDEBUG:--all}"
+if [ -n "$HADRON_LOG" ]; then
+    mkdir -p "$ROOT/build/logs"
+    log="$ROOT/build/logs/$appid-$(date +%Y%m%d-%H%M%S).log"
+    echo "logging to $log" >&2
+    debug="${WINEDEBUG:-err+all,+loaddll}"
+    exec > "$log" 2>&1
+fi
 
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     TMPDIR="${TMPDIR:-/tmp}" \
     WINEPREFIX="$PREFIX" \
-    WINEDEBUG="${WINEDEBUG:--all}" \
+    WINEDEBUG="$debug" \
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=;steamclient,steamclient64=n;lsteamclient=b}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
     SteamAppId="$appid" SteamGameId="$appid" \
