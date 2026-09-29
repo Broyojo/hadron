@@ -1,8 +1,8 @@
-From ace13f7131696d4d51ea457bc7cc66d6c4cf34e8 Mon Sep 17 00:00:00 2001
+From f34887a6d82ab3660cd86f988215f942f864507a Mon Sep 17 00:00:00 2001
 From: proton-apple <dev@proton-apple>
 Date: Tue, 29 Sep 2026 15:09:02 -0400
-Subject: [PATCH] ntdll: Keep allocations out of the top 16MB of the address
- space on macOS.
+Subject: [PATCH 5/6] ntdll: Keep allocations out of the top 16MB of the
+ address space on macOS.
 
 XNU's copyinstr() validates the full maximum string length, so execve()
 fails with EFAULT when argument or environment strings are close to the

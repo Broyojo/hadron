@@ -67,4 +67,10 @@ make install >/dev/null
 for loader in "$PREFIX/bin/wine" "$PREFIX/lib/wine/aarch64-unix/wine"; do
     codesign -f -s - --entitlements "$ROOT/packaging/dev.entitlements" "$loader" 2>/dev/null
 done
+# make install replaces d3d11/dxgi with wined3d's; put DXMT's back if it has been built.
+dxmt_build="$BUILD/dxmt"; [[ $variant == dev ]] && dxmt_build="$BUILD/dxmt-dev"
+if [[ -f "$dxmt_build/build.ninja" ]]; then
+    PATH="$ROOT/toolchains/llvm-mingw/bin:$PATH" meson install -C "$dxmt_build" --no-rebuild >/dev/null
+    log "reinstalled DXMT"
+fi
 log "done: $PREFIX/bin/wine"

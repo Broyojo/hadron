@@ -1,0 +1,106 @@
+From 7ad2a3247b53d92652ca77f28f22d1146f3a72db Mon Sep 17 00:00:00 2001
+From: proton-apple <dev@proton-apple>
+Date: Tue, 29 Sep 2026 17:10:21 -0400
+Subject: [PATCH] winemac.drv: Export the function table DXMT uses to attach
+ Metal views.
+
+DXMT looks up "macdrv_functions" and expects CrossOver's window data
+layout. Provide it, creating the window's client surface on demand since
+upstream only creates the client view for GL/Vulkan surfaces.
+---
+ dlls/winemac.drv/window.c | 82 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 82 insertions(+)
+
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index 7d8bf1319e..cec76ccdb4 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -2208,3 +2208,85 @@ void init_win_context(void)
+     pthread_mutex_init(&win_data_mutex, &attr);
+     pthread_mutexattr_destroy(&attr);
+ }
++
++
++/***********************************************************************
++ *              DXMT interface
++ *
++ * DXMT (https://github.com/3Shain/dxmt) attaches a Metal view to a window's client
++ * view through a function table exported as "macdrv_functions", using the window
++ * data layout that CrossOver provides.
++ */
++struct dxmt_win_data
++{
++    HWND                    hwnd;
++    WineWindow             *cocoa_window;
++    WineContentView        *cocoa_view;
++    WineContentView        *client_cocoa_view;
++    struct macdrv_win_data *data;               /* not part of the DXMT layout */
++};
++
++static struct dxmt_win_data *dxmt_get_win_data(HWND hwnd)
++{
++    struct macdrv_win_data *data;
++    struct dxmt_win_data *ret;
++    BOOL has_client_view;
++
++    if (!(data = get_win_data(hwnd))) return NULL;
++    has_client_view = data->client_view != NULL;
++    release_win_data(data);
++
++    /* the client view only exists once a client surface has been created */
++    if (!has_client_view) macdrv_CreateClientSurface(hwnd, 0, FALSE);
++
++    if (!(data = get_win_data(hwnd))) return NULL;
++    if (!data->client_view || !(ret = malloc(sizeof(*ret))))
++    {
++        release_win_data(data);
++        return NULL;
++    }
++    ret->hwnd = data->hwnd;
++    ret->cocoa_window = data->cocoa_window;
++    ret->cocoa_view = data->client_view;
++    ret->client_cocoa_view = data->client_view;
++    ret->data = data;
++    return ret;
++}
++
++static void dxmt_release_win_data(struct dxmt_win_data *win_data)
++{
++    if (!win_data) return;
++    release_win_data(win_data->data);
++    free(win_data);
++}
++
++static WineWindow *dxmt_get_cocoa_window(HWND hwnd, BOOL require_on_screen)
++{
++    return macdrv_get_cocoa_window(hwnd, require_on_screen);
++}
++
++__attribute__((visibility("default"))) const struct
++{
++    void                   (*init_display_devices)(BOOL);
++    struct dxmt_win_data  *(*get_win_data)(HWND);
++    void                   (*release_win_data)(struct dxmt_win_data *);
++    WineWindow            *(*get_cocoa_window)(HWND, BOOL);
++    MTLDevice_id           (*create_metal_device)(void);
++    void                   (*release_metal_device)(MTLDevice_id);
++    WineMetalView         *(*view_create_metal_view)(WineContentView *, MTLDevice_id);
++    CAMetalLayer          *(*view_get_metal_layer)(WineMetalView *);
++    void                   (*view_release_metal_view)(WineMetalView *);
++    void                   (*on_main_thread)(void *);
++} macdrv_functions =
++{
++    NULL,
++    dxmt_get_win_data,
++    dxmt_release_win_data,
++    dxmt_get_cocoa_window,
++    macdrv_create_metal_device,
++    macdrv_release_metal_device,
++    macdrv_view_create_metal_view,
++    macdrv_view_get_metal_layer,
++    macdrv_view_release_metal_view,
++    NULL,
++};
+-- 
+2.54.0 (Apple Git-157)
+

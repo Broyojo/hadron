@@ -1,7 +1,7 @@
-From 9c79a7d76a7c97287e7564c22621bbe5df56e136 Mon Sep 17 00:00:00 2001
+From 2c4115da8556b0067d08b701132121db0a2f6ab0 Mon Sep 17 00:00:00 2001
 From: proton-apple <dev@proton-apple>
 Date: Tue, 29 Sep 2026 14:49:43 -0400
-Subject: [PATCH 3/4] ntdll: Allow building with KUSER_SHARED_DATA above 4GB.
+Subject: [PATCH 3/6] ntdll: Allow building with KUSER_SHARED_DATA above 4GB.
 
 Hosts that can't map memory below 4GB (arm64 macOS without the
 cross-architecture entitlement) can define WINE_HIGH_USER_SHARED_DATA to
@@ -18,9 +18,11 @@ work in this mode.
  dlls/ntdll/signal_arm64ec.c |  5 +++++
  dlls/ntdll/thread.c         |  2 +-
  dlls/ntdll/unix/virtual.c   |  8 +++++++-
+ dlls/ntoskrnl.exe/instr.c   |  2 +-
+ dlls/win32u/message.c       |  2 +-
  include/ddk/wdm.h           | 10 ++++++++++
  include/wine/asm.h          |  7 ++++++-
- 9 files changed, 33 insertions(+), 7 deletions(-)
+ 11 files changed, 35 insertions(+), 9 deletions(-)
 
 diff --git a/dlls/kernel32/process.c b/dlls/kernel32/process.c
 index 9bbb18d89d..5e7a8f65b6 100644
@@ -141,6 +143,32 @@ index 07ebf670c0..98ed79dfa4 100644
 +#endif
  }
  
+ 
+diff --git a/dlls/ntoskrnl.exe/instr.c b/dlls/ntoskrnl.exe/instr.c
+index 31e1e6e28a..35df3ffa80 100644
+--- a/dlls/ntoskrnl.exe/instr.c
++++ b/dlls/ntoskrnl.exe/instr.c
+@@ -490,7 +490,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(int);
+ #define SIB_BASE( sib, rex )    (((sib) & 7) | (((rex) & REX_B) ? 8 : 0))
+ 
+ /* keep in sync with dlls/ntdll/thread.c:thread_init */
+-static const BYTE *wine_user_shared_data = (BYTE *)0x7ffe0000;
++static const BYTE *wine_user_shared_data = (BYTE *)MM_SHARED_USER_DATA_VA;
+ static const BYTE *user_shared_data      = (BYTE *)0xfffff78000000000;
+ 
+ static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
+diff --git a/dlls/win32u/message.c b/dlls/win32u/message.c
+index 8c9a2aaef7..68551961c6 100644
+--- a/dlls/win32u/message.c
++++ b/dlls/win32u/message.c
+@@ -45,7 +45,7 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
+ #define QS_HARDWARE     0x40000000
+ #define QS_INTERNAL     (QS_DRIVER | QS_HARDWARE)
+ 
+-static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
++static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)MM_SHARED_USER_DATA_VA;
+ 
+ static const struct ratio no_dpi;
  
 diff --git a/include/ddk/wdm.h b/include/ddk/wdm.h
 index bce13425a2..0ca6be93b9 100644

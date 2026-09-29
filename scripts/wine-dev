@@ -6,5 +6,6 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     TMPDIR="${TMPDIR:-/tmp}" \
     WINEPREFIX="${WINEPREFIX:-$ROOT/prefix/dev}" \
     WINEDEBUG="${WINEDEBUG:-}" \
+    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
     "$ROOT/dist-dev/bin/wine" "$@"

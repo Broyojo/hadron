@@ -1,7 +1,7 @@
-From 6beba420a5b7e8d77a8c51d536fb427c41fe6f0f Mon Sep 17 00:00:00 2001
+From 09f918a8c619140e070223b9b9a021725e812755 Mon Sep 17 00:00:00 2001
 From: proton-apple <dev@proton-apple>
 Date: Tue, 29 Sep 2026 14:49:43 -0400
-Subject: [PATCH 4/4] ntdll: Opt threads into the custom x18 ABI on arm64
+Subject: [PATCH 4/6] ntdll: Opt threads into the custom x18 ABI on arm64
  macOS.
 
 arm64 macOS zeroes x18 on context switches unless the thread enables the

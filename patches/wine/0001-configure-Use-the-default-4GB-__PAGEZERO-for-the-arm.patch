@@ -1,8 +1,8 @@
 From cd4189bb6cce57a58c3e717196b1a3ede1bd5e65 Mon Sep 17 00:00:00 2001
 From: proton-apple <dev@proton-apple>
 Date: Tue, 29 Sep 2026 10:05:08 -0400
-Subject: [PATCH] configure: Use the default 4GB __PAGEZERO for the arm64 macOS
- loader.
+Subject: [PATCH 1/6] configure: Use the default 4GB __PAGEZERO for the arm64
+ macOS loader.
 
 arm64 macOS SIGKILLs executables whose __PAGEZERO is smaller than 4GB.
 ---
