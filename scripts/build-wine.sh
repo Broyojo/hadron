@@ -67,6 +67,14 @@ make install >/dev/null
 for loader in "$PREFIX/bin/wine" "$PREFIX/lib/wine/aarch64-unix/wine"; do
     codesign -f -s - --entitlements "$ROOT/packaging/dev.entitlements" "$loader" 2>/dev/null
 done
+# make install replaces xtajit64.dll with Wine's stub; put FEX back as the default emulators.
+W="$PREFIX/lib/wine/aarch64-windows"
+if [[ -f "$W/libarm64ecfex.dll" ]]; then
+    rm -f "$W/xtajit.dll" "$W/xtajit64.dll"
+    cp "$W/libwow64fex.dll" "$W/xtajit.dll"
+    cp "$W/libarm64ecfex.dll" "$W/xtajit64.dll"
+    log "reinstalled FEX as xtajit.dll/xtajit64.dll"
+fi
 # make install replaces d3d11/dxgi with wined3d's; put DXMT's back if it has been built.
 dxmt_build="$BUILD/dxmt"; [[ $variant == dev ]] && dxmt_build="$BUILD/dxmt-dev"
 if [[ -f "$dxmt_build/build.ninja" ]]; then

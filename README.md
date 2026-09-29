@@ -18,6 +18,8 @@ scripts/build-wine.sh        # native arm64 Wine -> dist/
 scripts/build-fex.sh         # FEX emulator DLLs -> dist/
 scripts/build-llvm15.sh      # static LLVM 15 for DXMT's shader compiler
 scripts/build-dxmt.sh        # DXMT (D3D10/11 -> Metal) -> dist/, needs Xcode
+scripts/package-loader.sh <profile>  # sign the loader with the entitlement (docs/apple-developer-setup.md)
+scripts/wine-run <program>   # run with a clean environment (prefix/release)
 ```
 
 ## Status
@@ -27,7 +29,9 @@ scripts/build-dxmt.sh        # DXMT (D3D10/11 -> Metal) -> dist/, needs Xcode
 - [x] Native arm64 Windows programs run (dev build)
 - [x] x86_64 Windows programs run through FEX, no Rosetta (dev build)
 - [x] Executable memory via RW/RX page flipping; x18 preserved via the custom x18 ABI
-- [ ] Low 4GB memory and i386 programs: needs the loader signed with the cross-architecture entitlement (see docs/apple-developer-setup.md)
+- [x] Real Windows memory layout (low 4GB) via the cross-architecture entitlement: `scripts/package-loader.sh`
+- [x] 32-bit x86 programs through FEX's WoW64 emulator
+- [x] FEX installed as Wine's default emulators (xtajit/xtajit64): no per-prefix setup
 - [x] D3D11 through DXMT on Metal (test program; arm64 and x86_64-through-FEX)
 - [ ] First real DX11 game
 - [ ] Steam Play integration

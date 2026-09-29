@@ -39,5 +39,12 @@ cmake -S "$FEX_SRC/Source/Windows/UnixLib" -B "$BUILD/fex-unixlib" -G Ninja \
 cmake --build "$BUILD/fex-unixlib"
 cmake --install "$BUILD/fex-unixlib" >/dev/null
 
+# Install FEX under the emulator names Wine loads by default (HKLM\Software\Microsoft\Wow64\x86
+# and \amd64 fall back to xtajit.dll / xtajit64.dll), so it works from the first prefix boot.
+W="$DIST/lib/wine/aarch64-windows"
+rm -f "$W/xtajit.dll" "$W/xtajit64.dll"
+cp "$W/libwow64fex.dll" "$W/xtajit.dll"
+cp "$W/libarm64ecfex.dll" "$W/xtajit64.dll"
+
 log "done:"
 ls -la "$DIST"/lib/wine/aarch64-windows/lib*fex.dll "$DIST"/lib/wine/aarch64-unix/lib*fex.so

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run Hadron's Wine with a clean environment, so host secrets never reach Windows
+# processes or debug logs.
+#   scripts/wine-run <wine args...>      release build (dist/, prefix/release)
+#   scripts/wine-dev <wine args...>      dev build (dist-dev/, prefix/dev)
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+case "$(basename "$0")" in
+    wine-dev) DIST="$ROOT/dist-dev" PREFIX="$ROOT/prefix/dev" ;;
+    *)        DIST="$ROOT/dist"     PREFIX="$ROOT/prefix/release" ;;
+esac
+mkdir -p "${WINEPREFIX:-$PREFIX}"
+exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    TMPDIR="${TMPDIR:-/tmp}" \
+    WINEPREFIX="${WINEPREFIX:-$PREFIX}" \
+    WINEDEBUG="${WINEDEBUG:-}" \
+    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}" \
+    DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+    "$DIST/bin/wine" "$@"
