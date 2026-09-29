@@ -1,0 +1,59 @@
+From d881c920bf48dd2390c53b76fa6635c887073c4a Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Tue, 29 Sep 2026 19:03:51 -0400
+Subject: [PATCH] Windows/UnixLib: Use thread_set_x86_64_compat for hardware
+ TSO on macOS.
+
+Apple silicon provides TSO per thread through the x86_64 compat mode
+(requires the cross-architecture entitlement). Report it to FEX so the
+JIT relies on hardware ordering instead of emulating it.
+---
+ Source/Windows/UnixLib/FEXUnixLib.cpp | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index 7e59d1dea..610be6340 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -8,6 +8,9 @@
+ #ifdef __linux__
+ #include <sys/prctl.h>
+ #endif
++#ifdef __APPLE__
++#include <mach/kern_return.h>
++#endif
+ #include <unistd.h>
+ 
+ #include "FEXUnixLib.h"
+@@ -58,6 +61,20 @@ static int prctl(int, ...) {
+ }
+ #endif
+ 
++#ifdef __APPLE__
++// Apple silicon provides x86 memory ordering (TSO) per thread through the x86_64 compat mode,
++// which requires the cross-architecture entitlement. Wine enables it on every thread it starts;
++// enable it here too so FEX only relies on it when it's actually available.
++extern "C" kern_return_t thread_set_x86_64_compat(uint32_t enable) __attribute__((weak_import));
++
++static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
++  auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
++  if (!thread_set_x86_64_compat) {
++    return STATUS_NOT_SUPPORTED;
++  }
++  return thread_set_x86_64_compat(Args->Enable) == KERN_SUCCESS ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
++}
++#else
+ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
+   auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
+   if (Args->Enable) {
+@@ -71,6 +88,7 @@ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
+   prctl(PR_SET_MEM_MODEL, PR_SET_MEM_MODEL_DEFAULT, 0, 0, 0);
+   return STATUS_SUCCESS;
+ }
++#endif
+ 
+ static NTSTATUS FEXUnixLib_SetKernelUnalignedAtomicControlHandler(void* _Args) {
+   auto Args = reinterpret_cast<const FEXUnixLib_SetKernelUnalignedAtomicControl*>(_Args);
+-- 
+2.54.0 (Apple Git-157)
+

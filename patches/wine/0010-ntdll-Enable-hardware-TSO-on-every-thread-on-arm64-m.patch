@@ -1,0 +1,96 @@
+From 4874f491377c9d25450608f386bd3bd136d9ba91 Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Tue, 29 Sep 2026 19:03:50 -0400
+Subject: [PATCH] ntdll: Enable hardware TSO on every thread on arm64 macOS.
+
+x86 emulators need x86's memory ordering. With the cross-architecture
+entitlement, thread_set_x86_64_compat() switches an Apple silicon thread
+to the hardware TSO memory model (verified with a message-passing litmus
+test: reorderings go from hundreds per 5M rounds to none). Enable it
+on each thread before it first runs Windows code; it fails harmlessly
+without the entitlement.
+---
+ dlls/ntdll/unix/server.c       |  2 ++
+ dlls/ntdll/unix/signal_arm64.c | 23 +++++++++++++++++++++++
+ dlls/ntdll/unix/unix_private.h |  2 ++
+ 3 files changed, 27 insertions(+)
+
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index 0ea41af7b6..c58238c265 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1769,6 +1769,7 @@ void server_init_process_done(void)
+ 
+     assert( !status );
+     enable_custom_x18_abi();
++    enable_hardware_tso();
+     signal_start_thread( main_image_info.TransferAddress, peb, data->teb );
+ }
+ 
+@@ -1804,6 +1805,7 @@ void server_init_thread( struct thread_data *data )
+     {
+         init_teb_data( data );
+         enable_custom_x18_abi();
++        enable_hardware_tso();
+         signal_start_thread( data->start, data->param, data->teb );
+     }
+     else if (data->start)
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index e8f18db6f7..660591888b 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -29,6 +29,9 @@
+ #include <assert.h>
+ #include <dlfcn.h>
+ #include <stdbool.h>
++#ifdef __APPLE__
++#include <mach/kern_return.h>
++#endif
+ #include <pthread.h>
+ #include <signal.h>
+ #include <stdlib.h>
+@@ -1702,6 +1705,26 @@ void enable_custom_x18_abi(void)
+     }
+     if (pset && pget && !pget()) pset( true );
+ }
++
++/***********************************************************************
++ *           enable_hardware_tso
++ *
++ * x86 emulators need x86's stronger memory ordering. Apple silicon provides it in hardware
++ * (TSO), enabled per thread by thread_set_x86_64_compat(); this requires the
++ * cross-architecture entitlement and fails harmlessly without it.
++ */
++void enable_hardware_tso(void)
++{
++    static kern_return_t (*pset)(uint32_t);
++    static int initialized;
++
++    if (!initialized)
++    {
++        pset = dlsym( RTLD_DEFAULT, "thread_set_x86_64_compat" );
++        initialized = 1;
++    }
++    if (pset && pset( 1 )) pset = NULL;  /* not entitled: don't retry on every thread */
++}
+ #endif
+ 
+ 
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 30130f93ba..2d7929ae2d 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -357,8 +357,10 @@ extern void signal_init_process( TEB *teb );
+ extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg, TEB *teb );
+ #if defined(__APPLE__) && defined(__aarch64__)
+ extern void enable_custom_x18_abi(void);
++extern void enable_hardware_tso(void);
+ #else
+ static inline void enable_custom_x18_abi(void) {}
++static inline void enable_hardware_tso(void) {}
+ #endif
+ extern SYSTEM_SERVICE_TABLE KeServiceDescriptorTable[4];
+ extern void __wine_syscall_dispatcher(void);
+-- 
+2.54.0 (Apple Git-157)
+
