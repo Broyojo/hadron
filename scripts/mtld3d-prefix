@@ -30,8 +30,8 @@ enable)
     cp "$H/aarch64/d3d9.dll" "$WIN/system32/d3d9.dll"
     # mtld3d.dll is a builtin with a custom name: Wine only loads it if the prefix has a
     # marker for it, which wineboot writes only for prefixes created after the install.
-    [ -f "$WIN/syswow64/mtld3d.dll" ] || cp "$H/markers/syswow64/mtld3d.dll" "$WIN/syswow64/"
-    [ -f "$WIN/system32/mtld3d.dll" ] || cp "$H/markers/system32/mtld3d.dll" "$WIN/system32/"
+    cp "$H/markers/syswow64/mtld3d.dll" "$WIN/syswow64/"
+    cp "$H/markers/system32/mtld3d.dll" "$WIN/system32/"
     echo "mtld3d installed in $PFX; run with WINEDLLOVERRIDES=\"d3d9=n,b\""
     ;;
 disable)

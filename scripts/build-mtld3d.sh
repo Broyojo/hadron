@@ -24,7 +24,7 @@
 #   $DIST/lib/wine/aarch64-unix/mtld3d.so
 #   $DIST/lib/hadron/d3d9/i386/d3d9.dll          native, for a prefix's syswow64
 #   $DIST/lib/hadron/d3d9/aarch64/d3d9.dll       native ARM64X, for a prefix's system32
-#   $DIST/lib/hadron/d3d9/markers/{syswow64,system32}/mtld3d.dll
+#   $DIST/lib/hadron/d3d9/markers/{syswow64,system32}/mtld3d.dll  (copies of the builtins)
 #                                                builtin markers for prefixes created
 #                                                before mtld3d was installed
 #   $DIST/lib/hadron/d3d9/mtld3d.conf, LICENSE
@@ -182,8 +182,10 @@ cp "$OUT_arm64x/mtld3d.dll" "$STAGE/aarch64-windows/"
 cp "$OUT_unix/mtld3d.so" "$STAGE/aarch64-unix/"
 cp "$OUT_i386/d3d9.dll" "$STAGE/native/i386/"
 cp "$OUT_arm64x/d3d9.dll" "$STAGE/native/aarch64/"
-"$WINEBUILD" --fake-module -o "$STAGE/markers/syswow64/mtld3d.dll" -b i386-windows --dll "$STAGE/i386-windows/mtld3d.dll"
-"$WINEBUILD" --fake-module -o "$STAGE/markers/system32/mtld3d.dll" -b aarch64-windows --dll "$STAGE/aarch64-windows/mtld3d.dll"
+# Prefix markers are the builtin PEs themselves, as wineboot copies them: a winebuild
+# --fake-module stub for aarch64 is refused (c000007b) when an ARM64EC process loads it.
+cp "$STAGE/i386-windows/mtld3d.dll" "$STAGE/markers/syswow64/"
+cp "$STAGE/aarch64-windows/mtld3d.dll" "$STAGE/markers/system32/"
 
 if (( install )); then
     log "installing into $PREFIX"
@@ -195,6 +197,6 @@ if (( install )); then
     mkdir -p "$H"
     cp -R "$STAGE/native/i386" "$STAGE/native/aarch64" "$STAGE/markers" "$H/"
     cp "$MTLD3D_SRC/mtld3d.conf" "$MTLD3D_SRC/LICENSE" "$H/"
-    echo "mtld3d $(git -C "$MTLD3D_SRC" describe --tags --always) ($PROFILE)" > "$H/VERSION"
+    echo "mtld3d $(git -C "$MTLD3D_SRC" describe --tags --match "v*" --always) ($PROFILE)" > "$H/VERSION"
 fi
 log "done; enable per prefix with scripts/mtld3d-prefix enable, run with WINEDLLOVERRIDES=d3d9=n,b"

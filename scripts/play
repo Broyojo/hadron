@@ -29,6 +29,10 @@ for dll in lsteamclient.dll winemetal.dll; do
     install_dll i386-windows syswow64 "$dll"
 done
 debug="${WINEDEBUG:--all}"
+overrides="mscoree,mshtml=;steamclient,steamclient64=n;lsteamclient=b"
+# HADRON_D3D9=mtld3d uses mtld3d (D3D9 -> Metal) instead of wined3d; enable it in the prefix
+# first with scripts/mtld3d-prefix enable.
+[ "$HADRON_D3D9" = mtld3d ] && overrides="$overrides;d3d9=n,b"
 if [ -n "$HADRON_LOG" ]; then
     mkdir -p "$ROOT/build/logs"
     log="$ROOT/build/logs/$appid-$(date +%Y%m%d-%H%M%S).log"
@@ -41,7 +45,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     TMPDIR="${TMPDIR:-/tmp}" \
     WINEPREFIX="$PREFIX" \
     WINEDEBUG="$debug" \
-    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=;steamclient,steamclient64=n;lsteamclient=b}" \
+    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$overrides}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
     FEX_DISKCACHE="${FEX_DISKCACHE:-1}" \
     SteamAppId="$appid" SteamGameId="$appid" \
