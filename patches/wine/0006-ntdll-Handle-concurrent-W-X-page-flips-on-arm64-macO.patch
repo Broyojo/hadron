@@ -1,0 +1,61 @@
+From 05d92bb0d50e50714d0bbe96d2abb36def827649 Mon Sep 17 00:00:00 2001
+From: proton-apple <dev@proton-apple>
+Date: Tue, 29 Sep 2026 15:12:20 -0400
+Subject: [PATCH] ntdll: Handle concurrent W^X page flips on arm64 macOS.
+
+Two threads can fault on the same page at once; by the time the second
+takes the virtual mutex, the first may already have flipped the page the
+way it needs. Treat that as handled instead of an access violation.
+---
+ dlls/ntdll/unix/virtual.c | 32 +++++++++++++++++++++-----------
+ 1 file changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index f6d1bb2a9d..168ca0f228 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -4737,20 +4737,30 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+ #ifdef WX_EXCLUSIVE_HOST
+     if (is_vprot_exec_write( vprot ) && !(vprot & VPROT_GUARD))
+     {
+-        if (err == EXCEPTION_EXECUTE_FAULT && !(vprot & VPROT_EXECMODE))
++        /* another thread may already have flipped the page the way we need it */
++        if (err == EXCEPTION_EXECUTE_FAULT)
+         {
+-            TRACE( "flipping %p to executable\n", page );
+-            set_page_vprot_bits( page, host_page_size, VPROT_EXECMODE, 0 );
+-            mprotect_range( page, host_page_size, 0, 0 );
+-            ret = STATUS_SUCCESS;
+-            goto done;
++            if (!(vprot & VPROT_EXECMODE))
++            {
++                TRACE( "flipping %p to executable\n", page );
++                set_page_vprot_bits( page, host_page_size, VPROT_EXECMODE, 0 );
++                mprotect_range( page, host_page_size, 0, 0 );
++            }
++            if (get_unix_prot( get_host_page_vprot( page )) & PROT_EXEC)
++            {
++                ret = STATUS_SUCCESS;
++                goto done;
++            }
+         }
+-        if (err == EXCEPTION_WRITE_FAULT && (vprot & VPROT_EXECMODE))
++        else if (err == EXCEPTION_WRITE_FAULT)
+         {
+-            TRACE( "flipping %p to writable\n", page );
+-            set_page_vprot_bits( page, host_page_size, 0, VPROT_EXECMODE );
+-            mprotect_range( page, host_page_size, 0, 0 );
+-            vprot = get_host_page_vprot( page );
++            if (vprot & VPROT_EXECMODE)
++            {
++                TRACE( "flipping %p to writable\n", page );
++                set_page_vprot_bits( page, host_page_size, 0, VPROT_EXECMODE );
++                mprotect_range( page, host_page_size, 0, 0 );
++                vprot = get_host_page_vprot( page );
++            }
+             if (get_unix_prot( vprot ) & PROT_WRITE)
+             {
+                 ret = STATUS_SUCCESS;
+-- 
+2.54.0 (Apple Git-157)
+
