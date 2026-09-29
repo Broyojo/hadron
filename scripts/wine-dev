@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the dev Wine build with a clean environment, so host secrets never reach
+# Windows processes or debug logs. Usage: scripts/wine-dev <wine args...>
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    TMPDIR="${TMPDIR:-/tmp}" \
+    WINEPREFIX="${WINEPREFIX:-$ROOT/prefix/dev}" \
+    WINEDEBUG="${WINEDEBUG:-}" \
+    DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+    "$ROOT/dist-dev/bin/wine" "$@"
