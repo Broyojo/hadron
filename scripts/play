@@ -1,0 +1,27 @@
+#!/bin/sh
+# Run a Steam game through Hadron, with the native Mac Steam client providing Steam.
+# Mac Steam must be running and logged in.
+#
+# Usage: scripts/play <appid> <path/to/game.exe> [game args...]
+#
+# Only an allowlist of environment variables reaches the game: host secrets never do.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+[ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
+appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
+
+MAC_STEAM="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
+[ -f "$MAC_STEAM/steamclient.dylib" ] || { echo "Mac Steam not found at $MAC_STEAM" >&2; exit 1; }
+pgrep -q steam_osx || echo "warning: Mac Steam doesn't seem to be running" >&2
+
+winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
+PREFIX="${WINEPREFIX:-$ROOT/prefix/release}"
+
+exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    TMPDIR="${TMPDIR:-/tmp}" \
+    WINEPREFIX="$PREFIX" \
+    WINEDEBUG="${WINEDEBUG:--all}" \
+    WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=;steamclient,steamclient64=n;lsteamclient=b}" \
+    DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+    SteamAppId="$appid" SteamGameId="$appid" \
+    STEAM_COMPAT_CLIENT_INSTALL_PATH="$MAC_STEAM" \
+    "$ROOT/dist/bin/wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
