@@ -1,0 +1,6 @@
+/src/
+/build/
+/dist/
+/prefix/
+.DS_Store
+/toolchains/

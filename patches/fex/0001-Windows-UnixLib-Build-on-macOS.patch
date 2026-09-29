@@ -1,0 +1,66 @@
+From 7c413eb587599d9cffb9772f26299d3b6c5623a8 Mon Sep 17 00:00:00 2001
+From: proton-apple <dev@proton-apple>
+Date: Tue, 29 Sep 2026 10:08:41 -0400
+Subject: [PATCH] Windows/UnixLib: Build on macOS.
+
+macOS has no prctl: report hardware TSO and kernel unaligned-atomic control
+as unsupported so FEX uses its software paths, make VMA naming a no-op, and
+don't link librt.
+---
+ Source/Windows/UnixLib/CMakeLists.txt |  4 +++-
+ Source/Windows/UnixLib/FEXUnixLib.cpp | 13 +++++++++++++
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/Source/Windows/UnixLib/CMakeLists.txt b/Source/Windows/UnixLib/CMakeLists.txt
+index 37eda6aa0..d41cbbbd4 100644
+--- a/Source/Windows/UnixLib/CMakeLists.txt
++++ b/Source/Windows/UnixLib/CMakeLists.txt
+@@ -6,7 +6,9 @@ include(GNUInstallDirs)
+ function(CreateLib TargetName LibName)
+   add_library(${TargetName} SHARED FEXUnixLib.cpp)
+   set_target_properties(${TargetName} PROPERTIES OUTPUT_NAME ${LibName} PREFIX "lib" SUFFIX ".so")
+-  target_link_libraries(${TargetName} PRIVATE rt)
++  if (NOT APPLE)
++    target_link_libraries(${TargetName} PRIVATE rt)
++  endif()
+   install(TARGETS ${TargetName} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Runtime)
+ endfunction()
+ 
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index 8adef5993..7e59d1dea 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -1,10 +1,13 @@
+ // SPDX-License-Identifier: MIT
+ #include <cstdint>
+ #include <type_traits>
++#include <errno.h>
+ #include <fcntl.h>
+ #include <string>
+ #include <sys/mman.h>
++#ifdef __linux__
+ #include <sys/prctl.h>
++#endif
+ #include <unistd.h>
+ 
+ #include "FEXUnixLib.h"
+@@ -45,6 +48,16 @@ constexpr NTSTATUS STATUS_INTERNAL_ERROR = 0xC00000E5;
+ #define PR_SET_VMA_ANON_NAME 0
+ #endif
+ 
++#ifdef __APPLE__
++// macOS exposes no userspace control over Apple Silicon's hardware TSO mode, has no
++// kernel unaligned-atomic emulation and no VMA naming. Report the first two as unsupported
++// so FEX falls back to its software implementations.
++static int prctl(int, ...) {
++  errno = ENOSYS;
++  return -1;
++}
++#endif
++
+ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
+   auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
+   if (Args->Enable) {
+-- 
+2.54.0 (Apple Git-157)
+

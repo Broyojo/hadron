@@ -1,0 +1,48 @@
+From cd4189bb6cce57a58c3e717196b1a3ede1bd5e65 Mon Sep 17 00:00:00 2001
+From: proton-apple <dev@proton-apple>
+Date: Tue, 29 Sep 2026 10:05:08 -0400
+Subject: [PATCH] configure: Use the default 4GB __PAGEZERO for the arm64 macOS
+ loader.
+
+arm64 macOS SIGKILLs executables whose __PAGEZERO is smaller than 4GB.
+---
+ configure    | 5 ++++-
+ configure.ac | 6 +++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/configure b/configure
+index 4116b4aaca..3115e94b01 100755
+--- a/configure
++++ b/configure
+@@ -12345,7 +12345,10 @@ case $host_os in
+     SYSTEMCONFIGURATION_LIBS="-framework SystemConfiguration"
+ 
+ 
+-    WINELOADER_LDFLAGS="-Wl,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist"
++    case $HOST_ARCH in
++      aarch64) WINELOADER_LDFLAGS="-Wl,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
++      *) WINELOADER_LDFLAGS="-Wl,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
++    esac
+ 
+     case $HOST_ARCH in
+       i386) wine_use_preloader=yes ;;
+diff --git a/configure.ac b/configure.ac
+index 80bb8b33c6..31c941169f 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -981,7 +981,11 @@ case $host_os in
+     AC_SUBST(SECURITY_LIBS,"-framework Security -framework CoreFoundation")
+     AC_SUBST(SYSTEMCONFIGURATION_LIBS,"-framework SystemConfiguration")
+ 
+-    WINELOADER_LDFLAGS="-Wl,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist"
++    case $HOST_ARCH in
++      dnl arm64 macOS kills processes whose __PAGEZERO is smaller than 4GB
++      aarch64) WINELOADER_LDFLAGS="-Wl,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
++      *) WINELOADER_LDFLAGS="-Wl,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
++    esac
+ 
+     case $HOST_ARCH in
+       i386) wine_use_preloader=yes ;;
+-- 
+2.54.0 (Apple Git-157)
+
