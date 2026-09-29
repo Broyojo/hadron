@@ -1,0 +1,319 @@
+From 308ec4d70339ece94c910efb25a372d8aa4419bf Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Tue, 29 Sep 2026 18:34:23 -0400
+Subject: [PATCH] ntdll: Redirect games' steamclient.dll to lsteamclient.
+
+When a game loads steamclient.dll, steamclient64.dll or the overlay
+renderer, load lsteamclient.dll and patch the module's exports and entry
+point to jump into it, so the game talks to the host Steam client
+instead of a Windows one. Adapted from Valve's Proton. The patched code
+is x86 run by the emulator, so it is made writable through
+NtProtectVirtualMemory rather than mapped writable and executable.
+Set HADRON_DISABLE_LSTEAMCLIENT=1 to disable.
+---
+ dlls/ntdll/loader.c      | 106 ++++++++++++++++++++++++++++++++++++++-
+ dlls/ntdll/unix/loader.c | 103 +++++++++++++++++++++++++++++++++++++
+ dlls/ntdll/unixlib.h     |   7 +++
+ 3 files changed, 215 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index b0b2392c50..d67b6efe3d 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -1139,6 +1139,28 @@ void * WINAPI RtlFindExportedRoutineByName( HMODULE module, const char *name )
+  * Import the dll specified by the given import descriptor.
+  * The loader_section must be locked while calling this function.
+  */
++/* private flag: the entry point was redirected to lsteamclient, don't call it */
++#define LDR_DONT_CALL_DLLMAIN 0x20000000
++
++/*************************************************************************
++ *		use_lsteamclient
++ *
++ * Whether games' steamclient.dll is redirected to lsteamclient.dll, which bridges to the
++ * host Steam client. Set HADRON_DISABLE_LSTEAMCLIENT=1 to disable.
++ */
++static BOOL use_lsteamclient(void)
++{
++    static int use = -1;
++    WCHAR buffer[8];
++    UNICODE_STRING name = RTL_CONSTANT_STRING( L"HADRON_DISABLE_LSTEAMCLIENT" );
++    UNICODE_STRING value = { 0, sizeof(buffer), buffer };
++
++    if (use != -1) return use;
++    use = RtlQueryEnvironmentVariable_U( NULL, &name, &value ) || !value.Length || buffer[0] == '0';
++    if (!use) ERR( "lsteamclient disabled\n" );
++    return use;
++}
++
+ static BOOL import_dll( WINE_MODREF *wm, const IMAGE_IMPORT_DESCRIPTOR *descr, LPCWSTR load_path, WINE_MODREF **pwm )
+ {
+     HMODULE module = wm->ldr.DllBase;
+@@ -1170,6 +1192,16 @@ static BOOL import_dll( WINE_MODREF *wm, const IMAGE_IMPORT_DESCRIPTOR *descr, L
+         return TRUE;
+     }
+ 
++    /* the host Steam client provides these to steamclient64.dll; lsteamclient doesn't need them */
++    if (use_lsteamclient() && (!strcmp( name, "tier0_s64.dll" ) || !strcmp( name, "vstdlib_s64.dll" )) &&
++        wm->ldr.BaseDllName.Buffer && (!wcsicmp( wm->ldr.BaseDllName.Buffer, L"steamclient64.dll" ) ||
++                                       !wcsicmp( wm->ldr.BaseDllName.Buffer, L"gameoverlayrenderer64.dll" )))
++    {
++        TRACE( "%s -> ntdll.dll\n", name );
++        name = "ntdll.dll";
++        len = strlen( name );
++    }
++
+     status = build_import_name( wm, buffer, name, len );
+     if (!status) status = load_dll( load_path, buffer, 0, &wmImp, system );
+ 
+@@ -1799,7 +1831,8 @@ static NTSTATUS process_attach( LDR_DDAG_NODE *node, LPVOID lpReserved )
+     if (status == STATUS_SUCCESS)
+     {
+         call_ldr_notifications( LDR_DLL_NOTIFICATION_REASON_LOADED, &wm->ldr );
+-        status = MODULE_InitDLL( wm, DLL_PROCESS_ATTACH, lpReserved );
++        if (!(wm->ldr.Flags & LDR_DONT_CALL_DLLMAIN))
++            status = MODULE_InitDLL( wm, DLL_PROCESS_ATTACH, lpReserved );
+         if (status == STATUS_SUCCESS)
+         {
+             wm->ldr.Flags |= LDR_PROCESS_ATTACHED;
+@@ -2264,6 +2297,75 @@ done:
+  *
+  * Build the module data for a mapped dll.
+  */
++/*************************************************************************
++ *		redirect_steamclient
++ *
++ * Point the exports of a game's steamclient.dll (and the overlay renderer) at
++ * lsteamclient.dll. Adapted from Valve's Proton.
++ */
++static void redirect_steamclient( WINE_MODREF *wm, LPCWSTR load_path, const UNICODE_STRING *nt_name,
++                                  IMAGE_NT_HEADERS *nt, SIZE_T map_size, DWORD *flags )
++{
++    static HMODULE lsteamclient;
++    UNICODE_STRING lsteamclient_name = RTL_CONSTANT_STRING( L"lsteamclient.dll" );
++    struct steamclient_setup_trampolines_params params;
++    const WCHAR *basename = nt_name->Buffer, *p;
++    ULONG len;
++    BOOL is_steamclient32;
++
++    for (p = nt_name->Buffer; p < nt_name->Buffer + nt_name->Length / sizeof(WCHAR); p++)
++        if (*p == '\\' || *p == '/') basename = p + 1;
++    len = nt_name->Length / sizeof(WCHAR) - (basename - nt_name->Buffer);
++    if (len >= 4 && !wcsnicmp( basename + len - 4, L".dll", 4 )) len -= 4;
++
++    is_steamclient32 = !RtlCompareUnicodeStrings( basename, len, L"steamclient", 11, TRUE );
++    if (!is_steamclient32 && RtlCompareUnicodeStrings( basename, len, L"steamclient64", 13, TRUE ) &&
++        RtlCompareUnicodeStrings( basename, len, L"gameoverlayrenderer", 19, TRUE ) &&
++        RtlCompareUnicodeStrings( basename, len, L"gameoverlayrenderer64", 21, TRUE ))
++        return;
++
++    if (!lsteamclient && LdrLoadDll( load_path, 0, &lsteamclient_name, &lsteamclient ))
++    {
++        ERR( "failed to load lsteamclient.dll, %s will talk to Windows Steam\n", debugstr_us( nt_name ));
++        return;
++    }
++    TRACE( "redirecting %s to lsteamclient\n", debugstr_us( nt_name ));
++
++    params.src_mod = wm->ldr.DllBase;
++    params.tgt_mod = lsteamclient;
++    WINE_UNIX_CALL( unix_steamclient_setup_trampolines, &params );
++    NtFlushInstructionCache( NtCurrentProcess(), wm->ldr.DllBase, map_size );
++
++    if (is_steamclient32)
++    {
++        /* keep its references unresolved and report the image base from the file,
++         * as games check it (from Proton) */
++        OBJECT_ATTRIBUTES attr;
++        void *addr = wm->ldr.DllBase;
++        SIZE_T size = 0x1000;
++        LARGE_INTEGER offset;
++        IO_STATUS_BLOCK io;
++        ULONG old_prot;
++        HANDLE file;
++
++        wm->ldr.Flags |= LDR_DONT_RESOLVE_REFS;
++        *flags |= LDR_DONT_RESOLVE_REFS;
++
++        NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READWRITE, &old_prot );
++        InitializeObjectAttributes( &attr, (UNICODE_STRING *)nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
++        if (!NtOpenFile( &file, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ | FILE_SHARE_DELETE,
++                         FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE ))
++        {
++            offset.QuadPart = (ULONG_PTR)&nt->OptionalHeader.ImageBase - (ULONG_PTR)wm->ldr.DllBase;
++            NtReadFile( file, 0, NULL, NULL, &io, &nt->OptionalHeader.ImageBase,
++                        sizeof(nt->OptionalHeader.ImageBase), &offset, NULL );
++            NtClose( file );
++        }
++        NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, old_prot, &old_prot );
++    }
++    else wm->ldr.Flags |= LDR_DONT_CALL_DLLMAIN;
++}
++
+ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, void **module,
+                               const SECTION_IMAGE_INFORMATION *image_info, const struct file_id *id,
+                               DWORD flags, BOOL system, BOOL redirected, WINE_MODREF **pwm )
+@@ -2296,6 +2398,8 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+ 
+     update_load_config( *module );
+ 
++    if (use_lsteamclient()) redirect_steamclient( wm, load_path, nt_name, nt, map_size, &flags );
++
+     /* fixup imports */
+ 
+     if (!(flags & LDR_DONT_RESOLVE_REFS) &&
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index ebfb6af538..d50f8370f9 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -1005,6 +1005,11 @@ static NTSTATUS unwind_builtin_dll( void *args )
+ #endif /* SO_DLLS_SUPPORTED */
+ 
+ 
++static NTSTATUS steamclient_setup_trampolines( void *args );
++#ifdef _WIN64
++static NTSTATUS wow64_steamclient_setup_trampolines( void *args );
++#endif
++
+ static const unixlib_entry_t unix_call_funcs[] =
+ {
+     load_so_dll,
+@@ -1015,6 +1020,7 @@ static const unixlib_entry_t unix_call_funcs[] =
+     unixcall_wine_server_handle_to_fd,
+     unixcall_wine_spawnvp,
+     system_time_precise,
++    steamclient_setup_trampolines,
+ };
+ 
+ 
+@@ -1033,6 +1039,7 @@ const unixlib_entry_t unix_call_wow64_funcs[] =
+     wow64_wine_server_handle_to_fd,
+     wow64_wine_spawnvp,
+     system_time_precise,
++    wow64_steamclient_setup_trampolines,
+ };
+ 
+ #endif  /* _WIN64 */
+@@ -1545,6 +1552,102 @@ static const void *get_module_data_dir( HMODULE module, ULONG dir, ULONG *size )
+     return get_rva( module, data->VirtualAddress );
+ }
+ 
++
++/***********************************************************************
++ *           steamclient_setup_trampolines
++ *
++ * Redirect the exports and entry point of a game's steamclient.dll to lsteamclient.dll,
++ * which bridges to the host Steam client. Adapted from Valve's Proton.
++ */
++static void steamclient_write_jump_x64( void *src_addr, ULONGLONG tgt_addr )
++{
++    static const BYTE mov[] = {0x48, 0xb8};  /* movabs $tgt_addr, %rax */
++    static const BYTE jmp[] = {0xff, 0xe0};  /* jmp *%rax */
++    memcpy( src_addr, mov, sizeof(mov) );
++    memcpy( (char *)src_addr + sizeof(mov), &tgt_addr, sizeof(tgt_addr) );
++    memcpy( (char *)src_addr + sizeof(mov) + sizeof(tgt_addr), jmp, sizeof(jmp) );
++}
++
++static void steamclient_write_jump_x86( void *src_addr, ULONG tgt_addr )
++{
++    static const BYTE mov[] = {0xb8};        /* mov $tgt_addr, %eax */
++    static const BYTE jmp[] = {0xff, 0xe0};  /* jmp *%eax */
++    memcpy( src_addr, mov, sizeof(mov) );
++    memcpy( (char *)src_addr + sizeof(mov), &tgt_addr, sizeof(tgt_addr) );
++    memcpy( (char *)src_addr + sizeof(mov) + sizeof(tgt_addr), jmp, sizeof(jmp) );
++}
++
++static NTSTATUS steamclient_setup_trampolines( void *args )
++{
++    struct steamclient_setup_trampolines_params *params = args;
++    HMODULE src_mod = params->src_mod, tgt_mod = params->tgt_mod;
++    IMAGE_NT_HEADERS *src_nt = get_rva( src_mod, ((IMAGE_DOS_HEADER *)src_mod)->e_lfanew );
++    IMAGE_NT_HEADERS *tgt_nt = get_rva( tgt_mod, ((IMAGE_DOS_HEADER *)tgt_mod)->e_lfanew );
++    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION( src_nt );
++    BOOL x64 = src_nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC;
++    const IMAGE_EXPORT_DIRECTORY *src_exp, *tgt_exp;
++    const DWORD *names;
++    void *src_addr, *tgt_addr;
++    ULONG src_entry, tgt_entry, old_prot;
++    int i;
++
++    /* Make the code writable through the virtual memory APIs; on hosts that can't map
++     * pages writable and executable at once, pages are then flipped on demand. */
++    for (i = 0; i < src_nt->FileHeader.NumberOfSections; i++)
++    {
++        void *addr = get_rva( src_mod, sec[i].VirtualAddress );
++        SIZE_T size = sec[i].Misc.VirtualSize;
++
++        if (memcmp( sec[i].Name, ".text", 5 )) continue;
++        NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_EXECUTE_READWRITE, &old_prot );
++    }
++
++    if (!(src_exp = get_module_data_dir( src_mod, IMAGE_DIRECTORY_ENTRY_EXPORT, NULL )) ||
++        !(tgt_exp = get_module_data_dir( tgt_mod, IMAGE_DIRECTORY_ENTRY_EXPORT, NULL )))
++        return STATUS_INVALID_IMAGE_FORMAT;
++
++    names = get_rva( src_mod, src_exp->AddressOfNames );
++    for (i = 0; i < src_exp->NumberOfNames; i++)
++    {
++        const char *name = get_rva( src_mod, names[i] );
++
++        if (!(src_addr = (void *)find_named_export( src_mod, src_exp, name ))) continue;
++        if (!(tgt_addr = (void *)find_named_export( tgt_mod, tgt_exp, name ))) continue;
++        if (x64) steamclient_write_jump_x64( src_addr, (ULONG_PTR)tgt_addr );
++        else steamclient_write_jump_x86( src_addr, PtrToUlong( tgt_addr ));
++    }
++
++    if (x64)
++    {
++        src_entry = ((IMAGE_NT_HEADERS64 *)src_nt)->OptionalHeader.AddressOfEntryPoint;
++        tgt_entry = ((IMAGE_NT_HEADERS64 *)tgt_nt)->OptionalHeader.AddressOfEntryPoint;
++        steamclient_write_jump_x64( get_rva( src_mod, src_entry ), (ULONG_PTR)get_rva( tgt_mod, tgt_entry ));
++    }
++    else
++    {
++        src_entry = ((IMAGE_NT_HEADERS32 *)src_nt)->OptionalHeader.AddressOfEntryPoint;
++        tgt_entry = ((IMAGE_NT_HEADERS32 *)tgt_nt)->OptionalHeader.AddressOfEntryPoint;
++        steamclient_write_jump_x86( get_rva( src_mod, src_entry ), PtrToUlong( get_rva( tgt_mod, tgt_entry )));
++    }
++    return STATUS_SUCCESS;
++}
++
++#ifdef _WIN64
++static NTSTATUS wow64_steamclient_setup_trampolines( void *args )
++{
++    struct
++    {
++        ULONG src_mod;
++        ULONG tgt_mod;
++    } const *params32 = args;
++    struct steamclient_setup_trampolines_params params;
++
++    params.src_mod = ULongToPtr( params32->src_mod );
++    params.tgt_mod = ULongToPtr( params32->tgt_mod );
++    return steamclient_setup_trampolines( &params );
++}
++#endif
++
+ /***********************************************************************
+  *           load_ntdll_functions
+  */
+diff --git a/dlls/ntdll/unixlib.h b/dlls/ntdll/unixlib.h
+index 9cb444342f..a31650985e 100644
+--- a/dlls/ntdll/unixlib.h
++++ b/dlls/ntdll/unixlib.h
+@@ -76,6 +76,13 @@ enum ntdll_unix_funcs
+     unix_wine_server_handle_to_fd,
+     unix_wine_spawnvp,
+     unix_system_time_precise,
++    unix_steamclient_setup_trampolines,
++};
++
++struct steamclient_setup_trampolines_params
++{
++    HMODULE src_mod;
++    HMODULE tgt_mod;
+ };
+ 
+ extern unixlib_handle_t __wine_unixlib_handle;
+-- 
+2.54.0 (Apple Git-157)
+
