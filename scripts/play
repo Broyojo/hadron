@@ -43,6 +43,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     WINEDEBUG="$debug" \
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=;steamclient,steamclient64=n;lsteamclient=b}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+    FEX_DISKCACHE="${FEX_DISKCACHE:-1}" \
     SteamAppId="$appid" SteamGameId="$appid" \
     STEAM_COMPAT_CLIENT_INSTALL_PATH="$MAC_STEAM" \
     ${HADRON_DISABLE_LSTEAMCLIENT:+HADRON_DISABLE_LSTEAMCLIENT=$HADRON_DISABLE_LSTEAMCLIENT} \
