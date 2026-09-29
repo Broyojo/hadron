@@ -22,8 +22,8 @@ scripts/build-fex.sh         # FEX emulator DLLs -> dist/
 
 - [x] Upstream Wine builds natively for arm64 macOS (aarch64 + arm64ec + i386 PE)
 - [x] FEX ARM64EC and WoW64 DLLs build, with a Darwin unix helper
-- [ ] Wine starts: blocked on mapping memory below 4GB (`KUSER_SHARED_DATA`)
-- [ ] Executable memory via RW/RX page flipping
+- [ ] Wine starts: needs the restricted `cross-architecture-support` entitlement for low memory
+- [~] Executable memory via RW/RX page flipping (written, untested)
 - [ ] x86_64 and i386 programs run through FEX
 - [ ] DXMT, first DX11 game
 - [ ] Steam Play integration

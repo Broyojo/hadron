@@ -1,0 +1,107 @@
+From e1beb93e282053034ecf2010b31293af4d678999 Mon Sep 17 00:00:00 2001
+From: proton-apple <dev@proton-apple>
+Date: Tue, 29 Sep 2026 10:11:15 -0400
+Subject: [PATCH] ntdll: Flip exec+write pages between RW and RX on arm64
+ macOS.
+
+arm64 macOS refuses mappings that are both writable and executable. Map
+pages that are exec+write in Windows terms as writable by default, flip a
+host page to executable on an execute fault and back to writable on a
+write fault. Under an x86 emulator guest code pages are never executed
+natively, so they stay writable; only the emulator's JIT code flips.
+---
+ dlls/ntdll/unix/virtual.c | 43 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 64eed72621..07ebf670c0 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -138,6 +138,7 @@ struct file_view
+ #define VPROT_GUARD      0x10
+ #define VPROT_COMMITTED  0x20
+ #define VPROT_WRITEWATCH 0x40
++#define VPROT_EXECMODE   0x80  /* W^X hosts: exec+write page currently mapped executable */
+ /* per-mapping protection flags */
+ #define VPROT_ARM64EC          0x0100  /* view may contain ARM64EC code */
+ #define VPROT_SYSTEM           0x0200  /* system view (underlying mmap not under our control) */
+@@ -256,6 +257,12 @@ static inline BOOL is_vprot_exec_write( BYTE vprot )
+     return (vprot & VPROT_EXEC) && (vprot & (VPROT_WRITE | VPROT_WRITECOPY));
+ }
+ 
++/* arm64 macOS refuses mappings that are both writable and executable. Pages that are
++ * both in Windows terms are mapped either writable or executable, and flipped on fault. */
++#if defined(__APPLE__) && defined(__aarch64__)
++#define WX_EXCLUSIVE_HOST
++#endif
++
+ /* address-space layout randomization */
+ static inline BOOL use_aslr(void)
+ {
+@@ -1370,6 +1377,10 @@ static int get_unix_prot( BYTE vprot )
+         if (vprot & VPROT_WRITECOPY) prot |= PROT_WRITE | PROT_READ;
+         if (vprot & VPROT_EXEC) prot |= PROT_EXEC | PROT_READ;
+         if (vprot & VPROT_WRITEWATCH) prot &= ~PROT_WRITE;
++#ifdef WX_EXCLUSIVE_HOST
++        if ((prot & PROT_WRITE) && (prot & PROT_EXEC))
++            prot &= (vprot & VPROT_EXECMODE) ? ~PROT_WRITE : ~PROT_EXEC;
++#endif
+     }
+     if (!prot) prot = PROT_NONE;
+     return prot;
+@@ -4707,6 +4718,33 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+     }
+ #endif
+ 
++#ifdef WX_EXCLUSIVE_HOST
++    if (is_vprot_exec_write( vprot ) && !(vprot & VPROT_GUARD))
++    {
++        if (err == EXCEPTION_EXECUTE_FAULT && !(vprot & VPROT_EXECMODE))
++        {
++            TRACE( "flipping %p to executable\n", page );
++            set_page_vprot_bits( page, host_page_size, VPROT_EXECMODE, 0 );
++            mprotect_range( page, host_page_size, 0, 0 );
++            ret = STATUS_SUCCESS;
++            goto done;
++        }
++        if (err == EXCEPTION_WRITE_FAULT && (vprot & VPROT_EXECMODE))
++        {
++            TRACE( "flipping %p to writable\n", page );
++            set_page_vprot_bits( page, host_page_size, 0, VPROT_EXECMODE );
++            mprotect_range( page, host_page_size, 0, 0 );
++            vprot = get_host_page_vprot( page );
++            if (get_unix_prot( vprot ) & PROT_WRITE)
++            {
++                ret = STATUS_SUCCESS;
++                goto done;
++            }
++            /* still write-watched, handled below */
++        }
++    }
++#endif
++
+     if (!is_inside_signal_stack( data, stack ) && (vprot & VPROT_GUARD))
+     {
+         struct thread_stack_info stack_info;
+@@ -4741,6 +4779,9 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+                 ret = STATUS_SUCCESS;
+         }
+     }
++#ifdef WX_EXCLUSIVE_HOST
++done:
++#endif
+     mutex_unlock( &virtual_mutex );
+     rec->ExceptionCode = ret;
+     return ret;
+@@ -5770,7 +5811,7 @@ static unsigned int fill_basic_memory_info( const void *addr, MEMORY_BASIC_INFOR
+         BYTE vprot;
+ 
+         info->AllocationBase = alloc_base;
+-        info->RegionSize = get_committed_size( view, base, ~(size_t)0, &vprot, ~VPROT_WRITEWATCH );
++        info->RegionSize = get_committed_size( view, base, ~(size_t)0, &vprot, ~(VPROT_WRITEWATCH | VPROT_EXECMODE) );
+         info->State = (vprot & VPROT_COMMITTED) ? MEM_COMMIT : MEM_RESERVE;
+         info->Protect = (vprot & VPROT_COMMITTED) ? get_win32_prot( vprot, view->protect ) : 0;
+         info->AllocationProtect = get_win32_prot( view->protect, view->protect );
+-- 
+2.54.0 (Apple Git-157)
+
