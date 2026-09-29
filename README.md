@@ -1,4 +1,4 @@
-# proton-apple
+# Hadron
 
 An open-source, Proton-style compatibility tool for running Windows games on Apple
 Silicon Macs without Rosetta: native arm64 Wine, FEX for x86 translation, DXMT and
@@ -27,7 +27,7 @@ scripts/build-dxmt.sh        # DXMT (D3D10/11 -> Metal) -> dist/, needs Xcode
 - [x] Native arm64 Windows programs run (dev build)
 - [x] x86_64 Windows programs run through FEX, no Rosetta (dev build)
 - [x] Executable memory via RW/RX page flipping; x18 preserved via the custom x18 ABI
-- [ ] Low 4GB memory and i386 programs: needs the `cross-architecture-support` entitlement
+- [ ] Low 4GB memory and i386 programs: needs the loader signed with the cross-architecture entitlement (see docs/apple-developer-setup.md)
 - [x] D3D11 through DXMT on Metal (test program; arm64 and x86_64-through-FEX)
 - [ ] First real DX11 game
 - [ ] Steam Play integration

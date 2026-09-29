@@ -1,4 +1,4 @@
-# Common environment for proton-apple build scripts. Source, don't execute.
+# Common environment for Hadron build scripts. Source, don't execute.
 
 set -euo pipefail
 
@@ -19,4 +19,4 @@ JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-[[ "$(uname -m)" == arm64 ]] || die "proton-apple targets Apple Silicon (arm64) hosts only"
+[[ "$(uname -m)" == arm64 ]] || die "Hadron targets Apple Silicon (arm64) hosts only"

@@ -59,7 +59,7 @@ int main( int argc, char **argv )
 
     setvbuf( stdout, NULL, _IONBF, 0 );
     RegisterClassA( &wc );
-    hwnd = CreateWindowA( "d3d11tri", "proton-apple D3D11 test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    hwnd = CreateWindowA( "d3d11tri", "Hadron D3D11 test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                           100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL );
     printf( "window %p\n", hwnd );
 

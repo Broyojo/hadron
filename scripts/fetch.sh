@@ -22,7 +22,7 @@ fetch() {
     local patches=("$ROOT/patches/$name"/*.patch)
     if [[ -e "${patches[0]}" ]]; then
         log "applying ${#patches[@]} patch(es) to $name"
-        git -C "$dir" -c user.name=proton-apple -c user.email=dev@proton-apple am -q --3way "${patches[@]}"
+        git -C "$dir" -c user.name=hadron -c user.email=dev@hadron.invalid am -q --3way "${patches[@]}"
     fi
 }
 

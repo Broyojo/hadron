@@ -1,6 +1,6 @@
 # Architecture
 
-proton-apple is an open-source Proton-style compatibility tool for macOS on Apple
+Hadron is an open-source Proton-style compatibility tool for macOS on Apple
 Silicon. It runs Windows x86/x86_64 games without Rosetta 2: Wine runs natively as
 arm64, and FEX translates x86 code inside Wine's ARM64EC/WoW64 emulator interface.
 
@@ -52,9 +52,11 @@ restricted entitlement `com.apple.developer.cross-architecture-support` (or
 
 `os_cross_arch_is_supported(OS_CROSS_ARCH_X86_64)` (macOS 26.6+) reports kernel support;
 it returns true on macOS 27. Ad-hoc signed binaries carrying the entitlement are killed
-by AMFI ("adhoc signed but contains restricted entitlements"), so distribution needs a
-provisioning profile from Apple. This is almost certainly how CrossOver's ARM64 preview
-works, and explains its macOS 26.5 floor.
+by AMFI ("adhoc signed but contains restricted entitlements"), so it must come from a
+provisioning profile. In the developer portal it is the self-serve *Cross-architecture
+Compatibility Framework* capability (see [apple-developer-setup.md](apple-developer-setup.md)).
+This is almost certainly how CrossOver's ARM64 preview works, and explains its macOS
+26.5 floor.
 
 ### Executable memory plan
 
