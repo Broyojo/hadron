@@ -25,7 +25,8 @@ done
 [[ -f "$profile" ]] || die "usage: $0 <profile.provisionprofile> [identity] [--runtime]"
 
 if [[ -z "$identity" ]]; then
-    identity=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ { print $2; exit }')
+    # by SHA-1 hash: several certificates can share the same name
+    identity=$(security find-identity -v -p codesigning | awk '/Apple Development/ { print $2; exit }')
     [[ -n "$identity" ]] || die "no Apple Development identity found; create one in Xcode > Settings > Accounts"
 fi
 
