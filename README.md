@@ -16,6 +16,8 @@ scripts/setup-toolchain.sh   # Homebrew deps + llvm-mingw
 scripts/fetch.sh             # clone upstream sources and apply patches/
 scripts/build-wine.sh        # native arm64 Wine -> dist/
 scripts/build-fex.sh         # FEX emulator DLLs -> dist/
+scripts/build-llvm15.sh      # static LLVM 15 for DXMT's shader compiler
+scripts/build-dxmt.sh        # DXMT (D3D10/11 -> Metal) -> dist/, needs Xcode
 ```
 
 ## Status
@@ -26,7 +28,8 @@ scripts/build-fex.sh         # FEX emulator DLLs -> dist/
 - [x] x86_64 Windows programs run through FEX, no Rosetta (dev build)
 - [x] Executable memory via RW/RX page flipping; x18 preserved via the custom x18 ABI
 - [ ] Low 4GB memory and i386 programs: needs the `cross-architecture-support` entitlement
-- [ ] DXMT, first DX11 game (needs Xcode's Metal toolchain)
+- [x] D3D11 through DXMT on Metal (test program; arm64 and x86_64-through-FEX)
+- [ ] First real DX11 game
 - [ ] Steam Play integration
 
 ### Dev build
