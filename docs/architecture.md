@@ -31,6 +31,9 @@ Noncommercial).
 | RW → RX `mprotect`, then execute | Works (ad-hoc signed, no hardened runtime) | Page flipping between RW and RX is viable. |
 | `MAP_JIT` | Works without entitlement when not hardened; not combinable with `MAP_FIXED`; address hints into a hole are honoured | |
 | Toggling `pthread_jit_write_protect_np` inside a signal handler | Reverted on sigreturn | Fault-driven JIT toggling must happen outside signal context. |
+| Mapping between 4GB and `0x7000000000` (hint, `MAP_FIXED`, `mach_vm_map` fixed) | Refused ("no space"); hints are moved to `0x7000000000` | Dev mode places `KUSER_SHARED_DATA` at `0x1007ffe0000` and starts the Windows address space at `0x7000000000`. |
+| x18 across context switches | Zeroed by default; preserved with `os_set_custom_x18_abi_enabled(true)` (unrestricted `custom-x18-abi-toggle` entitlement, ad-hoc OK) | Every Wine thread opts in before entering Windows code (patch `wine/0004`). An on+off toggle pair costs ~19ns. |
+| Custom x18 mode across signals | Restored to the pre-signal value on sigreturn | Signal handlers may switch it freely; returning to Windows code restores it. |
 
 ### The cross-architecture entitlement (macOS 26.4+)
 

@@ -61,4 +61,10 @@ make -j"$JOBS"
 
 log "installing to $PREFIX"
 make install >/dev/null
+
+# The loader needs the custom x18 ABI entitlement (ad-hoc signable). Release builds are
+# re-signed with the Developer ID and release entitlements by scripts/sign.sh.
+for loader in "$PREFIX/bin/wine" "$PREFIX/lib/wine/aarch64-unix/wine"; do
+    codesign -f -s - --entitlements "$ROOT/packaging/dev.entitlements" "$loader" 2>/dev/null
+done
 log "done: $PREFIX/bin/wine"

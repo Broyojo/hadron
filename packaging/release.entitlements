@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Developer ID builds with the hardened runtime. Requires a provisioning profile
+     granting the cross-architecture entitlement (see docs/apple-entitlement-request.md). -->
+<plist version="1.0">
+<dict>
+    <!-- Soft __PAGEZERO (memory below 4GB), 4K-page spawns, thread_set_x86_64_compat. -->
+    <key>com.apple.developer.cross-architecture-support</key>
+    <true/>
+    <key>com.apple.security.custom-x18-abi-toggle</key>
+    <true/>
+    <!-- FEX's JIT: exec+write pages are flipped RW <-> RX, which the hardened runtime
+         only permits for unsigned executable memory. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- Steam overlay injection into the game process. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>

@@ -1,0 +1,101 @@
+From 6beba420a5b7e8d77a8c51d536fb427c41fe6f0f Mon Sep 17 00:00:00 2001
+From: proton-apple <dev@proton-apple>
+Date: Tue, 29 Sep 2026 14:49:43 -0400
+Subject: [PATCH 4/4] ntdll: Opt threads into the custom x18 ABI on arm64
+ macOS.
+
+arm64 macOS zeroes x18 on context switches unless the thread enables the
+custom x18 ABI (macOS 26.4+). x18 holds the TEB, so enable it before a
+thread first enters Windows code. Requires the
+com.apple.security.custom-x18-abi-toggle entitlement on the loader.
+---
+ dlls/ntdll/unix/server.c       |  2 ++
+ dlls/ntdll/unix/signal_arm64.c | 28 ++++++++++++++++++++++++++++
+ dlls/ntdll/unix/unix_private.h |  5 +++++
+ 3 files changed, 35 insertions(+)
+
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index fa9138d2bf..0ea41af7b6 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -1768,6 +1768,7 @@ void server_init_process_done(void)
+     SERVER_END_REQ;
+ 
+     assert( !status );
++    enable_custom_x18_abi();
+     signal_start_thread( main_image_info.TransferAddress, peb, data->teb );
+ }
+ 
+@@ -1802,6 +1803,7 @@ void server_init_thread( struct thread_data *data )
+     if (data->teb)
+     {
+         init_teb_data( data );
++        enable_custom_x18_abi();
+         signal_start_thread( data->start, data->param, data->teb );
+     }
+     else if (data->start)
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index 576f76bd7e..e8f18db6f7 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -27,6 +27,8 @@
+ #include "config.h"
+ 
+ #include <assert.h>
++#include <dlfcn.h>
++#include <stdbool.h>
+ #include <pthread.h>
+ #include <signal.h>
+ #include <stdlib.h>
+@@ -1677,6 +1679,32 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
+ }
+ 
+ 
++#ifdef __APPLE__
++/***********************************************************************
++ *           enable_custom_x18_abi
++ *
++ * arm64 macOS zeroes x18 on context switches unless the thread opts into the
++ * custom x18 ABI (macOS 26.4+, requires com.apple.security.custom-x18-abi-toggle).
++ * x18 holds the TEB, so every thread running Windows code must opt in.
++ */
++void enable_custom_x18_abi(void)
++{
++    static void (*pset)(bool);
++    static bool (*pget)(void);
++    static int initialized;
++
++    if (!initialized)
++    {
++        pset = dlsym( RTLD_DEFAULT, "os_set_custom_x18_abi_enabled" );
++        pget = dlsym( RTLD_DEFAULT, "os_custom_x18_abi_enabled" );
++        if (!pset || !pget) ERR( "custom x18 ABI not available, x18 will not be preserved\n" );
++        initialized = 1;
++    }
++    if (pset && pget && !pget()) pset( true );
++}
++#endif
++
++
+ /***********************************************************************
+  *           signal_start_thread
+  */
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 9b6401ee37..30130f93ba 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -355,6 +355,11 @@ extern void signal_free_thread( TEB *teb );
+ extern void signal_disable_syscall_dispatch(void);
+ extern void signal_init_process( TEB *teb );
+ extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg, TEB *teb );
++#if defined(__APPLE__) && defined(__aarch64__)
++extern void enable_custom_x18_abi(void);
++#else
++static inline void enable_custom_x18_abi(void) {}
++#endif
+ extern SYSTEM_SERVICE_TABLE KeServiceDescriptorTable[4];
+ extern void __wine_syscall_dispatcher(void);
+ extern void __wine_syscall_dispatcher_return(void);
+-- 
+2.54.0 (Apple Git-157)
+

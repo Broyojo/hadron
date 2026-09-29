@@ -1,25 +1,26 @@
-From 28a8e2408134378967d951006ab959cb2664f4eb Mon Sep 17 00:00:00 2001
+From 9c79a7d76a7c97287e7564c22621bbe5df56e136 Mon Sep 17 00:00:00 2001
 From: proton-apple <dev@proton-apple>
-Date: Tue, 29 Sep 2026 14:32:14 -0400
-Subject: [PATCH] ntdll: Allow building with KUSER_SHARED_DATA above 4GB.
+Date: Tue, 29 Sep 2026 14:49:43 -0400
+Subject: [PATCH 3/4] ntdll: Allow building with KUSER_SHARED_DATA above 4GB.
 
 Hosts that can't map memory below 4GB (arm64 macOS without the
 cross-architecture entitlement) can define WINE_HIGH_USER_SHARED_DATA to
-move the shared user data page and the start of the address space above
-4GB. The x64 syscall thunks then skip the SystemCall check, which uses a
-32-bit absolute address. Only 64-bit programs that don't hardcode the
-address work in this mode.
+move the shared user data page and the start of the address space higher.
+arm64 macOS also refuses mappings between 4GB and 0x7000000000. The x64
+syscall thunks then skip the SystemCall check, which uses a 32-bit
+absolute address. Only 64-bit programs that don't hardcode the address
+work in this mode.
 ---
- dlls/kernel32/process.c     | 2 +-
- dlls/kernel32/sync.c        | 2 +-
- dlls/kernelbase/memory.c    | 2 +-
- dlls/kernelbase/sync.c      | 2 +-
- dlls/ntdll/signal_arm64ec.c | 5 +++++
- dlls/ntdll/thread.c         | 2 +-
- dlls/ntdll/unix/virtual.c   | 8 +++++++-
- include/ddk/wdm.h           | 9 +++++++++
- include/wine/asm.h          | 7 ++++++-
- 9 files changed, 32 insertions(+), 7 deletions(-)
+ dlls/kernel32/process.c     |  2 +-
+ dlls/kernel32/sync.c        |  2 +-
+ dlls/kernelbase/memory.c    |  2 +-
+ dlls/kernelbase/sync.c      |  2 +-
+ dlls/ntdll/signal_arm64ec.c |  5 +++++
+ dlls/ntdll/thread.c         |  2 +-
+ dlls/ntdll/unix/virtual.c   |  8 +++++++-
+ include/ddk/wdm.h           | 10 ++++++++++
+ include/wine/asm.h          |  7 ++++++-
+ 9 files changed, 33 insertions(+), 7 deletions(-)
 
 diff --git a/dlls/kernel32/process.c b/dlls/kernel32/process.c
 index 9bbb18d89d..5e7a8f65b6 100644
@@ -105,7 +106,7 @@ index 1c25c8ff1d..97630b3cae 100644
  struct debug_info
  {
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 07ebf670c0..3e5a91d6cb 100644
+index 07ebf670c0..98ed79dfa4 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -183,7 +183,11 @@ static const UINT_PTR host_page_mask = 0xfff;
@@ -113,7 +114,7 @@ index 07ebf670c0..3e5a91d6cb 100644
  
  /* Note: these are Windows limits, you cannot change them. */
 +#ifdef WINE_HIGH_USER_SHARED_DATA
-+static void *address_space_start = (void *)0x100000000;
++static void *address_space_start = (void *)0x7000000000;  /* arm64 macOS reserves 4GB-0x7000000000 */
 +#else
  static void *address_space_start = (void *)0x10000;
 +#endif
@@ -142,18 +143,19 @@ index 07ebf670c0..3e5a91d6cb 100644
  
  
 diff --git a/include/ddk/wdm.h b/include/ddk/wdm.h
-index bce13425a2..52802587ed 100644
+index bce13425a2..0ca6be93b9 100644
 --- a/include/ddk/wdm.h
 +++ b/include/ddk/wdm.h
-@@ -1479,6 +1479,15 @@ typedef struct _KUSER_SHARED_DATA {
+@@ -1479,6 +1479,16 @@ typedef struct _KUSER_SHARED_DATA {
  
  C_ASSERT( sizeof(KUSER_SHARED_DATA) == 0x738 );
  
 +/* Hosts that cannot map below 4GB (arm64 macOS without the cross-architecture
 + * entitlement) can build with WINE_HIGH_USER_SHARED_DATA to move it; only 64-bit
-+ * programs that don't hardcode the address will work. */
++ * programs that don't hardcode the address will work. arm64 macOS also refuses
++ * mappings between 4GB and 0x7000000000, so use an address above 1TB. */
 +#ifdef WINE_HIGH_USER_SHARED_DATA
-+#define MM_SHARED_USER_DATA_VA 0x107ffe0000
++#define MM_SHARED_USER_DATA_VA 0x1007ffe0000
 +#else
 +#define MM_SHARED_USER_DATA_VA 0x7ffe0000
 +#endif

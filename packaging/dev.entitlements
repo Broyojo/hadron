@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Ad-hoc development builds. Only unrestricted entitlements. -->
+<plist version="1.0">
+<dict>
+    <!-- x18 holds the Windows TEB; opt threads into the custom x18 ABI (macOS 26.4+). -->
+    <key>com.apple.security.custom-x18-abi-toggle</key>
+    <true/>
+</dict>
+</plist>
