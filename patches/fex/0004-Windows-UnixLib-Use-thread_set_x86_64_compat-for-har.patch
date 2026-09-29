@@ -1,4 +1,4 @@
-From cd82ead30c5901100826c0e2361fa0c655a6ac2f Mon Sep 17 00:00:00 2001
+From f2a0992b9ad90f17233ba05a5d88096e8faa1d94 Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Tue, 29 Sep 2026 19:03:51 -0400
 Subject: [PATCH] Windows/UnixLib: Use thread_set_x86_64_compat for hardware
@@ -12,7 +12,7 @@ JIT relies on hardware ordering instead of emulating it.
  1 file changed, 21 insertions(+)
 
 diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
-index 7e59d1dea..738f1fb0a 100644
+index 7e59d1dea..c6b2e7dc5 100644
 --- a/Source/Windows/UnixLib/FEXUnixLib.cpp
 +++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
 @@ -1,5 +1,7 @@
@@ -46,7 +46,7 @@ index 7e59d1dea..738f1fb0a 100644
 +static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
 +  auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
 +  const char* Env = getenv("HADRON_HARDWARE_TSO");
-+  if (!thread_set_x86_64_compat || (Env && !strcmp(Env, "0"))) {
++  if (!thread_set_x86_64_compat || !Env || strcmp(Env, "1")) {  // opt-in, see Wine's enable_hardware_tso
 +    return STATUS_NOT_SUPPORTED;
 +  }
 +  return thread_set_x86_64_compat(Args->Enable) == KERN_SUCCESS ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;

@@ -1,0 +1,51 @@
+#!/bin/sh
+# Opt a Wine prefix into mtld3d (D3D9 on Metal), the way Proton opts prefixes into DXVK:
+# a native d3d9.dll in syswow64 (32-bit) and system32 (ARM64X, for x64 and arm64 code),
+# selected at run time with a DLL override. Without the override the prefix keeps
+# using Wine's builtin d3d9 (wined3d), even with the files in place.
+#
+#   scripts/mtld3d-prefix enable  [prefix]   copy mtld3d's d3d9.dll (+ mtld3d.dll markers)
+#   scripts/mtld3d-prefix disable [prefix]   put Wine's own d3d9.dll back
+#   scripts/mtld3d-prefix status  [prefix]
+#
+# then run with:  WINEDLLOVERRIDES="d3d9=n,b" scripts/wine-run game.exe
+# (or persistently: wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d9 /d native,builtin /f)
+#
+# prefix defaults to prefix/release; set DIST for another runtime tree (e.g. dist-dev).
+# Needs scripts/build-mtld3d.sh to have installed dist/lib/hadron/d3d9.
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DIST="${DIST:-$ROOT/dist}"
+H="$DIST/lib/hadron/d3d9"
+cmd="${1:-status}"
+PFX="${2:-${WINEPREFIX:-$ROOT/prefix/release}}"
+WIN="$PFX/drive_c/windows"
+
+[ -d "$WIN/system32" ] && [ -d "$WIN/syswow64" ] || { echo "error: $PFX is not an initialised 64-bit prefix" >&2; exit 1; }
+
+case "$cmd" in
+enable)
+    [ -f "$H/i386/d3d9.dll" ] || { echo "error: $H missing, run scripts/build-mtld3d.sh" >&2; exit 1; }
+    cp "$H/i386/d3d9.dll" "$WIN/syswow64/d3d9.dll"
+    cp "$H/aarch64/d3d9.dll" "$WIN/system32/d3d9.dll"
+    # mtld3d.dll is a builtin with a custom name: Wine only loads it if the prefix has a
+    # marker for it, which wineboot writes only for prefixes created after the install.
+    [ -f "$WIN/syswow64/mtld3d.dll" ] || cp "$H/markers/syswow64/mtld3d.dll" "$WIN/syswow64/"
+    [ -f "$WIN/system32/mtld3d.dll" ] || cp "$H/markers/system32/mtld3d.dll" "$WIN/system32/"
+    echo "mtld3d installed in $PFX; run with WINEDLLOVERRIDES=\"d3d9=n,b\""
+    ;;
+disable)
+    cp "$DIST/lib/wine/i386-windows/d3d9.dll" "$WIN/syswow64/d3d9.dll"
+    cp "$DIST/lib/wine/aarch64-windows/d3d9.dll" "$WIN/system32/d3d9.dll"
+    echo "Wine's builtin d3d9 restored in $PFX"
+    ;;
+status)
+    for d in syswow64 system32; do
+        if grep -q "Wine builtin DLL" "$WIN/$d/d3d9.dll" 2>/dev/null; then s="wine builtin"
+        elif grep -q "mtld3d" "$WIN/$d/d3d9.dll" 2>/dev/null; then s="mtld3d"
+        else s="other native"; fi
+        echo "$d/d3d9.dll: $s"
+    done
+    ;;
+*) echo "usage: $0 enable|disable|status [prefix]" >&2; exit 2 ;;
+esac

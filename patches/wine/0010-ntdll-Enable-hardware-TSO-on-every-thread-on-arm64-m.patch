@@ -1,4 +1,4 @@
-From c812bacd1d12733318279f27aa4a034802cc0a8c Mon Sep 17 00:00:00 2001
+From bae18064b79f76a883cadc5dead98a22c5cbff51 Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Tue, 29 Sep 2026 19:03:50 -0400
 Subject: [PATCH] ntdll: Enable hardware TSO on every thread on arm64 macOS.
@@ -11,9 +11,9 @@ on each thread before it first runs Windows code; it fails harmlessly
 without the entitlement.
 ---
  dlls/ntdll/unix/server.c       |  2 ++
- dlls/ntdll/unix/signal_arm64.c | 24 ++++++++++++++++++++++++
+ dlls/ntdll/unix/signal_arm64.c | 26 ++++++++++++++++++++++++++
  dlls/ntdll/unix/unix_private.h |  2 ++
- 3 files changed, 28 insertions(+)
+ 3 files changed, 30 insertions(+)
 
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
 index 0ea41af7b6..c58238c265 100644
@@ -36,7 +36,7 @@ index 0ea41af7b6..c58238c265 100644
      }
      else if (data->start)
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index e8f18db6f7..b8a2bb606b 100644
+index e8f18db6f7..f06f2fa8c4 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -29,6 +29,9 @@
@@ -49,7 +49,7 @@ index e8f18db6f7..b8a2bb606b 100644
  #include <pthread.h>
  #include <signal.h>
  #include <stdlib.h>
-@@ -1702,6 +1705,27 @@ void enable_custom_x18_abi(void)
+@@ -1702,6 +1705,29 @@ void enable_custom_x18_abi(void)
      }
      if (pset && pget && !pget()) pset( true );
  }
@@ -68,8 +68,10 @@ index e8f18db6f7..b8a2bb606b 100644
 +
 +    if (!initialized)
 +    {
++        /* opt-in: TSO also applies to native code on the thread (e.g. graphics drivers), and has
++         * been seen to make games far slower overall */
 +        const char *env = getenv( "HADRON_HARDWARE_TSO" );
-+        if (!env || strcmp( env, "0" )) pset = dlsym( RTLD_DEFAULT, "thread_set_x86_64_compat" );
++        if (env && !strcmp( env, "1" )) pset = dlsym( RTLD_DEFAULT, "thread_set_x86_64_compat" );
 +        initialized = 1;
 +    }
 +    if (pset && pset( 1 )) pset = NULL;  /* not entitled: don't retry on every thread */
