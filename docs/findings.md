@@ -18,6 +18,7 @@ Root causes found while bringing up Hadron, and what fixed them. Most affect eve
 | 12 | Steam bridge hangs ("Timed out waiting for game mapping") | Mac Steam only serves games it launched | Needs Steam Play integration |
 | 13 | Portal black screen on mtld3d without `-novid`, later a crash | (a) A GDI paint of the game window before the intro hides the client view that mtld3d/DXMT present into, for good; (b) with the Steam bridge off, every retry of `SteamAPI_Init` loads and unloads Windows `steamclient.dll`, leaking a 32 MB reservation, and Source retries every frame during the intro | Keep external Metal views visible (Wine 0012); `scripts/play` disables Windows `steamclient.dll` when the bridge is off |
 | 14 | Portal lag spike every few seconds | W^X flips on FEX's JIT code (two faults and two `mprotect`s per write/run alternation on a 16K page), triggered in bulk whenever FEX loads or links lots of code | MAP_JIT code buffers that FEX toggles itself (Wine 0011, FEX 0005) |
+| 15 | FNaF fullscreen image shifted down/right and cropped | A display mode set while the app is still inactive (a game launched from a terminal) is deferred to activation, but win32u re-reads the old mode and monitor rect right after the call succeeds, so the fullscreen window is sized for the old desktop while the back buffer has the new size | Report the pending mode at once (Wine 0013) |
 
 ## Portal black screen and crash with the Bink intro (resolved, #13)
 
@@ -89,6 +90,38 @@ link or invalidation batch rather than per fault. A code write that misses a win
 so every write to a code buffer must be inside one. Left: the remaining ~50 ms stall per retry
 disappears with working Steam; FEX never reclaims space from invalidated blocks, so code that is
 repeatedly unmapped and reloaded still fills the buffer and forces full cache clears.
+
+## FNaF fullscreen offset (resolved, #15)
+
+Symptom: fullscreen FNaF showed its menu shifted down/right with black bands at the top and
+left, cropped at the right and bottom. The Metal view/client-surface frame was not the cause:
+traces (`trace+macdrv,trace+system,trace+display`) show the view covering the window throughout.
+
+What happens: FNaF asks for a 1280x800 fullscreen back buffer. mtld3d calls
+`ChangeDisplaySettings(1280x800, CDS_FULLSCREEN)`, which succeeds, then sizes the window to the
+monitor rect. But the Wine app is not active yet (it was launched from a terminal, and activation
+is asynchronous), and in that case winemac's `-[WineApplicationController setMode:forDisplay:]`
+only records the mode in `latentDisplayModes` and sets it on the next activation. win32u re-reads
+the displays right after the call and gets the old mode back (`add_modes current 1512x982`,
+monitor `(0,0)-(1512,982)`), so mtld3d sized the window to 1512x982 ("honoring the requested
+1280x800 back buffer without a mode-set; the window covers the monitor (1512x982)"). The Clickteam
+runtime then centered its 1280x720 frame child for a 1512x982 client, at `(116,131)`, and drew
+at that offset into the 1280x800 back buffer, which present scaled to the window: the offset
+seen on screen (136x161 pt = 116x131 scaled by 1512/1280 and 982/800) and the crop. When the app
+was activated a moment later the display really switched to 1280x800, but nothing resized the
+window again.
+
+Fix (Wine 0013): while a mode is pending, winemac reports it as the display's current mode and
+sizes the monitor rect to it, as on Windows, where the mode is in effect when
+`ChangeDisplaySettings` returns. `screen_covered_by_rect` also treats a window covering a screen
+in its pending mode as fullscreen, so Cocoa does not push the 1280x800 window below the menu bar
+before the mode is set. Activation then only carries out the change, and the window, back buffer
+and display agree: FNaF's 1280x720 frame is centered with 40-pixel bands above and below, like
+on Windows. Any game that changes the display mode at startup benefits, whatever its renderer.
+
+Note: a real mode change captures the display (Wine's normal behavior): other apps are hidden
+until the game quits or Cmd-Tab releases the display. Testing: `scripts/shot` skips windows
+above the normal window level, and captured-display game windows are raised above it.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 

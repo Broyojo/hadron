@@ -1,0 +1,202 @@
+From 4c66f33479420c8d930b043099b0846d9214cea1 Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Tue, 29 Sep 2026 23:05:32 -0400
+Subject: [PATCH] winemac.drv: Report a display mode set while the app is
+ inactive at once.
+
+ChangeDisplaySettings on an inactive app (a game launched from a
+terminal, before activation completes) only records the mode; it is set
+on the next activation, yet the call succeeds. win32u then re-reads the
+displays at once and gets the old mode and monitor rect back, so a
+fullscreen D3D device sizes its window for the old desktop while its
+back buffer has the new size: Five Nights at Freddy's (1280x800 on a
+1512x982 desktop) centered its frame for 1512x982 inside a 1280x800
+back buffer, shifted down/right and cropped.
+
+Report the pending mode as the display's current mode and monitor size,
+as on Windows, where the mode is in effect when the call returns, and
+keep Cocoa from constraining a window that covers the screen in that
+mode below the menu bar. Activation then only realizes the mode.
+---
+ dlls/winemac.drv/cocoa_app.h    |  3 +++
+ dlls/winemac.drv/cocoa_app.m    | 39 +++++++++++++++++++++++++++++++++
+ dlls/winemac.drv/cocoa_window.m |  8 ++++++-
+ dlls/winemac.drv/display.c      | 35 ++++++++++++++++++++++++-----
+ dlls/winemac.drv/macdrv_cocoa.h |  1 +
+ 5 files changed, 79 insertions(+), 7 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.h b/dlls/winemac.drv/cocoa_app.h
+index 11325456ed..14539ec1be 100644
+--- a/dlls/winemac.drv/cocoa_app.h
++++ b/dlls/winemac.drv/cocoa_app.h
+@@ -124,6 +124,9 @@ - (void) noteKey:(uint16_t)keyCode pressed:(BOOL)pressed;
+     - (void) window:(WineWindow*)window isBeingDragged:(BOOL)dragged;
+     - (void) windowWillOrderOut:(WineWindow*)window;
+ 
++    - (CGDisplayModeRef) latentModeForDisplay:(CGDirectDisplayID)displayID;
++    - (NSRect) pendingModeFrameForScreen:(NSScreen*)screen;
++
+     - (void) flipRect:(NSRect*)rect;
+     - (NSPoint) flippedMouseLocation:(NSPoint)point;
+ 
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index 4b0cfb3353..f151bf2eca 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -920,6 +920,26 @@ - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
+         return ret;
+     }
+ 
++    - (CGDisplayModeRef) latentModeForDisplay:(CGDirectDisplayID)displayID
++    {
++        return (CGDisplayModeRef)latentDisplayModes[[NSNumber numberWithUnsignedInt:displayID]];
++    }
++
++    // The frame the screen will have once its pending mode is realized, anchored at its
++    // top-left corner like Win32 coordinates, or NSZeroRect when no mode is pending.
++    - (NSRect) pendingModeFrameForScreen:(NSScreen*)screen
++    {
++        NSNumber* displayID = [screen deviceDescription][@"NSScreenNumber"];
++        CGDisplayModeRef mode = displayID ? (CGDisplayModeRef)latentDisplayModes[displayID] : NULL;
++        NSRect frame = [screen frame];
++        size_t width, height;
++
++        if (!mode) return NSZeroRect;
++        width = CGDisplayModeGetWidth(mode);
++        height = CGDisplayModeGetHeight(mode);
++        return NSMakeRect(NSMinX(frame), NSMaxY(frame) - height, width, height);
++    }
++
+     - (BOOL) areDisplaysCaptured
+     {
+         return ([originalDisplayModes count] > 0 || displaysCapturedForFullscreen);
+@@ -2450,6 +2470,25 @@ int macdrv_set_display_mode(CGDirectDisplayID displayID, CGDisplayModeRef displa
+     return ret;
+ }
+ 
++/***********************************************************************
++ *              macdrv_copy_latent_display_mode
++ *
++ * Returns the mode a display change made while the app was inactive will
++ * switch the display to once the app is activated, or NULL if none is
++ * pending.  The caller must release it.
++ */
++CGDisplayModeRef macdrv_copy_latent_display_mode(CGDirectDisplayID displayID)
++{
++    __block CGDisplayModeRef ret;
++
++    OnMainThread(^{
++        WineApplicationController* controller = [WineApplicationController sharedController];
++        ret = CGDisplayModeRetain((CGDisplayModeRef)[controller latentModeForDisplay:displayID]);
++    });
++
++    return ret;
++}
++
+ /***********************************************************************
+  *              macdrv_set_cursor
+  *
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 53020e7498..aaac375ca3 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -97,11 +97,17 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
+ }
+ 
+ 
++/* A screen with a pending display mode (set while the app was inactive, realized on activation)
++   also counts as covered by a rect that covers it in that mode: Win32 already sees that mode and
++   sizes fullscreen windows for it, and Cocoa must not constrain them meanwhile. */
+ static NSScreen* screen_covered_by_rect(NSRect rect, NSArray* screens)
+ {
++    WineApplicationController* controller = [WineApplicationController sharedController];
++
+     for (NSScreen* screen in screens)
+     {
+-        if (NSContainsRect(rect, [screen frame]))
++        if (NSContainsRect(rect, [screen frame]) ||
++            NSContainsRect(rect, [controller pendingModeFrameForScreen:screen]))
+             return screen;
+     }
+     return nil;
+diff --git a/dlls/winemac.drv/display.c b/dlls/winemac.drv/display.c
+index d045ff1749..68408ee848 100644
+--- a/dlls/winemac.drv/display.c
++++ b/dlls/winemac.drv/display.c
+@@ -873,13 +873,24 @@ static DEVMODEW *display_get_modes(CGDirectDisplayID display_id, int *modes_coun
+     return devmodes;
+ }
+ 
+-static void display_get_current_mode(struct macdrv_monitor *monitor, DEVMODEW *devmode)
++/* Returns whether the mode is a latent one, see below. */
++static BOOL display_get_current_mode(struct macdrv_monitor *monitor, DEVMODEW *devmode)
+ {
+     CGDisplayModeRef display_mode;
+     CGDirectDisplayID display_id;
++    BOOL latent;
+ 
+     display_id = monitor->id;
+-    display_mode = CGDisplayCopyDisplayMode(display_id);
++    /* A mode change made while the app is inactive is only carried out once the app is activated
++       (see -[WineApplicationController setMode:forDisplay:]). ChangeDisplaySettings has succeeded
++       by then, and on Windows the new mode is in effect when it returns: callers size their
++       fullscreen windows from the monitor rect right away. So report the pending mode as the
++       current one; activation then only realizes it. */
++    if ((latent = (display_mode = macdrv_copy_latent_display_mode(display_id)) != NULL))
++        TRACE("display %u: reporting the pending mode %zux%zu\n", display_id,
++              CGDisplayModeGetWidth(display_mode), CGDisplayModeGetHeight(display_mode));
++    else
++        display_mode = CGDisplayCopyDisplayMode(display_id);
+ 
+     devmode->dmPosition.x = CGRectGetMinX(monitor->rc_monitor);
+     devmode->dmPosition.y = CGRectGetMinY(monitor->rc_monitor);
+@@ -898,6 +909,7 @@ static void display_get_current_mode(struct macdrv_monitor *monitor, DEVMODEW *d
+     }
+ 
+     CFRelease(display_mode);
++    return latent;
+ }
+ 
+ /***********************************************************************
+@@ -1091,11 +1103,22 @@ UINT macdrv_UpdateDisplayDevices(const struct gdi_device_manager *device_manager
+                     .edid = monitor->edid,
+                     .hdr_enabled = monitor->hdr_enabled,
+                 };
+-                device_manager->add_monitor( &gdi_monitor, param );
+ 
+-                /* Get the current mode */
+-                if (monitor->id == adapter->id)
+-                    display_get_current_mode(monitor, &current_mode);
++                /* Get the current mode; a pending one also sizes the monitor, keeping the
++                   work area's insets */
++                if (monitor->id == adapter->id &&
++                    display_get_current_mode(monitor, &current_mode))
++                {
++                    RECT *rc = &gdi_monitor.rc_monitor, *work = &gdi_monitor.rc_work;
++                    int dx = rc->left + current_mode.dmPelsWidth - rc->right;
++                    int dy = rc->top + current_mode.dmPelsHeight - rc->bottom;
++
++                    rc->right += dx;
++                    rc->bottom += dy;
++                    work->right = max(work->left, work->right + dx);
++                    work->bottom = max(work->top, work->bottom + dy);
++                }
++                device_manager->add_monitor( &gdi_monitor, param );
+             }
+ 
+             if (!(modes = display_get_modes(adapter->id, &mode_count))) break;
+diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+index 7920ff4305..3038ac9325 100644
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -263,6 +263,7 @@ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
+ };
+ 
+ extern int macdrv_set_display_mode(CGDirectDisplayID id, CGDisplayModeRef display_mode);
++extern CGDisplayModeRef macdrv_copy_latent_display_mode(CGDirectDisplayID id);
+ extern int macdrv_get_gpus(struct macdrv_gpu** gpus, int* count);
+ extern void macdrv_free_gpus(struct macdrv_gpu* gpus);
+ extern int macdrv_get_adapters(uint64_t gpu_id, struct macdrv_adapter** adapters, int* count);
+-- 
+2.54.0 (Apple Git-157)
+
