@@ -1,0 +1,64 @@
+#!/bin/sh
+# Guard the Mac while a game runs: log memory once a second and stop every Hadron process
+# (scripts/stop) before the system starts thrashing. scripts/play starts it in the background.
+#
+# Usage: scripts/watchdog <log file> <pid>
+#
+# <pid> is the game's launcher process (scripts/play execs into it); the watchdog exits with it.
+#
+# Stops the game when any of these holds:
+#   - macOS reports critical memory pressure (kern.memorystatus_vm_pressure_level 4);
+#   - swap in use exceeds HADRON_SWAP_LIMIT_MB (default 2048): the system is paging;
+#   - Hadron's Wine processes together hold more than HADRON_MEM_LIMIT_GB (default: half of RAM);
+#   - the disk has less than HADRON_DISK_MIN_GB (default 5) free: swap and logs need room.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+log="$1" pid="$2"
+ram_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+mem_limit_mb=$(( ${HADRON_MEM_LIMIT_GB:-$(( ram_gb / 2 ))} * 1024 ))
+swap_limit_mb=${HADRON_SWAP_LIMIT_MB:-2048}
+disk_min_mb=$(( ${HADRON_DISK_MIN_GB:-5} * 1024 ))
+
+# PIDs already checked, so lsof runs once per process rather than every second
+ours=" " others=" "
+wine_rss() {  # sets rss (MB) and procs for this checkout's Wine processes
+    rss=0 procs=0
+    for entry in $(ps -Ao pid=,rss=,command= | grep -E 'C:\\windows|Z:\\|wine|wineserver' | grep -v grep \
+                   | awk '{ print $1 ":" $2 }'); do
+        p=${entry%%:*} kb=${entry#*:}
+        case "$others" in *" $p "*) continue ;; esac
+        case "$ours" in
+            *" $p "*) ;;
+            *)  # like scripts/stop: ours if it has files from this checkout mapped
+                if lsof -a -p "$p" -d txt -Fn 2>/dev/null | grep -qF "$ROOT/"; then ours="$ours$p "
+                else others="$others$p "; continue
+                fi ;;
+        esac
+        rss=$((rss + kb / 1024)) procs=$((procs + 1))
+    done
+}
+swap_used_mb() {
+    sysctl -n vm.swapusage | sed -E 's/.*used = ([0-9.]+)M.*/\1/' | cut -d. -f1
+}
+
+echo "watchdog: limits ${mem_limit_mb} MB resident, ${swap_limit_mb} MB swap, ${disk_min_mb} MB free disk, critical pressure" >> "$log"
+while kill -0 "$pid" 2>/dev/null; do
+    wine_rss
+    pressure=$(sysctl -n kern.memorystatus_vm_pressure_level)
+    swap=$(swap_used_mb)
+    disk=$(df -m "$ROOT" | awk 'NR == 2 { print $4 }')
+    echo "$(date +%H:%M:%S) rss_mb=$rss procs=$procs swap_mb=$swap pressure=$pressure disk_free_mb=$disk" >> "$log"
+
+    reason=
+    [ "$pressure" -ge 4 ] && reason="critical memory pressure"
+    [ "$swap" -gt "$swap_limit_mb" ] && reason="swap at ${swap} MB"
+    [ "$rss" -gt "$mem_limit_mb" ] && reason="Wine resident memory at ${rss} MB"
+    [ "$disk" -lt "$disk_min_mb" ] && reason="only ${disk} MB of disk left"
+    if [ -n "$reason" ]; then
+        echo "watchdog: $reason, stopping the game" | tee -a "$log" >&2
+        osascript -e "display notification \"$reason\" with title \"Hadron stopped the game\"" 2>/dev/null
+        "$ROOT/scripts/stop" >> "$log" 2>&1
+        exit 1
+    fi
+
+    sleep 1
+done

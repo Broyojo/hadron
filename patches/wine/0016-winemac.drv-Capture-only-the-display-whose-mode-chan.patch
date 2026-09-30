@@ -1,0 +1,71 @@
+From 2cfa02ea674009ac2b8d1f7051944055b94322e7 Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 10:45:15 -0400
+Subject: [PATCH] winemac.drv: Capture only the display whose mode changes.
+
+Changing a display's mode captured every display with
+CGCaptureAllDisplays, which blacks out all the other screens while a
+game runs full screen at its own resolution. Windows changes the mode
+of one monitor and leaves the others alone. Capture the display being
+changed, and release it when its mode is restored or the change fails.
+---
+ dlls/winemac.drv/cocoa_app.m | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index f151bf2eca..34d550d943 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -809,6 +809,13 @@ - (NSArray*)modesMatchingMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplay
+         return ret;
+     }
+ 
++    /* Capture just the display whose mode changes. Windows changes the mode of one monitor and
++     * leaves the others as they are; CGCaptureAllDisplays would black out every other screen. */
++    - (BOOL) captureDisplay:(CGDirectDisplayID)displayID
++    {
++        return CGDisplayIsCaptured(displayID) || CGDisplayCapture(displayID) == CGDisplayNoErr;
++    }
++
+     - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
+     {
+         BOOL ret = FALSE;
+@@ -835,6 +842,8 @@ - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
+                     if (CGDisplaySetDisplayMode(displayID, mode, NULL) == CGDisplayNoErr)
+                     {
+                         [originalDisplayModes removeObjectForKey:displayIDKey];
++                        if (!displaysCapturedForFullscreen)
++                            CGDisplayRelease(displayID);
+                         ret = TRUE;
+                         break;
+                     }
+@@ -869,8 +878,7 @@ - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
+ 
+             BOOL active = [NSApp isActive];
+ 
+-            if ([originalDisplayModes count] || displaysCapturedForFullscreen ||
+-                !active || CGCaptureAllDisplays() == CGDisplayNoErr)
++            if (displaysCapturedForFullscreen || !active || [self captureDisplay:displayID])
+             {
+                 if (active)
+                 {
+@@ -896,11 +904,12 @@ - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
+                     }
+                     if (ret && !(currentMode && [self mode:mode matchesMode:currentMode]))
+                         [originalDisplayModes setObject:(id)originalMode forKey:displayIDKey];
+-                    else if (![originalDisplayModes count])
++                    else
+                     {
+-                        CGRestorePermanentDisplayConfiguration();
+-                        if (!displaysCapturedForFullscreen)
+-                            CGReleaseAllDisplays();
++                        if (![originalDisplayModes count])
++                            CGRestorePermanentDisplayConfiguration();
++                        if (!displaysCapturedForFullscreen && !originalDisplayModes[displayIDKey])
++                            CGDisplayRelease(displayID);
+                     }
+ 
+                     if (currentMode)
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,436 @@
+From 723f5bd71512f5446e78af138d1856827ace242d Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 10:39:57 -0400
+Subject: [PATCH 1/2] d3d9: Draw from system-memory vertex buffers the way
+ Windows does
+
+A Windows runtime processes a D3DPOOL_SYSTEMMEM vertex buffer in
+software: each draw copies the vertices it names out of it, and the
+buffer never reaches the GPU as such. mtld3d uploaded it like any Staged
+buffer, at every Unlock. Clickteam Fusion titles lock their entire
+system-memory sprite buffer (NOOVERWRITE, no range) for every sprite and
+draw it straight away: Ultimate Custom Night uploaded its 384 KiB buffer
+about a thousand times a frame, 65 ms of an 83 ms frame, filled the
+retention cap and forced mid-frame GPU waits.
+
+Record a draw from a system-memory buffer as a Draw*PrimitiveUP with the
+vertices it reads copied into the frame's scratch: StartVertex and the
+vertex count for DrawPrimitive, BaseVertexIndex + MinVertexIndex and
+NumVertices for DrawIndexedPrimitive, whose indices are copied too,
+rebased onto that span. Only single-stream, per-vertex draws whose span
+lies inside the buffer, fits 64 KiB and contains every index qualify;
+the rest read the device buffer as before. A whole-buffer lock of a
+system-memory buffer no longer uploads at Unlock but leaves the range
+for the next draw that reads the device buffer.
+
+Per-draw uploads into the device buffer instead would be one Metal
+buffer, one page-aligned staging allocation and one blit per sprite, and
+every one after the first overlaps the range an indexed draw is assumed
+to read, forcing a rename with a whole-buffer GPU copy.
+
+Ultimate Custom Night's menu: vertex buffer time 65 ms -> 0 per frame,
+no staging uploads or retention, encoder 8 -> 1 ms per frame.
+---
+ windows/d3d9/src/device.rs        | 232 +++++++++++++++++++++++++++++-
+ windows/d3d9/src/vertex_buffer.rs |  74 +++++++++-
+ 2 files changed, 301 insertions(+), 5 deletions(-)
+
+diff --git a/windows/d3d9/src/device.rs b/windows/d3d9/src/device.rs
+index 34e499c..dd02f20 100644
+--- a/windows/d3d9/src/device.rs
++++ b/windows/d3d9/src/device.rs
+@@ -10131,6 +10131,16 @@ extern "system" fn device_draw_primitive(
+         std::hint::cold_path();
+         return D3DERR_INVALIDCALL;
+     }
++    if let Some(hr) = draw_system_memory_as_up(
++        &obj,
++        metal_prim,
++        &SystemMemoryDraw::Vertices {
++            start_vertex,
++            vertex_count: vtx_count,
++        },
++    ) {
++        return hr;
++    }
+     // Flush any bound buffer that's drawn while still mapped, before the draw
+     // snapshot reads it.
+     flush_mapped_bound_buffers(obj.inner());
+@@ -10375,8 +10385,8 @@ extern "system" fn device_draw_indexed_primitive(
+     this: *mut c_void,
+     primitive_type: u32,
+     base_vertex_index: i32,
+-    _min_vertex_index: u32,
+-    _num_vertices: u32,
++    min_vertex_index: u32,
++    num_vertices: u32,
+     start_index: u32,
+     primitive_count: u32,
+ ) -> i32 {
+@@ -10417,6 +10427,19 @@ extern "system" fn device_draw_indexed_primitive(
+         std::hint::cold_path();
+         return D3DERR_INVALIDCALL;
+     }
++    if let Some(hr) = draw_system_memory_as_up(
++        &obj,
++        metal_prim,
++        &SystemMemoryDraw::Indexed {
++            base_vertex: base_vertex_index,
++            min_vertex: min_vertex_index,
++            num_vertices,
++            start_index,
++            index_count,
++        },
++    ) {
++        return hr;
++    }
+ 
+     // Flush any bound buffer that's drawn while still mapped, before the draw
+     // snapshot reads it.
+@@ -10470,13 +10493,20 @@ extern "system" fn device_draw_indexed_primitive(
+ ///
+ /// A buffer drawn while locked never reached `Unlock`'s upload, so its latest
+ /// CPU writes are flushed here. The lock stays open and `dirty` stays set, so
+-/// `Unlock` still flushes afterwards.
++/// `Unlock` still flushes afterwards. A system-memory buffer whose `Unlock`
++/// left its range for the next GPU read uploads it here too, when the draw's
++/// declaration reads its stream: a buffer merely left bound is not read.
+ fn flush_mapped_bound_buffers(dev: &mut DeviceInner) {
++    let read_streams = declared_stream_mask(dev);
+     for stream in 0..mtld3d_types::MAX_STREAMS as usize {
+         let vb = dev.bound_buffers().stream_vertex_buffer(stream);
+         if !vb.is_null() {
+             // SAFETY: a bound vertex buffer is a live wrapper while bound.
+-            unsafe { (*vb).inner_mut() }.flush_staged_if_mapped(dev);
++            let inner = unsafe { (*vb).inner_mut() };
++            inner.flush_staged_if_mapped(dev);
++            if read_streams & (1 << stream) != 0 {
++                inner.upload_deferred(dev);
++            }
+         }
+     }
+     let ib = dev.bound_buffers().index_buffer();
+@@ -10610,6 +10640,200 @@ fn snapshot_bound_index_source(dev: &DeviceInner, start_index: u32) -> Option<In
+     })
+ }
+ 
++/// The streams the bound vertex declaration reads, one bit per stream; an FVF reads stream 0.
++fn declared_stream_mask(dev: &DeviceInner) -> u16 {
++    let decl_ptr = dev.vertex_decl();
++    if decl_ptr.is_null() {
++        return 1;
++    }
++    // SAFETY: non-null; the device slot's refcount keeps the declaration
++    // alive while bound.
++    unsafe { &*decl_ptr }.inner().stream_mask()
++}
++
++/// A draw from bound streams, as [`draw_system_memory_as_up`] takes it.
++enum SystemMemoryDraw {
++    Vertices {
++        start_vertex: u32,
++        vertex_count: u32,
++    },
++    Indexed {
++        base_vertex: i32,
++        min_vertex: u32,
++        num_vertices: u32,
++        start_index: u32,
++        index_count: u32,
++    },
++}
++
++/// Largest vertex span, and largest index span, a system-memory draw copies inline.
++///
++/// Larger draws read the uploaded buffers instead.
++const SYSTEM_MEMORY_UP_MAX_BYTES: usize = 64 * 1024;
++
++/// Record a draw from a `D3DPOOL_SYSTEMMEM` vertex buffer with the vertices it reads copied inline.
++///
++/// A Windows runtime processes a system-memory vertex buffer in software: each
++/// draw copies the vertices it names out of it, and the buffer itself never
++/// reaches the GPU. Recording the draw as a `Draw*PrimitiveUP` does the same,
++/// so a title that rewrites the buffer between draws, as Clickteam Fusion
++/// does for every sprite, costs one small copy per draw rather than an upload
++/// of the whole buffer. An indexed draw copies the vertices
++/// `[BaseVertexIndex + MinVertexIndex, + NumVertices)` and its indices,
++/// rebased onto that span.
++///
++/// `None`, leaving the draw to the bound-buffer path, unless stream 0 is the
++/// only stream the declaration reads, it steps per vertex, its buffer is in
++/// system memory, the span lies inside it and fits
++/// [`SYSTEM_MEMORY_UP_MAX_BYTES`], its indices fit the same bound, and every
++/// index falls inside the window the draw declares.
++fn draw_system_memory_as_up(
++    obj: &Direct3DDevice9,
++    metal_prim: mtld3d_shared::mtl::PrimitiveType,
++    draw: &SystemMemoryDraw,
++) -> Option<i32> {
++    let dev = obj.inner();
++    let bound = dev.bound_buffers();
++    let vb = bound.stream_vertex_buffer(0);
++    let stride = bound.stream_stride(0);
++    if declared_stream_mask(dev) != 1 || vb.is_null() || stride == 0 || bound.stream_freq(0) != 1 {
++        return None;
++    }
++    // SAFETY: a bound vertex buffer is a live wrapper while bound.
++    let vb_inner = unsafe { &*vb }.inner();
++    let vertices = vb_inner.system_memory_vertices()?;
++    let (first_vertex, count) = match *draw {
++        SystemMemoryDraw::Vertices {
++            start_vertex,
++            vertex_count,
++        } => (u64::from(start_vertex), vertex_count),
++        SystemMemoryDraw::Indexed {
++            base_vertex,
++            min_vertex,
++            num_vertices,
++            ..
++        } => (
++            u64::try_from(i64::from(base_vertex) + i64::from(min_vertex)).ok()?,
++            num_vertices,
++        ),
++    };
++    let start = u64::from(bound.stream_offset(0)) + first_vertex * u64::from(stride);
++    let size = u64::from(count) * u64::from(stride);
++    if count == 0
++        || start + size > u64::from(vb_inner.length())
++        || size > SYSTEM_MEMORY_UP_MAX_BYTES as u64
++    {
++        return None;
++    }
++    let (start, size) = (usize::try_from(start).ok()?, usize::try_from(size).ok()?);
++
++    let index_source = match *draw {
++        SystemMemoryDraw::Vertices { vertex_count, .. } => IndexSource::None {
++            start_vertex: 0,
++            vertex_count,
++        },
++        SystemMemoryDraw::Indexed {
++            min_vertex,
++            num_vertices,
++            start_index,
++            index_count,
++            ..
++        } => {
++            let (rebased, index_type) =
++                rebased_system_memory_indices(dev, start_index, index_count, min_vertex, num_vertices)?;
++            IndexSource::Up {
++                // SAFETY: `rebased` holds `rebased.len()` initialized bytes.
++                bytes: unsafe { copy_up_vertices(dev, rebased.as_ptr().cast(), rebased.len()) },
++                index_count,
++                index_type,
++            }
++        }
++    };
++    // SAFETY: `[start, start + size)` lies inside the buffer's CPU backing
++    // (checked above against its length).
++    let vertex_copy =
++        unsafe { copy_up_vertices(dev, vertices[start..].as_ptr().cast(), size) };
++
++    let perf_ptr = DeviceInner::perf_ptr_of(obj.inner);
++    let snap = CycleAddTimer::start(draw_snapshot_ptr(perf_ptr));
++    emit_snapshot_deltas(obj);
++    drop(snap);
++    let _push = CycleAddTimer::start(draw_push_op_ptr(perf_ptr));
++    obj.inner().record_draw(&DrawOp {
++        metal_prim,
++        vertex_source: VertexSource::Up {
++            bytes: vertex_copy,
++            size: u32::try_from(size).ok()?,
++            stride,
++        },
++        index_source,
++    });
++    Some(
++        obj.inner()
++            .encoder_status()
++            .map_or_else(|hr| hr, |()| D3D_OK),
++    )
++}
++
++/// The bound index buffer's indices for a system-memory draw, rebased by `-min_vertex`.
++///
++/// `None` when no index buffer is bound, its format is unknown, it holds no
++/// current CPU copy, the indices exceed [`SYSTEM_MEMORY_UP_MAX_BYTES`], the
++/// draw reads past the buffer, or an index falls outside
++/// `[min_vertex, min_vertex + num_vertices)`: D3D9 leaves such a draw
++/// undefined, and the bound-buffer path reads the whole buffer instead.
++fn rebased_system_memory_indices(
++    dev: &DeviceInner,
++    start_index: u32,
++    index_count: u32,
++    min_vertex: u32,
++    num_vertices: u32,
++) -> Option<(Vec<u8>, mtld3d_shared::mtl::IndexType)> {
++    let ib = dev.bound_buffers().index_buffer();
++    if ib.is_null() {
++        return None;
++    }
++    // SAFETY: a bound index buffer is a live wrapper while bound.
++    let inner = unsafe { &*ib }.inner();
++    if inner.backing_needs_readback() {
++        return None;
++    }
++    let (index_type, index_size) = match inner.format() {
++        D3DFMT_INDEX16 => (mtld3d_shared::mtl::IndexType::UInt16, 2_usize),
++        D3DFMT_INDEX32 => (mtld3d_shared::mtl::IndexType::UInt32, 4_usize),
++        _ => return None,
++    };
++    let first = usize::try_from(start_index).ok()? * index_size;
++    let len = usize::try_from(index_count).ok()? * index_size;
++    if len > SYSTEM_MEMORY_UP_MAX_BYTES || first + len > inner.current_backing_len() {
++        return None;
++    }
++    // SAFETY: `[first, first + len)` lies inside the live backing box
++    // (checked above); the API thread owns CPU access to it while bound.
++    let src = unsafe {
++        core::slice::from_raw_parts((inner.current_backing_ptr() + first) as *const u8, len)
++    };
++    let end = u64::from(min_vertex) + u64::from(num_vertices);
++    let mut rebased = Vec::with_capacity(len);
++    for index in src.chunks_exact(index_size) {
++        let value = if index_size == 2 {
++            u64::from(u16::from_le_bytes([index[0], index[1]]))
++        } else {
++            u64::from(u32::from_le_bytes([index[0], index[1], index[2], index[3]]))
++        };
++        if value < u64::from(min_vertex) || value >= end {
++            return None;
++        }
++        let local = value - u64::from(min_vertex);
++        if index_size == 2 {
++            rebased.extend_from_slice(&u16::try_from(local).ok()?.to_le_bytes());
++        } else {
++            rebased.extend_from_slice(&u32::try_from(local).ok()?.to_le_bytes());
++        }
++    }
++    Some((rebased, index_type))
++}
++
+ /// Copy `len` bytes of a `Draw*PrimitiveUP` vertex stream out of the user pointer.
+ ///
+ /// The bytes travel to the encoder inside the draw op, so they are copied
+diff --git a/windows/d3d9/src/vertex_buffer.rs b/windows/d3d9/src/vertex_buffer.rs
+index 51117fb..d02f4d7 100644
+--- a/windows/d3d9/src/vertex_buffer.rs
++++ b/windows/d3d9/src/vertex_buffer.rs
+@@ -31,7 +31,7 @@ use mtld3d_core::{
+ use mtld3d_shared::{InPtr, InPtrMut};
+ use mtld3d_types::{
+     D3DFMT_VERTEXDATA, D3DLOCK_DISCARD, D3DLOCK_KNOWN_BITS, D3DLOCK_NOOVERWRITE, D3DLOCK_READONLY,
+-    D3DRTYPE_VERTEXBUFFER, D3DVERTEXBUFFER_DESC, Guid, IDirect3DVertexBuffer9Vtbl,
++    D3DPOOL_SYSTEMMEM, D3DRTYPE_VERTEXBUFFER, D3DVERTEXBUFFER_DESC, Guid, IDirect3DVertexBuffer9Vtbl,
+ };
+ 
+ use super::{
+@@ -90,6 +90,18 @@ pub struct VertexBufferInner {
+     /// Accumulated across `Lock`s and flushed on `Unlock`. Unused for
+     /// `Direct`.
+     dirty: DirtyRange,
++    /// `Staged` `D3DPOOL_SYSTEMMEM` only: `Unlock` left `dirty` for the next GPU read.
++    ///
++    /// Set by a lock that names no usable window (`SizeToLock == 0`,
++    /// `D3DLOCK_DISCARD`), which dirties the whole buffer. Clickteam Fusion
++    /// titles lock their entire system-memory buffer that way for every
++    /// sprite they draw, so uploading at `Unlock` copied the whole buffer a
++    /// thousand times a frame. Draws that read a system-memory buffer take
++    /// their vertices from the CPU backing instead (see
++    /// `device::draw_system_memory_as_up`), as a Windows runtime does, so the
++    /// range is uploaded only when a draw reads the device buffer
++    /// ([`VertexBufferInner::upload_deferred`]).
++    defer_to_draws: bool,
+     /// Canonical CPU backing.
+     ///
+     /// For `Direct`, the GPU reads this directly and rename swaps it out
+@@ -244,6 +256,60 @@ impl VertexBufferInner {
+         self.map_mode
+     }
+ 
++    /// The buffer's size in bytes, as created.
++    pub const fn length(&self) -> u32 {
++        self.length
++    }
++
++    /// The CPU copy a draw from a `D3DPOOL_SYSTEMMEM` buffer reads its vertices from.
++    ///
++    /// `None` for any other pool, or while the buffer is mapped: a system-memory
++    /// buffer's backing is the only copy, always current, but a mapped one is
++    /// being written under the draw.
++    #[must_use]
++    pub fn system_memory_vertices(&self) -> Option<&[u8]> {
++        if self.pool != D3DPOOL_SYSTEMMEM
++            || self.locked
++            || !matches!(self.map_mode, BufferMapMode::Staged)
++            || self.backing.is_released()
++        {
++            return None;
++        }
++        Some(self.backing.as_slice())
++    }
++
++    /// Upload the range an `Unlock` left for the next GPU read, before a draw reads the device buffer.
++    ///
++    /// No-op unless [`Self::defer_to_draws`] is set and the buffer is not mapped
++    /// (a mapped buffer is flushed by [`Self::flush_staged_if_mapped`]).
++    pub fn upload_deferred(&mut self, dev: &mut DeviceInner) {
++        if !self.defer_to_draws || self.locked {
++            return;
++        }
++        let Some((min, max)) = self.dirty.span() else {
++            self.defer_to_draws = false;
++            return;
++        };
++        let Some(src) = self.backing.read_ptr_at(min as usize) else {
++            mtld3d_shared::log_once_warn!(target: crate::LOG_TARGET,
++                "upload_deferred: no CPU backing behind a pending dirty range");
++            return;
++        };
++        let size = (max - min) as usize;
++        let Ok(mut transient) = dev.alloc_pagebox_capped(size) else {
++            return;
++        };
++        // SAFETY: `src` spans `[min, max)` of the backing; `transient` is a
++        // fresh `PageBox` of ≥ `size` bytes; the two allocations are disjoint.
++        unsafe {
++            core::ptr::copy_nonoverlapping(src, transient.as_mut_ptr(), size);
++        }
++        self.backing.note_upload(min, max);
++        dev.push_stage_upload(self.buffer_id, transient, min, max - min);
++        self.dirty.clear();
++        self.defer_to_draws = false;
++    }
++
+     pub fn current_backing_ptr(&self) -> usize {
+         self.backing.ptr()
+     }
+@@ -317,6 +383,7 @@ impl Direct3DVertexBuffer9 {
+             private_data: PrivateDataStore::default(),
+             map_mode,
+             dirty,
++            defer_to_draws: false,
+             backing,
+             last_submit_seq: 0,
+             locked: false,
+@@ -716,6 +783,10 @@ extern "system" fn vb_lock(
+                 (offset_to_lock, size_to_lock)
+             };
+             inner.dirty.conjoin(dirty_offset, dirty_size, inner.length);
++            // A whole-buffer lock of a system-memory buffer leaves its upload
++            // to the next GPU read; any other lock ends that, and its
++            // `Unlock` uploads the whole pending range.
++            inner.defer_to_draws = widen && inner.pool == D3DPOOL_SYSTEMMEM;
+         }
+     }
+ 
+@@ -849,6 +920,7 @@ extern "system" fn vb_unlock(this: *mut c_void) -> i32 {
+     }
+     inner.locked = false;
+     if matches!(inner.map_mode, BufferMapMode::Staged)
++        && !inner.defer_to_draws
+         && let Some((min, max)) = inner.dirty.span()
+         && !inner.device_inner.is_null()
+     {
+-- 
+2.54.0 (Apple Git-157)
+

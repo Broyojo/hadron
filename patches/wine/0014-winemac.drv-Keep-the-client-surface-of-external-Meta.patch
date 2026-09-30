@@ -1,0 +1,135 @@
+From 5df0f4966af62cd7b3d0494a451f88f3f1e01f04 Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 10:23:41 -0400
+Subject: [PATCH 14/15] winemac.drv: Keep the client surface of external Metal
+ views in use.
+
+DXMT and mtld3d attach their Metal view to the window's client view,
+which the DXMT interface created with an unregistered client surface.
+win32u never updated it, so the view kept the client size the window had
+when the device was created: a window resized afterwards showed the frame
+in its top-left corner. Take the surface through get_unused_client_surface
+and use_window_client_surface, as the Vulkan surfaces do, and release it
+with the window, so win32u keeps the view in step with the client area.
+---
+ dlls/win32u/win32u_private.h |  2 --
+ dlls/winemac.drv/macdrv.h    |  1 +
+ dlls/winemac.drv/window.c    | 46 ++++++++++++++++++++++++++++++++++--
+ include/wine/gdi_driver.h    |  2 ++
+ 4 files changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/win32u/win32u_private.h b/dlls/win32u/win32u_private.h
+index 5e3f7550a4..0e7f421c51 100644
+--- a/dlls/win32u/win32u_private.h
++++ b/dlls/win32u/win32u_private.h
+@@ -331,8 +331,6 @@ extern HWND get_taskman_window(void);
+ extern BOOL is_client_surface_window( struct client_surface *surface, HWND hwnd );
+ extern void client_surface_update( struct client_surface *surface );
+ extern BOOL client_surface_get_size( struct client_surface *surface, SIZE *virtual_size, SIZE *monitor_size );
+-extern void use_window_client_surface( struct client_surface *surface, BOOL use );
+-extern struct client_surface *get_unused_client_surface( HWND hwnd, int format, BOOL raw );
+ extern HICON get_window_icon_info( HWND hwnd, UINT type, HICON icon, ICONINFO *ret );
+ extern void init_startup_info(void);
+ 
+diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
+index 6643cc6770..6322d52a8b 100644
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -227,6 +227,7 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+     HWND                hwnd;                   /* hwnd that this private data belongs to */
+     WineWindow         *cocoa_window;
+     WineContentView    *client_view;
++    struct client_surface *metal_client_surface; /* client surface holding the view of an external Metal layer (DXMT, mtld3d) */
+     struct window_rects rects;                  /* window rects in monitor DPI, relative to parent client area */
+     int                 pixel_format;           /* pixel format for GL */
+     HANDLE              drag_event;             /* event to signal that Cocoa-driven window dragging has ended */
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index 02c6788170..872e317ad7 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -1258,6 +1258,7 @@ LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+ void macdrv_DestroyWindow(HWND hwnd)
+ {
+     struct macdrv_win_data *data;
++    struct client_surface *metal_client_surface;
+ 
+     TRACE("%p\n", hwnd);
+ 
+@@ -1267,9 +1268,13 @@ void macdrv_DestroyWindow(HWND hwnd)
+ 
+     destroy_cocoa_window(data);
+ 
++    metal_client_surface = data->metal_client_surface;
+     CFDictionaryRemoveValue(win_datas, hwnd);
+     release_win_data(data);
+     free(data);
++
++    /* win32u has detached it already; the release takes the surfaces lock, so after the win data's */
++    if (metal_client_surface) client_surface_release(metal_client_surface);
+ }
+ 
+ 
+@@ -2236,8 +2241,45 @@ static struct dxmt_win_data *dxmt_get_win_data(HWND hwnd)
+     has_client_view = data->client_view != NULL;
+     release_win_data(data);
+ 
+-    /* the client view only exists once a client surface has been created */
+-    if (!has_client_view) macdrv_CreateClientSurface(hwnd, 0, FALSE);
++    /* The client view only exists once a client surface has been created. Take one the way
++     * the Vulkan surfaces do, and keep it in use until the window is destroyed: win32u then
++     * keeps the view's frame in step with the window's client area, which DXMT and mtld3d,
++     * presenting to their own layer rather than through client_surface_present, never ask for.
++     * A window that kept one from an earlier device, whose view a window surface flush has
++     * since hidden, presents it again instead. */
++    if (!has_client_view)
++    {
++        struct client_surface *client = NULL;
++
++        if ((data = get_win_data(hwnd)))
++        {
++            if ((client = data->metal_client_surface)) client_surface_add_ref(client);
++            release_win_data(data);
++        }
++        if (client)
++        {
++            client_surface_present(client);
++            client_surface_release(client);
++        }
++        else if ((client = get_unused_client_surface(hwnd, 0, FALSE)))
++        {
++            use_window_client_surface(client, TRUE);
++            if ((data = get_win_data(hwnd)))
++            {
++                if (!data->metal_client_surface)
++                {
++                    data->metal_client_surface = client;
++                    client = NULL;
++                }
++                release_win_data(data);
++            }
++            if (client)
++            {
++                use_window_client_surface(client, FALSE);
++                client_surface_release(client);
++            }
++        }
++    }
+ 
+     if (!(data = get_win_data(hwnd))) return NULL;
+     if (!data->client_view || !(ret = malloc(sizeof(*ret))))
+diff --git a/include/wine/gdi_driver.h b/include/wine/gdi_driver.h
+index ad00912c4d..24ca5ac58b 100644
+--- a/include/wine/gdi_driver.h
++++ b/include/wine/gdi_driver.h
+@@ -278,6 +278,8 @@ W32KAPI void *client_surface_create( const struct client_surface_funcs *funcs, H
+ W32KAPI void client_surface_add_ref( struct client_surface *surface );
+ W32KAPI void client_surface_release( struct client_surface *surface );
+ W32KAPI void client_surface_present( struct client_surface *surface );
++W32KAPI struct client_surface *get_unused_client_surface( HWND hwnd, int format, BOOL raw );
++W32KAPI void use_window_client_surface( struct client_surface *surface, BOOL use );
+ W32KAPI void update_client_surfaces( HWND hwnd );
+ W32KAPI void detach_client_surfaces( HWND hwnd );
+ 
+-- 
+2.54.0 (Apple Git-157)
+

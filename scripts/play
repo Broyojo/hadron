@@ -6,6 +6,12 @@
 #
 # Only an allowlist of environment variables reaches the game: host secrets never do.
 # HADRON_LOG=1 writes module load addresses and errors to build/logs/ for crash analysis.
+# FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
+# /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
+# A watchdog stops the game before memory use can make the Mac thrash; HADRON_MEM_LIMIT_GB
+# (default half of RAM) and HADRON_SWAP_LIMIT_MB (default 2048) set its limits.
+# 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
+# limits those not marked large address aware to 2GB, as on Windows.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
@@ -42,8 +48,16 @@ esac
 # HADRON_D3D9=mtld3d uses mtld3d (D3D9 -> Metal) instead of wined3d; enable it in the prefix
 # first with scripts/mtld3d-prefix enable.
 [ "$HADRON_D3D9" = mtld3d ] && overrides="$overrides;d3d9=n,b"
+# The watchdog logs memory to build/logs/ and stops the game before it can make the Mac
+# thrash (see scripts/watchdog for the limits). HADRON_WATCHDOG=0 turns it off.
+mkdir -p "$ROOT/build/logs"
+if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
+    memlog="$ROOT/build/logs/$appid-$(date +%Y%m%d-%H%M%S).mem.log"
+    echo "watchdog: memory log in $memlog" >&2
+    # $$ is this script's PID, which the exec below hands to Wine.
+    nohup "$ROOT/scripts/watchdog" "$memlog" $$ >/dev/null 2>&1 &
+fi
 if [ -n "$HADRON_LOG" ]; then
-    mkdir -p "$ROOT/build/logs"
     log="$ROOT/build/logs/$appid-$(date +%Y%m%d-%H%M%S).log"
     echo "logging to $log" >&2
     debug="${WINEDEBUG:-err+all,+loaddll}"
@@ -57,6 +71,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$overrides}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
     FEX_DISKCACHE="${FEX_DISKCACHE:-1}" \
+    WINE_LARGE_ADDRESS_AWARE="${HADRON_LARGE_ADDRESS_AWARE:-1}" \
     MTLD3D_NO_CRASH_HANDLER=1 \
     MTLD3D_CONFIG="${MTLD3D_CONFIG:-color.hdr.enable=false}" \
     ${RUST_LOG:+RUST_LOG=$RUST_LOG} \
@@ -64,4 +79,5 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     STEAM_COMPAT_CLIENT_INSTALL_PATH="$MAC_STEAM" \
     ${HADRON_DISABLE_LSTEAMCLIENT:+HADRON_DISABLE_LSTEAMCLIENT=$HADRON_DISABLE_LSTEAMCLIENT} \
     ${HADRON_HARDWARE_TSO:+HADRON_HARDWARE_TSO=$HADRON_HARDWARE_TSO} \
+    ${FEX_BLOCKJITNAMING:+FEX_BLOCKJITNAMING=$FEX_BLOCKJITNAMING} \
     "$ROOT/dist/bin/wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"

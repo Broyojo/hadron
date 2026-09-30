@@ -2,7 +2,9 @@
 
 ## Order of work (agreed 2026-09-29)
 
-1. FNaF fullscreen image offset (in progress; see docs/test-games.md).
+1. Ultimate Custom Night: done bar the frame-time dips in nights (docs/findings.md #18). Next small items: Portal's
+   quit-time assert (worker threads terminated at exit) and a clean mtld3d failure when a 32-bit process runs out of
+   address space.
 2. Harden the MAP_JIT code buffers (Wine 0011, FEX 0005):
    - an off switch (e.g. `HADRON_FEX_MAP_JIT=0`) falling back to page flipping, for A/B testing;
    - a real nesting counter for write windows (thread-local storage crashed in FEX's Windows DLLs; use
@@ -17,7 +19,8 @@
    ID provisioning profile for com.broyojo.hadron.loader (only the team's Account Holder can create the
    certificate).
 
-Later: hardware TSO limited to emulated code (a toggle costs ~0.27 us; enabling it on whole threads made
+Later: mtld3d should fail an allocation cleanly when a 32-bit process runs out of address space (it
+crashed on a null pointer in `LeaseCompletion::consume` with 79 MB left); hardware TSO limited to emulated code (a toggle costs ~0.27 us; enabling it on whole threads made
 Portal unplayably slow); mtld3d/DXMT presenting through Wine's client surfaces (removes Wine 0012's special
 case); D3D12 (vkd3d-proton on KosmicKrisp or DXMT's D3D12); the remaining ~50 ms steamclient retry cost
 disappears with Steam Play integration.

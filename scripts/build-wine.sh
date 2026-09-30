@@ -67,6 +67,23 @@ make install >/dev/null
 for loader in "$PREFIX/bin/wine" "$PREFIX/lib/wine/aarch64-unix/wine"; do
     codesign -f -s - --entitlements "$ROOT/packaging/dev.entitlements" "$loader" 2>/dev/null
 done
+# make install replaces the links into the loader bundle with a bare loader, which lacks the
+# cross-architecture entitlement; wrap it again the way the bundle was signed: the same profile,
+# certificate and hardened-runtime setting, so a Developer ID bundle stays one.
+bundle="$PREFIX/lib/wine/aarch64-unix/wine.app"
+if [[ $variant == release && -f "$bundle/Contents/embedded.provisionprofile" ]]; then
+    cp "$bundle/Contents/embedded.provisionprofile" "$BUILD/loader.provisionprofile"
+    rm -f "$BUILD"/loader-cert*
+    codesign -d --extract-certificates="$BUILD/loader-cert" "$bundle" 2>/dev/null
+    identity=$(shasum -a 1 "$BUILD/loader-cert0" 2>/dev/null | cut -d' ' -f1 | tr a-f A-F)
+    runtime=(); codesign -dv "$bundle" 2>&1 | grep -q 'flags=.*runtime' && runtime=(--runtime)
+    if [[ -n "$identity" ]] && security find-identity -v -p codesigning | grep -q "$identity"; then
+        "$ROOT/scripts/package-loader.sh" "$BUILD/loader.provisionprofile" "$identity" ${runtime[@]+"${runtime[@]}"} >/dev/null
+        log "wrapped the loader in wine.app again"
+    else
+        log "warning: the certificate wine.app was signed with is not in the keychain; run scripts/package-loader.sh"
+    fi
+fi
 # make install replaces xtajit64.dll with Wine's stub; put FEX back as the default emulators.
 W="$PREFIX/lib/wine/aarch64-windows"
 if [[ -f "$W/libarm64ecfex.dll" ]]; then

@@ -1,0 +1,88 @@
+From 0c501a575629ee66c5817c22185b55fb772812ea Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 10:22:47 -0400
+Subject: [PATCH 2/2] d3d9: Export DebugSetMute
+
+D3DX, which many games link statically, resolves DebugSetMute from
+d3d9d.dll and d3d9.dll with GetProcAddress before its debug output and
+caches only a pointer it found. Without the export it repeats
+GetModuleHandle("d3d9d.dll"), GetModuleHandle("d3d9.dll"),
+LoadLibrary("d3d9.dll") and GetProcAddress on every D3DX call. Clickteam
+Fusion's runtime makes one per sprite: in Ultimate Custom Night those
+lookups took 40% of the game thread under an x86 emulator. Windows' and
+Wine's d3d9.dll export it; D3DX calls it cdecl with one argument.
+
+Ultimate Custom Night's menu: 30 -> 60 fps.
+---
+ windows/d3d9/d3d9.def              |  1 +
+ windows/d3d9/src/lib.rs            | 11 +++++++++++
+ windows/tests/tests/e2e/d3dperf.rs | 20 ++++++++++++++++++++
+ 3 files changed, 32 insertions(+)
+
+diff --git a/windows/d3d9/d3d9.def b/windows/d3d9/d3d9.def
+index e3f0cbe..019b3da 100644
+--- a/windows/d3d9/d3d9.def
++++ b/windows/d3d9/d3d9.def
+@@ -8,5 +8,6 @@ EXPORTS
+     D3DPERF_SetMarker @7
+     D3DPERF_SetOptions @8
+     D3DPERF_SetRegion @9
++    DebugSetMute
+     Direct3DCreate9Ex @17
+     Direct3DShaderValidatorCreate9 @16
+diff --git a/windows/d3d9/src/lib.rs b/windows/d3d9/src/lib.rs
+index 1413208..9c71f0b 100644
+--- a/windows/d3d9/src/lib.rs
++++ b/windows/d3d9/src/lib.rs
+@@ -264,6 +264,17 @@ pub const extern "system" fn d3dperf_get_status() -> u32 {
+     0
+ }
+ 
++/// `DebugSetMute`: mutes the debug runtime's output; the retail runtime has none to mute.
++///
++/// D3DX, which many games link statically, resolves it from `d3d9d.dll` and
++/// `d3d9.dll` with `GetProcAddress` before its own debug output and caches
++/// only a pointer it found. Without the export it repeats both module
++/// lookups and the `GetProcAddress` on every D3DX call: Clickteam Fusion's
++/// runtime makes one per sprite, thousands a frame. D3DX calls it `cdecl`
++/// with one argument (the caller pops it), hence `extern "C"`.
++#[unsafe(export_name = "DebugSetMute")]
++pub const extern "C" fn debug_set_mute(_mute: u32) {}
++
+ // Wires up the PE-side `env_logger` for this cdylib, then fires a
+ // one-shot `InitLogger` thunk so the unix .so registers its own
+ // (each cdylib has its own `log` crate statics). Runs from DllMain
+diff --git a/windows/tests/tests/e2e/d3dperf.rs b/windows/tests/tests/e2e/d3dperf.rs
+index 811fef9..5592da5 100644
+--- a/windows/tests/tests/e2e/d3dperf.rs
++++ b/windows/tests/tests/e2e/d3dperf.rs
+@@ -40,6 +40,26 @@ fn resolve(lib: *mut c_void, name: &'static core::ffi::CStr) -> *mut c_void {
+     addr
+ }
+ 
++/// `DebugSetMute` resolves and returns, called the way D3DX calls it.
++///
++/// D3DX caches the pointer only when `GetProcAddress` finds it, so a missing
++/// export makes it repeat the lookup on every call.
++#[test]
++fn debug_set_mute_resolves() {
++    type DebugSetMuteFn = unsafe extern "C" fn(u32);
++    // SAFETY: plain kernel32 call with a NUL-terminated name.
++    let lib = unsafe { LoadLibraryA(c"d3d9.dll".as_ptr()) };
++    assert!(!lib.is_null(), "LoadLibrary(d3d9.dll)");
++    // SAFETY: `DebugSetMute` takes one `cdecl` argument, as D3DX calls it.
++    let mute: DebugSetMuteFn = unsafe { core::mem::transmute(resolve(lib, c"DebugSetMute")) };
++    // SAFETY: the resolved export, called with its one argument.
++    unsafe { mute(1) };
++    // SAFETY: as above.
++    unsafe { mute(0) };
++    // SAFETY: `lib` is the handle `LoadLibraryA` returned above.
++    unsafe { FreeLibrary(lib) };
++}
++
+ #[test]
+ fn d3dperf_family_resolves_and_reports_no_profiler() {
+     // SAFETY: plain kernel32 call with a NUL-terminated name.
+-- 
+2.54.0 (Apple Git-157)
+
