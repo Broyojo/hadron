@@ -1,7 +1,7 @@
 From 723f5bd71512f5446e78af138d1856827ace242d Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Wed, 30 Sep 2026 10:39:57 -0400
-Subject: [PATCH 1/2] d3d9: Draw from system-memory vertex buffers the way
+Subject: [PATCH 1/3] d3d9: Draw from system-memory vertex buffers the way
  Windows does
 
 A Windows runtime processes a D3DPOOL_SYSTEMMEM vertex buffer in

@@ -1,0 +1,428 @@
+From aed7228e7c6c954311b6d98bc037b8a6f0d57d7b Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 12:01:31 -0400
+Subject: [PATCH 3/3] Present with display sync when the game asks for vsync,
+ as Windows does
+
+mtld3d always turned Metal-side vsync off (displaySyncEnabled = false) and
+mapped a vsync request to a present throttle only, so every game could
+tear. Follow Windows instead. A fullscreen device follows its
+presentation interval: any interval but IMMEDIATE waits for a display
+refresh and never tears, IMMEDIATE presents at once. A windowed device
+always waits for a refresh, as DWM composites windowed presents whatever
+their interval (Source ignores its own vsync setting in a window for that
+reason). The layer's display sync is set at attach and follows a Reset
+that changes the request.
+
+A new present.vsync key (game, on, off; default game) overrides the game
+for titles that offer no vsync setting of their own. The throttle stays
+for present.maxFps and divided intervals.
+---
+ mtld3d.conf                        | 15 +++++++++
+ unix/unix/src/metal/macdrv.rs      | 53 +++++++++++++++++++++---------
+ windows/core/src/config.rs         | 24 ++++++++++++++
+ windows/core/src/encoder_config.rs | 21 ++++++++++++
+ windows/core/src/present.rs        | 33 +++++++++++++++++--
+ windows/core/src/present/tests.rs  | 46 +++++++++++++++++++++-----
+ windows/d3d9/src/device.rs         |  8 ++++-
+ 7 files changed, 172 insertions(+), 28 deletions(-)
+
+diff --git a/mtld3d.conf b/mtld3d.conf
+index 2a2be8b..4328ca3 100644
+--- a/mtld3d.conf
++++ b/mtld3d.conf
+@@ -446,6 +446,21 @@
+ 
+ # present.maxFps = 0
+ 
++# Whether presents wait for a display refresh (vsync).
++#
++# `game` does what Windows does. A windowed game is composited, so its
++# presents wait for a refresh and never tear whatever it asks for. A
++# fullscreen game follows its presentation interval: any interval but
++# IMMEDIATE waits for a refresh, IMMEDIATE presents at once for the lowest
++# latency and may tear. `on` and `off` override the game in both, for
++# titles that offer no vsync setting of their own.
++# A divided interval (TWO/THREE/FOUR) still sets its frame-rate ceiling.
++#
++# Default: game
++# Supported values: game, on, off
++
++# present.vsync = game
++
+ 
+ ##############
+ # Rendering  #
+diff --git a/unix/unix/src/metal/macdrv.rs b/unix/unix/src/metal/macdrv.rs
+index 4e6e9de..7d8e8bd 100644
+--- a/unix/unix/src/metal/macdrv.rs
++++ b/unix/unix/src/metal/macdrv.rs
+@@ -2147,6 +2147,7 @@ fn refresh_attachment_on_main(att: &Arc<Attachment>) {
+     if let Some(screen) = screen.as_deref() {
+         follow_screen_layer_mode(att, screen, mtm);
+         follow_screen_present_throttle(att, screen);
++        follow_display_sync(att, mtm);
+         follow_layer_backing_scale(att, mtm);
+     }
+     log_headroom_change_if_any(att, headroom, &view_obj, mtm);
+@@ -2240,12 +2241,14 @@ fn configure_metal_layer(
+     // on the main thread. Sound on x86_64 — pointers fit in `u64`
+     // losslessly.
+     let layer_addr = layer as u64;
++    let display_sync = pacing.vsync_requested;
+     run_on_main_thread_sync(move || {
+         configure_metal_layer_inner(
+             layer_addr as *mut c_void,
+             device_handle,
+             width,
+             height,
++            display_sync,
+             LayerColorRefs {
+                 mode: color.mode,
+                 color_space: color.color_space,
+@@ -2263,6 +2266,7 @@ fn configure_metal_layer_inner(
+     device_handle: u64,
+     width: u32,
+     height: u32,
++    display_sync: bool,
+     color: LayerColorRefs<'_>,
+ ) {
+     use objc2_quartz_core::{CAMetalLayer, kCAGravityResizeAspect};
+@@ -2307,22 +2311,20 @@ fn configure_metal_layer_inner(
+     // guest compat: D3D9 games commonly GetBackBuffer + StretchRect,
+     // lock, or read the backbuffer.
+     layer.setFramebufferOnly(false);
+-    // We always disable Metal-side vsync and instead throttle presents
+-    // via `presentDrawable:afterMinimumDuration:` set to `1/panel_max_hz`
+-    // when the guest asked for vsync. On a fixed-Hz panel that matches
+-    // the old "snap to vblank" cadence; on a ProMotion panel the system
+-    // adapts the panel rate down to whatever sub-max cadence the API
+-    // thread sustains under the cap (transparent VRR) — fractional
+-    // production rates land at their actual rate instead of being
+-    // rounded down to the next vsync divisor. PE-side
+-    // `D3DPRESENT_INTERVAL_*` mapping (`display_sync_for`): every
+-    // interval but IMMEDIATE → vsync requested, IMMEDIATE → free-run.
+-    // A divided interval (TWO/THREE/FOUR) arrives as a frame-rate
+-    // ceiling, folded PE-side with the user's `present.maxFps` into
+-    // the one ceiling that rides the same throttle: the lower rate
+-    // wins, and it also bounds the IMMEDIATE free-run. The duration
+-    // itself is derived by the caller and kept on the attachment record.
+-    layer.setDisplaySyncEnabled(false);
++    // Metal-side vsync follows the vsync request, as a D3D9 driver's does:
++    // with it on, a drawable is shown at a display refresh and never
++    // tears; with it off (IMMEDIATE, or `present.vsync = off`) it is shown
++    // at once and may. PE-side `D3DPRESENT_INTERVAL_*` mapping
++    // (`layer_pacing_for`): every interval but IMMEDIATE requests vsync,
++    // unless `present.vsync` overrides it. Presents are also throttled
++    // via `presentDrawable:afterMinimumDuration:`: to `1/panel_max_hz`
++    // when vsync is requested, which on a ProMotion panel lets the system
++    // adapt the panel rate to the cadence the API thread sustains, and to
++    // the frame-rate ceiling a divided interval (TWO/THREE/FOUR) or the
++    // user's `present.maxFps` sets, the lower rate winning. The duration
++    // itself is derived by the caller and kept on the attachment record;
++    // a later re-pace moves this setting in `follow_display_sync`.
++    layer.setDisplaySyncEnabled(display_sync);
+     layer.setMaximumDrawableCount(DRAWABLE_POOL_DEPTH);
+     // Default true; surface stalls surface as errors, not hangs.
+     layer.setAllowsNextDrawableTimeout(true);
+@@ -2616,6 +2618,25 @@ fn follow_screen_present_throttle(att: &Arc<Attachment>, screen: &objc2_app_kit:
+     );
+ }
+ 
++/// Point the layer's display sync at the vsync request it holds now. **Main thread only.**
++///
++/// Attach configures it; this follows a `Reset` that changed the request
++/// ([`set_display_sync_enabled`] queues the refresh that runs it).
++fn follow_display_sync(att: &Arc<Attachment>, mtm: MainThreadMarker) {
++    let Some(layer) = attachment::retain_layer(att, mtm) else {
++        return;
++    };
++    let wanted = unpack_pacing(att.pacing_bits()).vsync_requested;
++    if layer.displaySyncEnabled() != wanted {
++        layer.setDisplaySyncEnabled(wanted);
++        info!(
++            target: LOG_TARGET,
++            "present: display sync {}",
++            if wanted { "on" } else { "off" },
++        );
++    }
++}
++
+ /// Re-derive the cursor scale from the Wine layer's `contentsScale`. **Main thread only.**
+ ///
+ /// The PE side drives the cursor upscale from it. winemac sets the scale from
+diff --git a/windows/core/src/config.rs b/windows/core/src/config.rs
+index e2ebdb7..cc978ff 100644
+--- a/windows/core/src/config.rs
++++ b/windows/core/src/config.rs
+@@ -266,6 +266,10 @@ pub struct Mtld3dConfig {
+     /// otherwise-unthrottled free-run. `0` = uncapped. Default: `0`.
+     /// File key: `present.maxFps`.
+     pub present_max_fps: u32,
++    /// Whether presents sync to the display: the game's choice, or always on or off.
++    ///
++    /// Default: `game`. File key: `present.vsync`.
++    pub present_vsync: crate::present::VsyncPolicy,
+     /// Render resolution as a percentage of the reported back buffer, `MetalFX`-upscaled.
+     ///
+     /// `100` (the default) renders at the size the game sees, which is an
+@@ -384,6 +388,7 @@ impl Default for Mtld3dConfig {
+             },
+             pagebox_pool_cap_bytes: DEFAULT_PAGEBOX_POOL_CAP_BYTES,
+             present_max_fps: 0,
++            present_vsync: crate::present::VsyncPolicy::Game,
+             render_scale_percent: 100,
+             render_lod_bias: true,
+             adapter_spoof: AdapterSpoof::None,
+@@ -559,6 +564,10 @@ pub fn log_options(cfg: &Mtld3dConfig) {
+         target: crate::LOG_TARGET,
+         "config: present.maxFps = {}", cfg.present_max_fps
+     );
++    info!(
++        target: crate::LOG_TARGET,
++        "config: present.vsync = {:?}", cfg.present_vsync
++    );
+     info!(
+         target: crate::LOG_TARGET,
+         "config: render.scale = {}",
+@@ -636,6 +645,7 @@ fn apply(cfg: &mut Mtld3dConfig, source: &str, key: &str, value: &str) {
+             assign_cap_mb(source, key, value, &mut cfg.pagebox_pool_cap_bytes);
+         }
+         "present.maxFps" => assign_max_fps(source, value, &mut cfg.present_max_fps),
++        "present.vsync" => assign_vsync(source, value, &mut cfg.present_vsync),
+         "render.scale" => assign_render_scale(source, value, &mut cfg.render_scale_percent),
+         "render.lodBias" => assign_bool(source, key, value, &mut cfg.render_lod_bias),
+         "adapter.spoof" => assign_adapter_spoof(source, value, &mut cfg.adapter_spoof),
+@@ -721,6 +731,20 @@ fn assign_cap_mb(source: &str, key: &str, value: &str, slot: &mut u64) {
+     }
+ }
+ 
++fn assign_vsync(source: &str, value: &str, slot: &mut crate::present::VsyncPolicy) {
++    use crate::present::VsyncPolicy;
++    match value.to_ascii_lowercase().as_str() {
++        "game" => *slot = VsyncPolicy::Game,
++        "on" => *slot = VsyncPolicy::On,
++        "off" => *slot = VsyncPolicy::Off,
++        other => log_once_warn!(
++            target: crate::LOG_TARGET,
++            "{source}: 'present.vsync = {other}' is not game, on or off → kept {kept:?}",
++            kept = *slot
++        ),
++    }
++}
++
+ fn assign_max_fps(source: &str, value: &str, slot: &mut u32) {
+     // `0` means uncapped; any other value is a frame-rate ceiling in Hz.
+     if let Ok(fps) = value.parse::<u32>() {
+diff --git a/windows/core/src/encoder_config.rs b/windows/core/src/encoder_config.rs
+index fcd9100..52abe6d 100644
+--- a/windows/core/src/encoder_config.rs
++++ b/windows/core/src/encoder_config.rs
+@@ -11,6 +11,7 @@ use crate::{
+     config::{AdapterSpoof, CursorScale, Mtld3dConfig},
+     encoder_value::WireValue,
+     gpu_caps::GpuCaps,
++    present::VsyncPolicy,
+ };
+ 
+ #[cfg(test)]
+@@ -42,6 +43,7 @@ impl WireValue for Mtld3dConfig {
+         self.vram_budget_cap_bytes.write_wire(writer)?;
+         self.pagebox_pool_cap_bytes.write_wire(writer)?;
+         self.present_max_fps.write_wire(writer)?;
++        self.present_vsync.write_wire(writer)?;
+         self.render_scale_percent.write_wire(writer)?;
+         self.render_lod_bias.write_wire(writer)?;
+         self.adapter_spoof.write_wire(writer)?;
+@@ -75,6 +77,7 @@ impl WireValue for Mtld3dConfig {
+             vram_budget_cap_bytes: <u64>::read_wire(reader)?,
+             pagebox_pool_cap_bytes: <u64>::read_wire(reader)?,
+             present_max_fps: <u32>::read_wire(reader)?,
++            present_vsync: <VsyncPolicy>::read_wire(reader)?,
+             render_scale_percent: <u32>::read_wire(reader)?,
+             render_lod_bias: <bool>::read_wire(reader)?,
+             adapter_spoof: <AdapterSpoof>::read_wire(reader)?,
+@@ -83,6 +86,24 @@ impl WireValue for Mtld3dConfig {
+     }
+ }
+ 
++impl WireValue for VsyncPolicy {
++    fn write_wire(&self, writer: &mut WireWriter<'_>) -> Result<(), WireError> {
++        writer.u8(match self {
++            Self::Game => 0,
++            Self::On => 1,
++            Self::Off => 2,
++        })
++    }
++    fn read_wire(reader: &mut WireReader<'_>) -> Result<Self, WireError> {
++        match reader.u8()? {
++            0 => Ok(Self::Game),
++            1 => Ok(Self::On),
++            2 => Ok(Self::Off),
++            _ => Err(WireError::InvalidValue),
++        }
++    }
++}
++
+ impl WireValue for AdapterSpoof {
+     fn write_wire(&self, writer: &mut WireWriter<'_>) -> Result<(), WireError> {
+         writer.u8(match self {
+diff --git a/windows/core/src/present.rs b/windows/core/src/present.rs
+index 7d379ab..5aff7bc 100644
+--- a/windows/core/src/present.rs
++++ b/windows/core/src/present.rs
+@@ -29,6 +29,20 @@ impl DisplaySync {
+     }
+ }
+ 
++/// Whose choice decides vsync: the game's presentation interval, or the user's.
++///
++/// `present.vsync` in `mtld3d.conf`. `Game` does what Windows does: a
++/// windowed device's presents are composited by DWM, which shows them at a
++/// display refresh whatever the interval, so they never tear; a fullscreen
++/// device follows its interval. `On` and `Off` override both, for titles
++/// that offer no vsync setting of their own.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum VsyncPolicy {
++    Game,
++    On,
++    Off,
++}
++
+ /// The pacing a device hands its layer: the vsync request and the frame-rate ceiling.
+ ///
+ /// `max_fps` is in Hz and `0` means no ceiling. It is the effective ceiling
+@@ -92,10 +106,25 @@ pub const fn effective_max_fps(interval: u32, refresh_hz: u32, configured: u32)
+ }
+ 
+ /// The pacing `interval` asks for on a `refresh_hz` mode under a `configured` ceiling.
++///
++/// `vsync` is the user's `present.vsync`: under [`VsyncPolicy::Game`] a
++/// `windowed` device syncs to the display and a fullscreen one follows its
++/// interval, otherwise the policy decides. A divided interval's ceiling
++/// applies either way.
+ #[must_use]
+-pub const fn layer_pacing_for(interval: u32, refresh_hz: u32, configured: u32) -> LayerPacing {
++pub const fn layer_pacing_for(
++    interval: u32,
++    refresh_hz: u32,
++    configured: u32,
++    vsync: VsyncPolicy,
++    windowed: bool,
++) -> LayerPacing {
+     LayerPacing {
+-        display_sync: display_sync_for(interval).enabled(),
++        display_sync: match vsync {
++            VsyncPolicy::Game => windowed || display_sync_for(interval).enabled(),
++            VsyncPolicy::On => true,
++            VsyncPolicy::Off => false,
++        },
+         max_fps: effective_max_fps(interval, refresh_hz, configured),
+     }
+ }
+diff --git a/windows/core/src/present/tests.rs b/windows/core/src/present/tests.rs
+index f745074..1b137dc 100644
+--- a/windows/core/src/present/tests.rs
++++ b/windows/core/src/present/tests.rs
+@@ -12,8 +12,8 @@ use mtld3d_types::{
+ };
+ 
+ use super::{
+-    DisplaySync, LayerPacing, display_sync_for, effective_max_fps, interval_divisor,
+-    layer_pacing_for, queued_pacing,
++    DisplaySync, LayerPacing, VsyncPolicy, display_sync_for, effective_max_fps,
++    interval_divisor, layer_pacing_for, queued_pacing,
+ };
+ 
+ const fn pacing(display_sync: bool, max_fps: u32) -> LayerPacing {
+@@ -127,35 +127,63 @@ fn an_unknown_refresh_rate_divides_nothing() {
+ #[test]
+ fn layer_pacing_pairs_the_vsync_request_with_the_ceiling() {
+     assert_eq!(
+-        layer_pacing_for(D3DPRESENT_INTERVAL_DEFAULT, 60, 0),
++        layer_pacing_for(D3DPRESENT_INTERVAL_DEFAULT, 60, 0, VsyncPolicy::Game, false),
+         pacing(true, 0)
+     );
+     assert_eq!(
+-        layer_pacing_for(D3DPRESENT_INTERVAL_ONE, 60, 90),
++        layer_pacing_for(D3DPRESENT_INTERVAL_ONE, 60, 90, VsyncPolicy::Game, false),
+         pacing(true, 90)
+     );
+     assert_eq!(
+-        layer_pacing_for(D3DPRESENT_INTERVAL_TWO, 60, 0),
++        layer_pacing_for(D3DPRESENT_INTERVAL_TWO, 60, 0, VsyncPolicy::Game, false),
+         pacing(true, 30)
+     );
+     assert_eq!(
+-        layer_pacing_for(D3DPRESENT_INTERVAL_THREE, 60, 0),
++        layer_pacing_for(D3DPRESENT_INTERVAL_THREE, 60, 0, VsyncPolicy::Game, false),
+         pacing(true, 20)
+     );
+     assert_eq!(
+-        layer_pacing_for(D3DPRESENT_INTERVAL_FOUR, 60, 10),
++        layer_pacing_for(D3DPRESENT_INTERVAL_FOUR, 60, 10, VsyncPolicy::Game, false),
+         pacing(true, 10)
+     );
+     assert_eq!(
+-        layer_pacing_for(D3DPRESENT_INTERVAL_IMMEDIATE, 60, 0),
++        layer_pacing_for(D3DPRESENT_INTERVAL_IMMEDIATE, 60, 0, VsyncPolicy::Game, false),
+         pacing(false, 0)
+     );
+     assert_eq!(
+-        layer_pacing_for(D3DPRESENT_INTERVAL_IMMEDIATE, 60, 72),
++        layer_pacing_for(D3DPRESENT_INTERVAL_IMMEDIATE, 60, 72, VsyncPolicy::Game, false),
+         pacing(false, 72)
+     );
+ }
+ 
++#[test]
++fn the_vsync_policy_overrides_the_interval_but_keeps_its_ceiling() {
++    assert_eq!(
++        layer_pacing_for(D3DPRESENT_INTERVAL_IMMEDIATE, 60, 0, VsyncPolicy::On, false),
++        pacing(true, 0)
++    );
++    assert_eq!(
++        layer_pacing_for(D3DPRESENT_INTERVAL_ONE, 60, 0, VsyncPolicy::Off, false),
++        pacing(false, 0)
++    );
++    assert_eq!(
++        layer_pacing_for(D3DPRESENT_INTERVAL_TWO, 60, 0, VsyncPolicy::Off, false),
++        pacing(false, 30)
++    );
++}
++
++#[test]
++fn a_windowed_device_syncs_to_the_display_whatever_its_interval() {
++    assert_eq!(
++        layer_pacing_for(D3DPRESENT_INTERVAL_IMMEDIATE, 60, 0, VsyncPolicy::Game, true),
++        pacing(true, 0)
++    );
++    assert_eq!(
++        layer_pacing_for(D3DPRESENT_INTERVAL_IMMEDIATE, 60, 0, VsyncPolicy::Off, true),
++        pacing(false, 0)
++    );
++}
++
+ #[test]
+ fn a_reset_at_the_pacing_the_layer_holds_queues_nothing() {
+     assert_eq!(queued_pacing(pacing(true, 0), pacing(true, 0)), None);
+diff --git a/windows/d3d9/src/device.rs b/windows/d3d9/src/device.rs
+index dd02f20..d944ad3 100644
+--- a/windows/d3d9/src/device.rs
++++ b/windows/d3d9/src/device.rs
+@@ -13748,5 +13748,11 @@ pub fn resolve_layer_pacing(
+     } else {
+         0
+     };
+-    layer_pacing_for(interval, refresh_hz, cfg.present_max_fps)
++    layer_pacing_for(
++        interval,
++        refresh_hz,
++        cfg.present_max_fps,
++        cfg.present_vsync,
++        pp.windowed != 0,
++    )
+ }
+-- 
+2.54.0 (Apple Git-157)
+
