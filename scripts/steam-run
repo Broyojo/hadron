@@ -39,9 +39,9 @@ apply_profile() {  # <file>
         [ "$id" = "${STEAM_COMPAT_APP_ID:-}" ] || continue
         for setting in ${settings%%#*}; do
             name="${setting%%=*}"
-            case "$name" in [A-Za-z_]*) ;; *) continue ;; esac
-            eval "set_already=\${$name+x}"
-            [ -n "$set_already" ] || export "$setting"
+            # Names only: this is a data file, nothing in it may run as shell code.
+            case "$name" in ""|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+            printenv "$name" >/dev/null || export "$setting"
         done
     done < "$1"
 }

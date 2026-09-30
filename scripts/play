@@ -66,6 +66,7 @@ fi
 # features vkd3d-proton requires (docs/findings.md #22); Wine's own d3d12 otherwise.
 if [ "${HADRON_D3D12:-}" = vkd3d ]; then
     [ -n "$icd" ] || { echo "HADRON_D3D12=vkd3d needs KosmicKrisp: run scripts/build-vulkan.sh" >&2; exit 1; }
+    [ -f "$sys32/dxgi_dxvk.dll" ] || { echo "HADRON_D3D12=vkd3d needs DXVK's DXGI: run scripts/build-vulkan.sh dxvk" >&2; exit 1; }
     for f in d3d12.dll d3d12core.dll; do
         src="$ROOT/dist/vkd3d-proton/x64/$f"
         [ -f "$src" ] || { echo "missing $src: run scripts/build-vulkan.sh" >&2; exit 1; }
