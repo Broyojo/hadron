@@ -8,8 +8,9 @@
 #
 # Stops the game when any of these holds:
 #   - macOS reports critical memory pressure (kern.memorystatus_vm_pressure_level 4);
-#   - swap in use grew by more than HADRON_SWAP_LIMIT_MB (default 2048) since the game started: the
-#     system is paging (macOS gives swap back slowly, so what was in use before doesn't count);
+#   - swap in use grew by more than HADRON_SWAP_LIMIT_MB (default 2048) above the lowest it has been
+#     since the game started: the system is paging (macOS gives swap back slowly, so what was in use
+#     before doesn't count);
 #   - Hadron's Wine processes together hold more than HADRON_MEM_LIMIT_GB (default: half of RAM);
 #   - the disk has less than HADRON_DISK_MIN_GB (default 5) free: swap and logs need room.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -61,6 +62,8 @@ while kill -0 "$pid" 2>/dev/null; do
 
     reason=
     [ "$pressure" -ge 4 ] && reason="critical memory pressure"
+    # Growth counts from the lowest swap seen, so reclaimed stale swap isn't headroom.
+    [ "$swap" -lt "$swap_base" ] && swap_base=$swap
     [ $((swap - swap_base)) -gt "$swap_limit_mb" ] && reason="swap grew to ${swap} MB (from ${swap_base} MB)"
     [ "$rss" -gt "$mem_limit_mb" ] && reason="Wine resident memory at ${rss} MB"
     [ "$disk" -lt "$disk_min_mb" ] && reason="only ${disk} MB of disk left"
