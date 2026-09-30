@@ -38,11 +38,20 @@ static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags flags)
     exit(1);
 }
 
+static struct buf make_buffer2(VkDeviceSize size, VkBufferUsageFlags2 usage2);
+
 static struct buf make_buffer(VkDeviceSize size, VkBufferUsageFlags usage)
 {
+    return make_buffer2(size, usage);
+}
+
+static struct buf make_buffer2(VkDeviceSize size, VkBufferUsageFlags2 usage2)
+{
     struct buf b = {0};
-    VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, size,
-            usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_SHARING_MODE_EXCLUSIVE };
+    VkBufferUsageFlags2CreateInfo usage_info = { VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO, NULL,
+            usage2 | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT };
+    VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, &usage_info, 0, size,
+            0, VK_SHARING_MODE_EXCLUSIVE };
     CHECK(vkCreateBuffer(dev, &info, NULL, &b.buf));
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(dev, b.buf, &req);
@@ -103,8 +112,11 @@ int main(void)
         robustness2.robustBufferAccess2 = robustness2.robustImageAccess2 = VK_FALSE;
     float prio = 1;
     VkDeviceQueueCreateInfo qci = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, NULL, 0, 0, 1, &prio };
-    const char *exts[] = { VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME };
-    VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f2, 0, 1, &qci, 0, NULL, 2, exts };
+    const char *exts[] = { VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
+            VK_KHR_MAINTENANCE_5_EXTENSION_NAME };
+    VkPhysicalDeviceMaintenance5Features m5 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES, f12.pNext, VK_TRUE };
+    f12.pNext = &m5;
+    VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f2, 0, 1, &qci, 0, NULL, 3, exts };
     CHECK(vkCreateDevice(pdev, &dci, NULL, &dev));
     VkQueue queue;
     vkGetDeviceQueue(dev, 0, 0, &queue);
@@ -228,7 +240,7 @@ int main(void)
         VkMemoryRequirements2 mr = { VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
         mem_req(dev, &mri, &mr);
         pre_size[i] = mr.memoryRequirements.size;
-        pre[i] = make_buffer(pre_size[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        pre[i] = make_buffer2(pre_size[i], VK_BUFFER_USAGE_2_PREPROCESS_BUFFER_BIT_EXT);
     }
 
     /* Record. */
