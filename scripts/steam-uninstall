@@ -1,0 +1,21 @@
+#!/bin/sh
+# Undo scripts/steam-install: restore Steam's launcher Info.plist, remove the library and
+# re-sign ad hoc. Reinstalling Steam from Valve also restores Valve's own signature.
+set -eu
+APP=/Applications/Steam.app
+BACKUP="$HOME/Library/Application Support/Hadron/Steam-Info.plist.before-hadron"
+
+echo "quitting Steam"
+osascript -e 'quit app "Steam"' 2>/dev/null || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+
+if [ -f "$BACKUP" ]; then
+    cp "$BACKUP" "$APP/Contents/Info.plist"
+else
+    /usr/libexec/PlistBuddy -c 'Delete :LSEnvironment:DYLD_INSERT_LIBRARIES' "$APP/Contents/Info.plist" 2>/dev/null || true
+fi
+rm -f "$APP/Contents/MacOS/notproton.dylib" "$APP/Contents/Info.plist.before-hadron"
+codesign -f -s - "$APP/Contents/MacOS/steam_osx"
+codesign -f -s - "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+echo "removed; Steam starts without Steam Play"
