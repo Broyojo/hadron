@@ -324,6 +324,13 @@ a build that can't create D3D devices. `HADRON_D3D12=vkd3d` now only selects vkd
 and `config/games.conf` sets it for Teardown. steam-run applies per-game settings from that file and
 from the user's ~/Library/Application Support/Hadron/games.conf; launch options win over both.
 
+Geometry shaders: Mesa patches 0004-0009 carry the pending upstream KosmicKrisp geometry shader
+merge request (!44786, by its author, one conflict resolved against DGC), which implements them with
+poly as compute passes before the draw. vkd3d-proton's geometry shader, layered rendering, topology
+mismatch and PS layer tests pass (527 checks; test_primitive_id_read_tess_geom has one failure).
+Patch 0010 lists the geometry stage for DGC: with geometryShader on, vkd3d-proton turns DGC off
+unless every graphics stage is supported, which briefly made Teardown's voxels vanish again.
+
 The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
 back slowly, and swap left over from earlier runs stopped Teardown at launch.
 
