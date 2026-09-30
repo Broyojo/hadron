@@ -52,3 +52,9 @@ scripts/wine-dev reg add 'HKLM\Software\Microsoft\Wow64\x86' /ve /d libwow64fex.
 
 First CPU numbers (M2 Pro, same C source, x86_64 through FEX vs native arm64): integer,
 memory and contended atomics within noise of native; floating point ~1.4x slower.
+
+## License
+
+Hadron's own code is under the BSD 3-Clause license ([LICENSE.hadron](LICENSE.hadron)). The Wine
+patches are LGPL-2.1-or-later and the FEX patches MIT, matching the projects they modify. Fetched
+upstream sources keep their own licenses. See [LICENSE](LICENSE).
