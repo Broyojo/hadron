@@ -45,9 +45,9 @@ case "${HADRON_DISABLE_LSTEAMCLIENT:-0}" in
     0) ;;
     *) overrides="mscoree,mshtml=;steamclient,steamclient64=d;lsteamclient=b" ;;
 esac
-# HADRON_D3D9=mtld3d uses mtld3d (D3D9 -> Metal) instead of wined3d; enable it in the prefix
-# first with scripts/mtld3d-prefix enable.
-[ "$HADRON_D3D9" = mtld3d ] && overrides="$overrides;d3d9=n,b"
+# D3D9 goes through mtld3d (D3D9 -> Metal), installed in the prefix by scripts/mtld3d-prefix
+# enable; HADRON_D3D9=wined3d uses Wine's own D3D9 (over OpenGL) instead, for comparisons.
+[ "${HADRON_D3D9:-mtld3d}" = mtld3d ] && overrides="$overrides;d3d9=n,b"
 # The watchdog logs memory to build/logs/ and stops the game before it can make the Mac
 # thrash (see scripts/watchdog for the limits). HADRON_WATCHDOG=0 turns it off.
 mkdir -p "$ROOT/build/logs"
