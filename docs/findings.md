@@ -232,6 +232,13 @@ Result: Among Us, Windows-only, shows Install/Play in the Mac library, installs 
 its install script through the tool, launches, and signs in online (the manual-launch
 `SteamworksAuthFail` is gone): launched by Steam, the lsteamclient bridge gets its game mapping.
 
+Steam Cloud: Steam maps Cloud paths into `users/steamuser`, and still names XP-era folders ("Local
+Settings/Application Data"). Steam launches run Wine as `USER=steamuser` (Wine names the profile after
+$USER, as Proton's patch does), `steam-run` aliases the XP paths onto `AppData/Local`, `AppData/Roaming` and
+`Documents` (merging anything Steam wrote there first), folds prefixes made under the Mac user's name into
+`steamuser`, and drops Wine's links from the profile to the Mac user's Documents, Desktop and so on, so
+each game's profile stays in its prefix as under Proton.
+
 Bugs found on the way: a path with a space in `STEAM_DYLD_INSERT_LIBRARIES` split `play`'s `env` call;
 the watchdog missed processes started through the symlinked runtime (lsof reports real paths).
 

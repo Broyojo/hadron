@@ -17,15 +17,18 @@
    - replace NotProton's "CrossOver options" panel with Hadron's options (vsync, D3D9 backend, HUD);
    - first-launch prefix creation takes minutes; seed new prefixes from a template instead;
    - Steam updates: detect a build the signatures don't cover and say so instead of failing silently.
-4. Run the rest of the test game set (docs/test-games.md) to find the next general bugs.
-5. Distribution: a Hadron.app that installs the runtime into ~/Library/Application Support/Hadron and the
+4. Vulkan on Metal (KosmicKrisp in Mesa, or MoltenVK) wired into Wine, then vkd3d-proton on it for D3D12
+   and Zink for OpenGL beyond Apple's 4.1. Teardown needs one or the other (docs/test-games.md).
+5. Run the rest of the test game set (docs/test-games.md) to find the next general bugs.
+6. Distribution: a Hadron.app that installs the runtime into ~/Library/Application Support/Hadron and the
    Steam integration into Steam.app (what scripts/steam-install does), notices when a Steam update undoes the
    injection and re-applies it, and offers a small GUI: repair, per-game settings, logs, and self-updates
    (Sparkle). Signing: a Developer ID Application certificate and a Developer Needs a Developer ID Application certificate and a Developer
    ID provisioning profile for com.broyojo.hadron.loader (only the team's Account Holder can create the
    certificate).
 
-Later: lower vsync input latency (fewer queued drawables while display sync is on); mtld3d should fail an allocation cleanly when a 32-bit process runs out of address space (it
+Later: external displays (games open on the main display; moving a running game across displays is
+unreliable); lower vsync input latency (fewer queued drawables while display sync is on); mtld3d should fail an allocation cleanly when a 32-bit process runs out of address space (it
 crashed on a null pointer in `LeaseCompletion::consume` with 79 MB left); hardware TSO limited to emulated code (a toggle costs ~0.27 us; enabling it on whole threads made
 Portal unplayably slow); mtld3d/DXMT presenting through Wine's client surfaces (removes Wine 0012's special
 case); D3D12 (vkd3d-proton on KosmicKrisp or DXMT's D3D12); the remaining ~50 ms steamclient retry cost should be gone for
