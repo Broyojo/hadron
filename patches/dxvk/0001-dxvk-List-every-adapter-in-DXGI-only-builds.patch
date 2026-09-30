@@ -1,0 +1,48 @@
+From 5e97f49c75ecf1d6ee67576378a2a41cef359ef8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 30 Sep 2026 16:28:36 -0400
+Subject: [PATCH] dxvk: List every adapter in DXGI-only builds
+
+A build with neither D3D11 nor D3D9 can't create D3D devices; its DXGI only
+presents for other implementations (vkd3d-proton). DXVK's D3D feature
+requirements don't apply to it, so don't filter adapters on them.
+---
+ meson.build                     | 6 ++++++
+ src/dxvk/dxvk_device_filter.cpp | 4 ++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/meson.build b/meson.build
+index 4964301b..d9da81e2 100644
+--- a/meson.build
++++ b/meson.build
+@@ -226,4 +226,10 @@ if platform != 'windows'
+   subdir('include/native')
+ endif
+ 
++# DXGI alone presents for other D3D implementations (vkd3d-proton): it can't create D3D devices,
++# so DXVK's D3D feature requirements don't apply to the adapters it lists.
++if not get_option('enable_d3d11') and not get_option('enable_d3d9')
++  add_project_arguments('-DDXVK_DXGI_ONLY', language : 'cpp')
++endif
++
+ subdir('src')
+diff --git a/src/dxvk/dxvk_device_filter.cpp b/src/dxvk/dxvk_device_filter.cpp
+index c1da5c73..ac89c3d1 100644
+--- a/src/dxvk/dxvk_device_filter.cpp
++++ b/src/dxvk/dxvk_device_filter.cpp
+@@ -52,8 +52,12 @@ namespace dxvk {
+     std::string compatError;
+ 
+     if (!adapter.isCompatible(compatError)) {
++#ifdef DXVK_DXGI_ONLY
++      Logger::info(str::format("  Listing for DXGI only: ", compatError));
++#else
+       Logger::info(str::format("  Skipping: ", compatError));
+       return false;
++#endif
+     }
+ 
+     if (m_flags.test(DxvkDeviceFilterFlag::MatchDeviceName)) {
+-- 
+2.54.0 (Apple Git-157)
+

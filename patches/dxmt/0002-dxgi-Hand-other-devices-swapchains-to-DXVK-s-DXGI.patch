@@ -1,0 +1,52 @@
+From cb65819c3ea910aa601a095d35091ef3218df582 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 30 Sep 2026 16:28:36 -0400
+Subject: [PATCH] dxgi: Hand other devices' swapchains to DXVK's DXGI
+
+DXMT's factory only creates swapchains for its own devices. Presenting for
+other D3D implementations, such as vkd3d-proton's D3D12 command queues, is
+left to DXVK's DXGI when it is installed as dxgi_dxvk.dll, so one DXGI serves
+D3D10/11 on DXMT and D3D12 on vkd3d-proton.
+---
+ src/dxgi/dxgi_factory.cpp | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/src/dxgi/dxgi_factory.cpp b/src/dxgi/dxgi_factory.cpp
+index 18956a5..31d48d5 100644
+--- a/src/dxgi/dxgi_factory.cpp
++++ b/src/dxgi/dxgi_factory.cpp
+@@ -14,6 +14,17 @@ namespace dxmt {
+ Com<IMTLDXGIAdapter> CreateAdapter(WMT::Device Device,
+                                    IDXGIFactory2 *pFactory, Config &config);
+ 
++static HRESULT CreateForeignFactory(REFIID riid, void **ppFactory) {
++  static HMODULE module = LoadLibraryA("dxgi_dxvk.dll");
++  if (!module)
++    return E_NOINTERFACE;
++  auto create = reinterpret_cast<HRESULT(WINAPI *)(UINT, REFIID, void **)>(
++      reinterpret_cast<void *>(GetProcAddress(module, "CreateDXGIFactory2")));
++  if (!create)
++    return E_NOINTERFACE;
++  return create(0, riid, ppFactory);
++}
++
+ class MTLDXGIFactory : public MTLDXGIObject<IDXGIFactory6> {
+ 
+ public:
+@@ -111,6 +122,13 @@ public:
+ 
+     Com<IMTLSwapChainFactory> swapchain_factory;
+     if (FAILED(pDevice->QueryInterface(IID_PPV_ARGS(&swapchain_factory)))) {
++      // Not one of DXMT's devices, e.g. a vkd3d-proton D3D12 command queue:
++      // DXVK's DXGI, installed as dxgi_dxvk.dll, can present for those.
++      Com<IDXGIFactory2> other;
++      if (SUCCEEDED(CreateForeignFactory(IID_PPV_ARGS(&other))))
++        return other->CreateSwapChainForHwnd(pDevice, hWnd, pDesc,
++                                             pFullscreenDesc,
++                                             pRestrictToOutput, ppSwapChain);
+       ERR("Unsupported device type");
+       return DXGI_ERROR_UNSUPPORTED;
+     }
+-- 
+2.54.0 (Apple Git-157)
+

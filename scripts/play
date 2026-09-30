@@ -56,17 +56,22 @@ esac
 # Vulkan loader would find otherwise, can't create an instance under Wine.
 icd="$ROOT/dist/mesa/share/vulkan/icd.d/kosmickrisp_mesa_icd.aarch64.json"
 [ -f "$icd" ] || icd=
-# HADRON_D3D12=vkd3d: D3D12 through vkd3d-proton on Vulkan, presenting through DXVK's DXGI. Per game
-# for now, since that DXGI replaces DXMT's, which D3D10/11 games need; games load d3d12.dll at run
-# time, so the choice can't come from their imports.
+# DXVK's DXGI presents for D3D12 devices: DXMT's dxgi.dll hands it the swapchains of devices that
+# aren't its own (vkd3d-proton's command queues), loading it by this name.
+sys32="$PREFIX/drive_c/windows/system32"
+if [ -f "$ROOT/dist/dxvk/x64/dxgi.dll" ] && [ -d "$sys32" ]; then
+    cmp -s "$ROOT/dist/dxvk/x64/dxgi.dll" "$sys32/dxgi_dxvk.dll" || cp "$ROOT/dist/dxvk/x64/dxgi.dll" "$sys32/dxgi_dxvk.dll"
+fi
+# HADRON_D3D12=vkd3d: D3D12 through vkd3d-proton on KosmicKrisp. Per game while the driver still lacks
+# features vkd3d-proton requires (docs/findings.md #22); Wine's own d3d12 otherwise.
 if [ "${HADRON_D3D12:-}" = vkd3d ]; then
     [ -n "$icd" ] || { echo "HADRON_D3D12=vkd3d needs KosmicKrisp: run scripts/build-vulkan.sh" >&2; exit 1; }
-    for f in vkd3d-proton/x64/d3d12.dll vkd3d-proton/x64/d3d12core.dll dxvk/x64/dxgi.dll; do
-        src="$ROOT/dist/$f"; dst="$PREFIX/drive_c/windows/system32/$(basename "$f")"
+    for f in d3d12.dll d3d12core.dll; do
+        src="$ROOT/dist/vkd3d-proton/x64/$f"
         [ -f "$src" ] || { echo "missing $src: run scripts/build-vulkan.sh" >&2; exit 1; }
-        cmp -s "$src" "$dst" || cp "$src" "$dst"
+        cmp -s "$src" "$sys32/$f" || cp "$src" "$sys32/$f"
     done
-    overrides="$overrides;d3d12,d3d12core,dxgi=n"
+    overrides="$overrides;d3d12,d3d12core=n"
     # vkd3d-proton caches pipelines in the working directory, the game's install, unless told otherwise.
     mkdir -p "$PREFIX/shadercache"
     vkd3d_cache="$PREFIX/shadercache"
