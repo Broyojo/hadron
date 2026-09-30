@@ -250,6 +250,36 @@ the file watcher out of prefix/, build/, dist/, src/, games/ and toolchains/, an
 Bugs found on the way: a path with a space in `STEAM_DYLD_INSERT_LIBRARIES` split `play`'s `env` call;
 the watchdog missed processes started through the symlinked runtime (lsof reports real paths).
 
+## Vulkan on Metal: KosmicKrisp through Wine, vkd3d-proton blocked on two driver features (#22)
+
+KosmicKrisp (Mesa main, `scripts/build-vulkan.sh mesa`) reports Vulkan 1.4 on the M2 Pro, and Wine's
+winevulkan reaches it through Homebrew's Khronos loader with `VK_DRIVER_FILES` pointing at its ICD JSON:
+an x86_64 program under FEX (`tools/vkprobe.c`) sees the GPU with 142 device extensions. With the
+default MoltenVK the same program gets `VK_ERROR_INCOMPATIBLE_DRIVER` from `vkCreateInstance`.
+
+vkd3d-proton 3.0.1 (`scripts/build-vulkan.sh vkd3d-proton`, x86_64 PE for now; llvm-mingw's libc++
+needs `<new>` and `<exception>` force-included) first crashed in `vkGetPhysicalDeviceProperties2`.
+That was Wine's generated thunk: `VkPhysicalDeviceLayeredApiVulkanPropertiesKHR` (maintenance7) holds
+a `VkPhysicalDeviceProperties2`, and make_vulkan skipped its input conversion because the member is
+returnedonly, so its pNext was uninitialized and the output conversion followed it. Wine patch 0017
+converts extensible returnedonly members on input; upstream master has the same bug. MoltenVK
+doesn't expose maintenance7, so nothing hit it before.
+
+With that, `D3D12CreateDevice` (`tools/d3d12probe.c`) fails on vkd3d-proton's hard requirements that
+KosmicKrisp doesn't meet yet:
+- transform feedback (`VK_EXT_transform_feedback`, D3D stream output; Metal has none, so the driver has
+  to emulate it, as Asahi's Honeykrisp does);
+- single-texel alignment for texel buffer views (KosmicKrisp requires 16 bytes; D3D12 typed buffer
+  views may start at any element, which a driver can support by folding the remainder into the shader's
+  index, again as Honeykrisp does).
+
+Everything else vkd3d-proton requires is there (Vulkan 1.3, 1M update-after-bind descriptors,
+robustness2 with nullDescriptor, push descriptors, mutable descriptors, maintenance5/6, zero instance
+divisors, samplerMirrorClampToEdge, shaderDrawParameters). Also missing, but not hard requirements:
+geometry shaders (Mesa MR !44786 pending), sparse resources (caps D3D12 at feature level 11_1 without
+an override), `VK_EXT_dynamic_rendering_unused_attachments`. vkd3d-proton also needs DXVK's dxgi.dll
+for swapchains, which conflicts with DXMT's; DXGI will have to be picked per API.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
