@@ -236,8 +236,16 @@ Steam Cloud: Steam maps Cloud paths into `users/steamuser`, and still names XP-e
 Settings/Application Data"). Steam launches run Wine as `USER=steamuser` (Wine names the profile after
 $USER, as Proton's patch does), `steam-run` aliases the XP paths onto `AppData/Local`, `AppData/Roaming` and
 `Documents` (merging anything Steam wrote there first), folds prefixes made under the Mac user's name into
-`steamuser`, and drops Wine's links from the profile to the Mac user's Documents, Desktop and so on, so
-each game's profile stays in its prefix as under Proton.
+`steamuser`, and makes the profile's Documents, Desktop and so on real folders inside the prefix, so each
+game's profile stays there as under Proton. Wine links a shell folder to the Mac user's only when it
+doesn't exist yet (shell32 `_SHGetUserProfilePath`), so real folders stay put: the layout runs once per
+prefix (marker `.hadron-profile-v1`). A first version redid it on every launch, and Wine re-linked the
+folders each time.
+
+A black screen and slow launches while testing this turned out to be VS Code: its search followed the
+prefixes' `dosdevices/z:` link to `/` and crawled the whole disk with 36 ripgrep processes (load average
+113), which took every Wine start from 2 s to about 20 s. `.vscode/settings.json` now keeps search and
+the file watcher out of prefix/, build/, dist/, src/, games/ and toolchains/, and off symlinks.
 
 Bugs found on the way: a path with a space in `STEAM_DYLD_INSERT_LIBRARIES` split `play`'s `env` call;
 the watchdog missed processes started through the symlinked runtime (lsof reports real paths).
