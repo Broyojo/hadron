@@ -18,14 +18,11 @@ import sys
 
 
 def busiest_jit_thread(lines):
-    counts, thread = collections.Counter(), None
-    for line in lines:
-        m = re.match(r'^    \d+ (Thread_\d+)', line)
-        if m:
-            thread = m.group(1)
-        elif thread and 'unknown binary' in line:
-            counts[thread] += 1
-    return counts.most_common(1)[0][0]
+    """The thread with the most self samples in JIT code."""
+    threads = {m.group(1) for m in (re.match(r'^    \d+ (Thread_\d+)', l) for l in lines) if m}
+    def jit_samples(thread):
+        return sum(count for text, count in self_samples(lines, thread).items() if 'unknown binary' in text)
+    return max(threads, key=jit_samples)
 
 
 def self_samples(lines, thread):
