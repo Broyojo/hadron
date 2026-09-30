@@ -1,0 +1,171 @@
+#!/bin/sh
+# Hadron's Steam compatibility tool: Mac Steam runs this (through the tool's `run` stub) as
+#   steam-run <verb> <program> [args...]
+# with STEAM_COMPAT_DATA_PATH, STEAM_COMPAT_INSTALL_PATH, STEAM_COMPAT_APP_ID and
+# STEAM_COMPAT_CLIENT_INSTALL_PATH set, like Proton's `proton` script on Linux.
+#
+# Each game gets its own prefix in STEAM_COMPAT_DATA_PATH/pfx, created on first launch. The
+# Steam bridge files (Valve's Windows steamclient DLLs, which Wine redirects to lsteamclient) are
+# staged into the prefix's Steam directory, and the game runs through scripts/play, so it gets
+# everything a manual launch does: mtld3d, vsync, the watchdog, hadron-steam.exe.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+verb="$1"; shift
+
+case "$verb" in
+    getcompatpath) printf '%s\n' "$STEAM_COMPAT_DATA_PATH"; exit 0 ;;
+    run|waitforexitandrun) ;;
+    *) echo "steam-run: unsupported verb '$verb'" >&2; exit 1 ;;
+esac
+[ -n "$STEAM_COMPAT_DATA_PATH" ] || { echo "steam-run: STEAM_COMPAT_DATA_PATH is not set" >&2; exit 1; }
+
+# Settings given as NAME=value launch options (a game's Properties, or the Compatibility page) arrive
+# in argv: export them, and keep the rest as the command.
+argc=$#
+while [ "$argc" -gt 0 ]; do
+    arg="$1"; shift; argc=$((argc - 1))
+    case "$arg" in
+        HADRON_*=*|WINE*=*|DXMT_*=*|MTLD3D_*=*|MTL_*=*|DXVK_*=*|VKD3D_*=*|FEX_*=*|CX_*=*|D3DM_*=*|NOTPROTON_*=*|ROSETTA_*=*)
+            export "$arg" ;;
+        *) set -- "$@" "$arg" ;;
+    esac
+done
+
+log="$STEAM_COMPAT_DATA_PATH/hadron-run.log"
+mkdir -p "$STEAM_COMPAT_DATA_PATH"
+{
+    echo "=== hadron steam-run $(date) ==="
+    echo "verb=$verb args=$*"
+    env | grep -E '^(Steam|STEAM_)' | sort
+} >> "$log" 2>&1
+
+export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
+# Proton's Windows user name. Steam's Cloud rules map Windows paths into users/steamuser, so the
+# profile has to be that one; Wine names it after $USER.
+real_user="$USER"
+export USER=steamuser
+# As in scripts/play: Wine finds FreeType and friends in Homebrew's library directory.
+export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
+wine="$ROOT/dist/bin/wine"
+
+wineserver="$ROOT/dist/bin/wineserver"
+
+# A prefix another runner made (NotProton's CrossOver, an x86-64 or Rosetta Wine) has system DLLs
+# Hadron's ARM64 runtime can't use: set it aside, saves and all, and make a new one.
+pe_machine() {  # the PE machine type of $1, e.g. aa64
+    off=$(od -An -t u4 -j 60 -N 4 "$1" 2>/dev/null | tr -d ' ')
+    [ -n "$off" ] && od -An -t x2 -j $((off + 4)) -N 2 "$1" | tr -d ' '
+}
+ntdll="$WINEPREFIX/drive_c/windows/system32/ntdll.dll"
+if [ -f "$ntdll" ] && [ "$(pe_machine "$ntdll")" != aa64 ]; then
+    aside="$WINEPREFIX.other-runner-$(date +%Y%m%d-%H%M%S)"
+    mv "$WINEPREFIX" "$aside"
+    echo "prefix made by another runner (ntdll machine $(pe_machine "$aside/drive_c/windows/system32/ntdll.dll")); moved to $aside" >> "$log"
+fi
+
+# A prefix is complete once this marker exists: a wineboot that fails part way leaves system.reg
+# behind, and that prefix must not be reused.
+ready="$WINEPREFIX/.hadron-prefix-ready"
+if [ ! -f "$ready" ] && { [ ! -f "$WINEPREFIX/system.reg" ] || [ -f "$WINEPREFIX/.hadron-prefix-creating" ]; }; then
+    echo "creating prefix $WINEPREFIX" >> "$log"
+    rm -rf "$WINEPREFIX"
+    mkdir -p "$WINEPREFIX" && touch "$WINEPREFIX/.hadron-prefix-creating"
+    # mscoree/mshtml off, as in scripts/play: otherwise wineboot waits on the Wine Mono and Gecko
+    # install dialogs.
+    if WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$wine" wineboot --init >> "$log" 2>&1 &&
+       WINEDEBUG=-all "$wineserver" -w &&
+       "$ROOT/scripts/mtld3d-prefix" enable "$WINEPREFIX" >> "$log" 2>&1; then
+        rm -f "$WINEPREFIX/.hadron-prefix-creating"
+    else
+        echo "steam-run: creating the prefix failed; see $log" | tee -a "$log" >&2
+        "$wineserver" -k 2>/dev/null
+        rm -rf "$WINEPREFIX"
+        exit 1
+    fi
+fi
+touch "$ready"
+
+# The profile Steam Cloud expects, as Proton lays it out: users/steamuser, its Documents, Desktop and
+# so on real folders inside the prefix (Wine links a shell folder to the Mac user's only when it
+# doesn't exist yet), and the XP-era paths Steam's Cloud rules still name ("Local Settings/Application
+# Data" and so on) as aliases of the modern folders. Done once per prefix: a prefix made before
+# this, under the Mac user's name, is folded into steamuser, the old name kept as a link so paths
+# already in its registry still resolve.
+users="$WINEPREFIX/drive_c/users"
+profile="$users/steamuser"
+if [ ! -f "$WINEPREFIX/.hadron-profile-v1" ]; then
+    if [ -n "$real_user" ] && [ "$real_user" != steamuser ] && [ -d "$users/$real_user" ] && [ ! -L "$users/$real_user" ]; then
+        mkdir -p "$profile"
+        cp -Rn "$users/$real_user/." "$profile/" 2>> "$log" && rm -rf "$users/$real_user" && ln -s steamuser "$users/$real_user"
+        echo "folded users/$real_user into users/steamuser" >> "$log"
+    fi
+    for folder in Desktop Documents Downloads Music Pictures Videos Templates AppData/Local AppData/Roaming; do
+        case "$(readlink "$profile/$folder" 2>/dev/null)" in
+            /*) rm -f "$profile/$folder" ;;
+        esac
+        mkdir -p "$profile/$folder"
+    done
+    for alias in "Local Settings/Application Data|AppData/Local|../AppData/Local" \
+                 "Application Data|AppData/Roaming|AppData/Roaming" \
+                 "My Documents|Documents|Documents"; do
+        old="$profile/${alias%%|*}" rest="${alias#*|}"
+        new="$profile/${rest%%|*}" target="${rest#*|}"
+        [ -L "$old" ] && continue
+        if [ -d "$old" ]; then  # written before the alias existed (Steam Cloud does this): merge it in
+            cp -Rn "$old/." "$new/" 2>> "$log" && rm -rf "$old"
+        fi
+        mkdir -p "$(dirname "$old")"
+        ln -s "$target" "$old"
+    done
+    touch "$WINEPREFIX/.hadron-profile-v1"
+    echo "laid out the steamuser profile" >> "$log"
+fi
+
+# Valve's Windows client DLLs, fetched from Valve's CDN (never redistributed): the game's
+# steam_api loads them from the Steam directory hadron-steam.exe registers, and Wine redirects
+# them to lsteamclient.
+valve="$ROOT/build/valve/bridge"
+steam_dir="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
+mkdir -p "$steam_dir"
+stage() {  # copy $1 to $2 unless it is already there, byte for byte
+    [ -f "$1" ] && ! cmp -s "$1" "$2" && cp "$1" "$2"
+    return 0
+}
+for f in steamclient.dll steamclient64.dll tier0_s64.dll vstdlib_s64.dll; do
+    stage "$valve/$f" "$steam_dir/$f"
+done
+# The SteamExe hadron-steam.exe registers: games run it to open steam:// links or restart through
+# Steam, and hadron-steam hands those links to Mac Steam.
+stage "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$steam_dir/steam.exe"
+# Steam runs installer scripts through the tool with iscriptevaluator.exe from here; follow the
+# fetched version.
+if [ -d "$valve/legacycompat" ] && [ -n "$STEAM_COMPAT_CLIENT_INSTALL_PATH" ]; then
+    mkdir -p "$STEAM_COMPAT_CLIENT_INSTALL_PATH/legacycompat"
+    for f in "$valve/legacycompat/"*; do
+        stage "$f" "$STEAM_COMPAT_CLIENT_INSTALL_PATH/legacycompat/$(basename "$f")"
+    done
+fi
+
+program="$1"
+install_path="${STEAM_COMPAT_INSTALL_PATH%/}"
+case "$program" in
+    "$install_path"/*) ;;
+    *)  # a helper Steam runs outside the game (installer scripts, redistributables)
+        echo "helper: $*" >> "$log"
+        exec "$wine" "$@" >> "$log" 2>&1 ;;
+esac
+
+shift
+echo "game: $program $*" >> "$log"
+# Keep a Wine log of every Steam launch while the integration is new (build/logs/<appid>-*.log).
+export HADRON_LOG="${HADRON_LOG:-1}"
+cd "$(dirname "$program")" || exit 1
+# Stay in the foreground: Steam tracks this process, and its Stop button sends it SIGTERM, which
+# has to end the game's whole Wine session rather than just the launcher.
+trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
+"$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" &
+wait $!
+# A launcher that starts the real game and exits returns early: stay until the prefix's whole Wine
+# session has ended, so Steam shows the game running (and can stop it) until then. Waited on in the
+# background, so Stop's SIGTERM still interrupts.
+"$wineserver" -w &
+wait $!

@@ -1,0 +1,22 @@
+{
+    // Wine prefixes contain dosdevices/z: -> / (the whole disk). Following symlinks, VS Code's
+    // search and file watcher crawl the entire filesystem from every prefix; on 2026-09-30 that ran
+    // 36 ripgrep processes at a load average over 100 and made every Wine start take ~20 s.
+    "search.followSymlinks": false,
+    "search.exclude": {
+        "prefix/**": true,
+        "build/**": true,
+        "dist/**": true,
+        "src/**": true,
+        "games/**": true,
+        "toolchains/**": true
+    },
+    "files.watcherExclude": {
+        "prefix/**": true,
+        "build/**": true,
+        "dist/**": true,
+        "src/**": true,
+        "games/**": true,
+        "toolchains/**": true
+    }
+}

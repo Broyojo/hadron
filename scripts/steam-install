@@ -1,0 +1,52 @@
+#!/bin/sh
+# Install Hadron's Steam Play integration into Mac Steam (built by scripts/build-steam-play.sh):
+#   - ~/Library/Application Support/Hadron/runtime -> this checkout (Steam's tool runs
+#     scripts/steam-run from there);
+#   - NotProton's hook signatures into ~/Library/Application Support/notproton/signatures;
+#   - the Steam client library into /Applications/Steam.app, loaded through the launcher's
+#     LSEnvironment, and the launcher re-signed ad hoc (Valve's signature is replaced; the real
+#     client inside ~/Library/Application Support/Steam is not touched).
+# Quits Steam first. scripts/steam-uninstall undoes it; so does reinstalling Steam from Valve.
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APP=/Applications/Steam.app
+LIB="$ROOT/build/notproton/notproton.dylib"
+SUPPORT="$HOME/Library/Application Support/Hadron"
+BACKUP="$SUPPORT/Steam-Info.plist.before-hadron"
+INSERT="$APP/Contents/MacOS/notproton.dylib"
+
+[ -f "$LIB" ] || { echo "missing $LIB; run scripts/build-steam-play.sh" >&2; exit 1; }
+[ -d "$APP" ] || { echo "Steam isn't installed at $APP" >&2; exit 1; }
+existing=$(/usr/libexec/PlistBuddy -c 'Print :LSEnvironment:DYLD_INSERT_LIBRARIES' "$APP/Contents/Info.plist" 2>/dev/null || true)
+if [ -n "$existing" ] && [ "$existing" != "$INSERT" ]; then
+    echo "Steam already loads another library ($existing); not touching it" >&2
+    exit 1
+fi
+
+mkdir -p "$SUPPORT"
+ln -sfn "$ROOT" "$SUPPORT/runtime"
+mkdir -p "$HOME/Library/Application Support/notproton/signatures/macos.arm64"
+cp -f "$ROOT/src/notproton/signatures/macos.arm64/"*.json "$HOME/Library/Application Support/notproton/signatures/macos.arm64/"
+
+echo "quitting Steam"
+osascript -e 'quit app "Steam"' 2>/dev/null || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+if pgrep -x steam_osx >/dev/null; then  # didn't quit: force it, never patch a running Steam
+    pkill -x steam_osx
+    for _ in 1 2 3 4 5; do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+    if pgrep -x steam_osx >/dev/null; then echo "Steam is still running; quit it and try again" >&2; exit 1; fi
+fi
+
+cp -f "$LIB" "$INSERT"
+# A safety copy of Steam's own plist, taken fresh while it doesn't carry our setting (so it follows
+# Steam updates); outside the bundle, as codesign refuses unknown files in Contents/.
+if [ -z "$existing" ]; then
+    cp "$APP/Contents/Info.plist" "$BACKUP"
+    /usr/libexec/PlistBuddy -c "Add :LSEnvironment:DYLD_INSERT_LIBRARIES string $INSERT" "$APP/Contents/Info.plist"
+fi
+codesign -f -s - "$INSERT"
+codesign -f -s - "$APP/Contents/MacOS/steam_osx"
+codesign -f -s - "$APP"
+codesign -v "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+echo "installed; start Steam as usual (Settings -> Compatibility shows Steam Play)"

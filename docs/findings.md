@@ -210,6 +210,46 @@ Portal's "Wait for vertical sync" re-paces the layer live in fullscreen; Among U
 vsync off and not with it on. Vsync adds some input latency, as on Windows; fewer queued
 drawables while display sync is on would reduce it (next step).
 
+## Steam Play in Mac Steam (prototype working, #21)
+
+Hadron runs as a compatibility tool inside the macOS Steam client, like Proton on Linux:
+
+- **Steam side: NotProton** (GPLv3, src/notproton, one patch in patches/notproton). A library loaded into
+  `steam_osx` through Steam.app's LSEnvironment (`scripts/steam-install`) hooks `CCompatManager` and
+  friends by string anchors plus byte patterns: Steam Play is force-enabled for every title, Windows-only
+  games default to our tool, and Steam downloads their Windows depots. The tool is registered in
+  `compatibilitytools.d/notproton` (its directory name must contain "proton" or Steam skips AutoCloud's
+  Windows path mapping; it displays as "Hadron"). Steam build 1788652215: 17/17 signatures resolve, 8/8
+  steamclient and 2/2 steamui hooks install.
+- **Launch side: Hadron's own** `scripts/steam-run`, which the tool's `run` stub execs from
+  ~/Library/Application Support/Hadron/runtime. Per game it creates `compatdata/<appid>/pfx` (with mtld3d,
+  and with Mono/Gecko installs suppressed so wineboot doesn't wait on a hidden dialog), stages Valve's
+  Windows client DLLs (fetched from Valve's CDN by `scripts/build-steam-play.sh`, never redistributed),
+  runs installer helpers directly and the game through `scripts/play`, and turns Steam's Stop into
+  `wineserver -k`.
+
+Result: Among Us, Windows-only, shows Install/Play in the Mac library, installs its Windows depot, runs
+its install script through the tool, launches, and signs in online (the manual-launch
+`SteamworksAuthFail` is gone): launched by Steam, the lsteamclient bridge gets its game mapping.
+
+Steam Cloud: Steam maps Cloud paths into `users/steamuser`, and still names XP-era folders ("Local
+Settings/Application Data"). Steam launches run Wine as `USER=steamuser` (Wine names the profile after
+$USER, as Proton's patch does), `steam-run` aliases the XP paths onto `AppData/Local`, `AppData/Roaming` and
+`Documents` (merging anything Steam wrote there first), folds prefixes made under the Mac user's name into
+`steamuser`, and makes the profile's Documents, Desktop and so on real folders inside the prefix, so each
+game's profile stays there as under Proton. Wine links a shell folder to the Mac user's only when it
+doesn't exist yet (shell32 `_SHGetUserProfilePath`), so real folders stay put: the layout runs once per
+prefix (marker `.hadron-profile-v1`). A first version redid it on every launch, and Wine re-linked the
+folders each time.
+
+A black screen and slow launches while testing this turned out to be VS Code: its search followed the
+prefixes' `dosdevices/z:` link to `/` and crawled the whole disk with 36 ripgrep processes (load average
+113), which took every Wine start from 2 s to about 20 s. `.vscode/settings.json` now keeps search and
+the file watcher out of prefix/, build/, dist/, src/, games/ and toolchains/, and off symlinks.
+
+Bugs found on the way: a path with a space in `STEAM_DYLD_INSERT_LIBRARIES` split `play`'s `env` call;
+the watchdog missed processes started through the symlinked runtime (lsof reports real paths).
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

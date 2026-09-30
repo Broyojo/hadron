@@ -1,0 +1,30 @@
+#!/bin/sh
+# Undo scripts/steam-install: remove Hadron's library and its launch setting from Steam.app and
+# re-sign ad hoc. Reinstalling Steam from Valve also restores Valve's own signature.
+set -eu
+APP=/Applications/Steam.app
+BACKUP="$HOME/Library/Application Support/Hadron/Steam-Info.plist.before-hadron"
+
+echo "quitting Steam"
+osascript -e 'quit app "Steam"' 2>/dev/null || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+if pgrep -x steam_osx >/dev/null; then  # didn't quit: force it, never patch a running Steam
+    pkill -x steam_osx
+    for _ in 1 2 3 4 5; do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+    if pgrep -x steam_osx >/dev/null; then echo "Steam is still running; quit it and try again" >&2; exit 1; fi
+fi
+
+# Remove only our setting, and only if it is ours: another integration may own it, and an old copy of
+# the plist could be older than the Steam it would be restored over.
+INSERT="$APP/Contents/MacOS/notproton.dylib"
+current=$(/usr/libexec/PlistBuddy -c 'Print :LSEnvironment:DYLD_INSERT_LIBRARIES' "$APP/Contents/Info.plist" 2>/dev/null || true)
+if [ "$current" = "$INSERT" ]; then
+    /usr/libexec/PlistBuddy -c 'Delete :LSEnvironment:DYLD_INSERT_LIBRARIES' "$APP/Contents/Info.plist"
+elif [ -n "$current" ]; then
+    echo "Steam loads another library ($current); leaving it" >&2
+fi
+rm -f "$INSERT" "$APP/Contents/Info.plist.before-hadron" "$BACKUP"
+codesign -f -s - "$APP/Contents/MacOS/steam_osx"
+codesign -f -s - "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+echo "removed; Steam starts without Steam Play"
