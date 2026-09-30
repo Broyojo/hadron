@@ -16,8 +16,43 @@ Root causes found while bringing up Hadron, and what fixed them. Most affect eve
 | 10 | Portal freezes on mtld3d | mtld3d's crash reporter calls `dladdr()` on every SIGSEGV; under FEX faults are routine | `MTLD3D_NO_CRASH_HANDLER=1` |
 | 11 | Portal unplayably slow with hardware TSO | TSO applies to all code on the thread, including native graphics drivers | Opt-in only; limit it to emulated code later (a toggle costs ~0.27us) |
 | 12 | Steam bridge hangs ("Timed out waiting for game mapping") | Mac Steam only serves games it launched | Needs Steam Play integration |
-| 13 | Portal black screen on mtld3d | The Bink intro video path; `-novid` renders fine | Open |
+| 13 | Portal black screen on mtld3d without `-novid`, later a crash | (a) A GDI paint of the game window before the intro hides the client view that mtld3d/DXMT present into, for good; (b) with the Steam bridge off, every retry of `SteamAPI_Init` loads and unloads Windows `steamclient.dll`, leaking a 32 MB reservation, and Source retries every frame during the intro | Keep external Metal views visible (Wine 0012); `scripts/play` disables Windows `steamclient.dll` when the bridge is off |
 | 14 | Portal lag spike every few seconds | W^X flips on FEX's JIT code (two faults and two `mprotect`s per write/run alternation on a 16K page), triggered in bulk whenever FEX loads or links lots of code | MAP_JIT code buffers that FEX toggles itself (Wine 0011, FEX 0005) |
+
+## Portal black screen and crash with the Bink intro (resolved, #13)
+
+Two independent bugs, both hit only on the intro-video path.
+
+**Black window.** mtld3d renders every frame and presents it (the F12 frame dump of the menu
+is identical to a `-novid` run, occlusion-query counts included), yet the window shows black
+from the first intro frame to the menu. Just before the intro, the game paints its window through
+GDI once (full client rect, `(0,0)-(1280,720)`). winemac's window-surface flush then hides the
+window's client view (`macdrv_surface_flush`: "the window may have been previously drawn with
+client_surface ... hide the client_view"). GL and Vulkan show it again on every present through
+`client_surface_present`; mtld3d and DXMT attach their Metal view through the `macdrv_functions`
+table (Wine 0007) and present to the `CAMetalLayer` directly, so the view stays hidden. Evidence:
+a temporary trace in that branch fired once, right after device creation, in the intro run and
+never in a `-novid` run. Fix (Wine 0012): views created through `macdrv_functions` are counted
+on their content view, and a flush leaves the client view alone while one exists. On Windows the
+next `Present` covers the GDI paint anyway. This also covers DXMT (D3D11) windows.
+
+**Crash.** With `HADRON_DISABLE_LSTEAMCLIENT=1` the game loads the Windows `steamclient.dll`,
+which cannot reach a Steam client and is unloaded again. Each load leaves one 32 MB
+`MEM_RESERVE`/`PAGE_NOACCESS` view reserved from code in Steam's `tier0_s.dll` (a temporary dump
+of the address space at the first failure showed 110 such views and 120 MB free below 4 GB; the
+guest return addresses were in `tier0_s.dll`). Source retries `SteamAPI_Init` every frame while
+an intro video plays (every ~70 ms, the time a reload takes; after the menu it is every 5 s), so
+the 4 GB of a large-address-aware 32-bit process is gone ~10 s into the intro. Then
+`allocate_virtual_memory` fails ~1400 times for 32 MB, and the game crashes into Steam's crash
+reporter. The earlier "execute fault at 4420D0F6" is plausibly the same thing: that address lies
+in one of these leaked reservations (not verified). Fix: when the bridge is off, `scripts/play`
+sets `steamclient,steamclient64=d`, so `SteamAPI_Init` fails at once ("Failed to load module")
+and the game runs without Steam. That also ends the steamclient reload every 5 s that #14
+describes.
+
+Testing note: mtld3d skips presents while the window is fully occluded, so `scripts/shot` of a
+covered game window shows a stale or black frame. Raise the window first (System Events: set the
+process frontmost and `AXRaise` its window).
 
 ## Portal lag spikes (resolved, #14)
 

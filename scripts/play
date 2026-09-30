@@ -30,6 +30,15 @@ for dll in lsteamclient.dll winemetal.dll; do
 done
 debug="${WINEDEBUG:--all}"
 overrides="mscoree,mshtml=;steamclient,steamclient64=n;lsteamclient=b"
+# Without the Steam bridge no Steam client serves the game, so don't let it load the Windows
+# steamclient.dll either: SteamAPI_Init then fails at once. Otherwise games retry, loading and
+# unloading the 21 MB DLL each time, and every cycle leaks a 32 MB reservation made by Steam's
+# tier0_s.dll; Source retries every frame during its intro videos, which fills a 32-bit
+# process's address space in seconds (docs/findings.md #13).
+case "${HADRON_DISABLE_LSTEAMCLIENT:-0}" in
+    0) ;;
+    *) overrides="mscoree,mshtml=;steamclient,steamclient64=d;lsteamclient=b" ;;
+esac
 # HADRON_D3D9=mtld3d uses mtld3d (D3D9 -> Metal) instead of wined3d; enable it in the prefix
 # first with scripts/mtld3d-prefix enable.
 [ "$HADRON_D3D9" = mtld3d ] && overrides="$overrides;d3d9=n,b"

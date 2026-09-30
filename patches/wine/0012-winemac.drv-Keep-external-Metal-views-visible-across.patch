@@ -1,0 +1,166 @@
+From 296c10f700fb9ed9584be821ca2210c2905b3cd1 Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Tue, 29 Sep 2026 22:33:18 -0400
+Subject: [PATCH] winemac.drv: Keep external Metal views visible across window
+ surface flushes.
+
+A window surface flush hides the window's client view, so that a view
+left over from an earlier GL/Vulkan swapchain doesn't cover GDI content.
+GL and Vulkan show it again on their next client_surface_present, but
+DXMT and mtld3d attach their Metal view through macdrv_functions and
+present to its CAMetalLayer directly, so after a single GDI paint of the
+window (a WM_PAINT/WM_ERASEBKGND, as Source does before its intro
+videos) their output stays hidden for good: a black window while the
+game runs.
+
+Count the Metal views created through macdrv_functions on their content
+view and leave the client view alone while one exists. On Windows the
+next Present covers GDI drawing in a swapchain's window anyway.
+---
+ dlls/winemac.drv/cocoa_window.m | 58 +++++++++++++++++++++++++++++++++
+ dlls/winemac.drv/macdrv_cocoa.h |  3 ++
+ dlls/winemac.drv/surface.c      |  6 ++--
+ dlls/winemac.drv/window.c       |  4 +--
+ 4 files changed, 67 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 009a8e862d..53020e7498 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -253,6 +253,7 @@ @interface WineContentView : WineBaseView <NSTextInputClient, NSViewLayerContent
+ 
+     WineMetalView *_metalView;
+     NSMutableDictionary<NSNumber*, CALayerHost*>* _caLayerHosts;
++    int _externalMetalViews;
+ }
+ 
+ @property (readonly, nonatomic) BOOL everHadGLContext;
+@@ -265,6 +266,8 @@ - (void) wine_getBackingSize:(int*)outBackingSize;
+     - (void) wine_setBackingSize:(const int*)newBackingSize;
+ 
+     - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device;
++    - (void) addExternalMetalView:(int)delta;
++    - (BOOL) hasExternalMetalView;
+     - (void) addCALayerHostViewWithContextId:(CAContextID)contextId;
+     - (void) removeCALayerHostView:(CAContextID)contextId;
+ 
+@@ -581,6 +584,16 @@ - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device
+         return _metalView;
+     }
+ 
++    - (void) addExternalMetalView:(int)delta
++    {
++        __atomic_add_fetch(&_externalMetalViews, delta, __ATOMIC_RELAXED);
++    }
++
++    - (BOOL) hasExternalMetalView
++    {
++        return __atomic_load_n(&_externalMetalViews, __ATOMIC_RELAXED) > 0;
++    }
++
+     - (void) addCALayerHostViewWithContextId:(CAContextID)contextId
+     {
+         if (!_caLayerHosts)
+@@ -3685,6 +3698,51 @@ void macdrv_view_release_metal_view(WineMetalView *view)
+     });
+ }
+ 
++/***********************************************************************
++ *              macdrv_view_create_external_metal_view
++ *
++ * Create a Metal view for a graphics layer outside the driver (DXMT, mtld3d), which presents
++ * to its CAMetalLayer directly rather than through a client surface. While such a view exists,
++ * its content view stays visible across window surface flushes; see
++ * macdrv_view_has_external_metal_view.
++ */
++WineMetalView *macdrv_view_create_external_metal_view(WineContentView *view, id<MTLDevice> device)
++{
++    __block WineMetalView *metalView;
++
++    OnMainThread(^{
++        metalView = [view newMetalViewWithDevice:device];
++        if (metalView) [view addExternalMetalView:1];
++    });
++
++    return metalView;
++}
++
++/***********************************************************************
++ *              macdrv_view_release_external_metal_view
++ */
++void macdrv_view_release_external_metal_view(WineMetalView *view)
++{
++    OnMainThread(^{
++        NSView *superview = [view superview];
++        if ([superview isKindOfClass:[WineContentView class]])
++            [(WineContentView*)superview addExternalMetalView:-1];
++        [view removeFromSuperview];
++        [view release];
++    });
++}
++
++/***********************************************************************
++ *              macdrv_view_has_external_metal_view
++ *
++ * Whether an external graphics layer currently presents into the view. Safe to call from any
++ * thread.
++ */
++bool macdrv_view_has_external_metal_view(WineContentView *view)
++{
++    return view && [view hasExternalMetalView];
++}
++
+ @protocol WineMetalSwapChain <NSObject>
+ 
+ - (CAMetalLayer*) layer;
+diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+index 1c6e1f3fd2..7920ff4305 100644
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -531,6 +531,9 @@ extern void macdrv_order_cocoa_window(WineWindow *window, WineWindow *prev,
+ extern WineMetalView *macdrv_view_create_metal_view(WineContentView *view, MTLDevice_id device);
+ extern CAMetalLayer *macdrv_view_get_metal_layer(WineMetalView *view);
+ extern void macdrv_view_release_metal_view(WineMetalView *view);
++extern WineMetalView *macdrv_view_create_external_metal_view(WineContentView *view, MTLDevice_id device);
++extern void macdrv_view_release_external_metal_view(WineMetalView *view);
++extern bool macdrv_view_has_external_metal_view(WineContentView *view);
+ extern WineMetalSwapChain_id macdrv_create_view_swapchain(WineContentView *view);
+ extern WineMetalSwapChain_id macdrv_create_offscreen_swapchain(void* hwnd, CGRect bounds);
+ extern CAMetalLayer *macdrv_swapchain_get_layer(WineMetalSwapChain_id swapchain);
+diff --git a/dlls/winemac.drv/surface.c b/dlls/winemac.drv/surface.c
+index 5552b82089..bdbcdcdfe6 100644
+--- a/dlls/winemac.drv/surface.c
++++ b/dlls/winemac.drv/surface.c
+@@ -121,10 +121,12 @@ static BOOL macdrv_surface_flush(struct window_surface *window_surface, const RE
+ 
+     /* The window may have been previously drawn with client_surface, for example, when the window
+      * had been a target for a D3D swapchain. Hide the client_view so that it doesn't occlude the
+-     * content in the window_surface */
++     * content in the window_surface. A view an external graphics layer (DXMT, mtld3d) still
++     * presents into stays: such a layer never goes through client_surface_present, which would
++     * show the view again, and its next present covers the GDI content, as on Windows. */
+     if ((data = get_win_data(window_surface->hwnd)))
+     {
+-        if (data->client_view)
++        if (data->client_view && !macdrv_view_has_external_metal_view(data->client_view))
+         {
+             macdrv_set_view_hidden(data->client_view, TRUE);
+             data->client_view = NULL;
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index cec76ccdb4..02c6788170 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -2285,8 +2285,8 @@ __attribute__((visibility("default"))) const struct
+     dxmt_get_cocoa_window,
+     macdrv_create_metal_device,
+     macdrv_release_metal_device,
+-    macdrv_view_create_metal_view,
++    macdrv_view_create_external_metal_view,
+     macdrv_view_get_metal_layer,
+-    macdrv_view_release_metal_view,
++    macdrv_view_release_external_metal_view,
+     NULL,
+ };
+-- 
+2.54.0 (Apple Git-157)
+

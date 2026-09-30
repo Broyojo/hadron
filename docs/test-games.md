@@ -26,10 +26,11 @@ HADRON_LOG=1 scripts/play <id> games/<name>/<game>.exe [args]
 ```
 
 Until Steam Play integration exists, games aren't launched by Mac Steam, so its client never
-maps them and the Steam bridge hangs; run with `HADRON_DISABLE_LSTEAMCLIENT=1` meanwhile.
+maps them and the Steam bridge hangs; run with `HADRON_DISABLE_LSTEAMCLIENT=1` meanwhile. That
+also keeps games from loading the Windows `steamclient.dll`, so they run without Steam.
 
 ## Status
 
 | Game | Result | Notes |
 |---|---|---|
-| Portal | **Playable and smooth** at 3024x1964 (full Retina), long sessions, no crashes | mtld3d (`HADRON_D3D9=mtld3d`), `-novid` until the Bink intro is fixed, Steam bridge off until Steam Play integration. Earlier stutter/crash (wined3d buffer copies) and lag spikes (W^X flips) fixed; see docs/findings.md. |
+| Portal | **Playable and smooth** at 3024x1964 (full Retina), long sessions, no crashes; Bink intro videos play, then the menu | mtld3d (`HADRON_D3D9=mtld3d`), Steam bridge off until Steam Play integration. Earlier stutter/crash (wined3d buffer copies), lag spikes (W^X flips) and the black/crashing intro (hidden Metal view, steamclient address-space leak) fixed; see docs/findings.md. |
