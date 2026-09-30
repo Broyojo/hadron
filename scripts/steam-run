@@ -30,6 +30,24 @@ while [ "$argc" -gt 0 ]; do
     esac
 done
 
+# Per-game settings, like Proton's app defaults: lines of "<appid> NAME=value..." in the user's
+# games.conf, then Hadron's config/games.conf. Launch options win over both, the user's file over
+# Hadron's, since a setting is only taken while unset.
+apply_profile() {  # <file>
+    [ -f "$1" ] || return 0
+    while read -r id settings; do
+        [ "$id" = "${STEAM_COMPAT_APP_ID:-}" ] || continue
+        for setting in ${settings%%#*}; do
+            name="${setting%%=*}"
+            # Names only: this is a data file, nothing in it may run as shell code.
+            case "$name" in ""|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+            printenv "$name" >/dev/null || export "$setting"
+        done
+    done < "$1"
+}
+apply_profile "$HOME/Library/Application Support/Hadron/games.conf"
+apply_profile "$ROOT/config/games.conf"
+
 log="$STEAM_COMPAT_DATA_PATH/hadron-run.log"
 mkdir -p "$STEAM_COMPAT_DATA_PATH"
 {

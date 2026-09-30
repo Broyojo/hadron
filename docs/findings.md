@@ -316,6 +316,14 @@ texel-alignment checks, forced feature level 12_0). Remaining driver work for an
 transform feedback, single-texel buffer alignment, sparse resources (feature level 12_0), pipeline
 statistics queries, timestamp query pools above Metal's 4096-entry counter heaps, and geometry shaders.
 
+D3D12 games launch from Steam like any other. DXGI isn't swapped per game any more: DXMT's dxgi.dll
+(DXMT patch 0002) hands swapchain creation for devices that aren't its own, such as vkd3d-proton's
+command queues, to DXVK's DXGI, which `play` installs in the prefix as dxgi_dxvk.dll. DXVK patch 0001
+lets a DXGI-only DXVK build list the GPU without DXVK's D3D11 feature requirements, which don't apply to
+a build that can't create D3D devices. `HADRON_D3D12=vkd3d` now only selects vkd3d-proton's d3d12.dll,
+and `config/games.conf` sets it for Teardown. steam-run applies per-game settings from that file and
+from the user's ~/Library/Application Support/Hadron/games.conf; launch options win over both.
+
 The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
 back slowly, and swap left over from earlier runs stopped Teardown at launch.
 
