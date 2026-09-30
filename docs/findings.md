@@ -89,3 +89,15 @@ link or invalidation batch rather than per fault. A code write that misses a win
 so every write to a code buffer must be inside one. Left: the remaining ~50 ms stall per retry
 disappears with working Steam; FEX never reclaims space from invalidated blocks, so code that is
 repeatedly unmapped and reloaded still fills the buffer and forces full cache clears.
+
+## Future cleanup: Metal renderers and Wine's client surfaces
+
+Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
+`macdrv_functions` table: 0007 creates a client surface so a view exists, and the renderers then
+draw into their own Metal layer without telling Wine when they present. 0012 compensates by keeping
+that view visible while an external Metal view exists. Upstream Wine's GL and Vulkan paths instead
+notify Wine on every present through its client-surface interface, so visibility is always right.
+The principled fix is to have mtld3d and DXMT present through Wine's client surfaces (a small
+per-present notification), removing 0012's special case and its edge cases (GDI drawing after a
+device is destroyed while the view survives; games mixing GDI and 3D in one window). Needs
+coordination with the mtld3d and DXMT developers.
