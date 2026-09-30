@@ -1,4 +1,4 @@
-From e9ac2705ac468b3815850295eed1a1105a1469e2 Mon Sep 17 00:00:00 2001
+From 249e00e897ed82df284216277b34e078579d9904 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 15:58:08 -0400
 Subject: [PATCH] winemac.drv: Scroll like a native Mac application.
@@ -11,14 +11,15 @@ covers 3 of the system's lines, the Windows definition, instead of a fixed
 6 units per pixel, which scrolled about 1.5x farther than a native
 application. Send exactly one notch per detent of a clicky wheel instead of
 macOS's accelerated line count, as a Windows wheel does, unless the new
-AccelerateScrollWheel option is set. Default UsePreciseScrolling to off, so
-trackpad movement is accumulated into whole notches: many games ignore or
-mishandle fractions of WHEEL_DELTA.
+AccelerateScrollWheel option is set. Default UsePreciseScrolling to off:
+many games move a fixed step per wheel message, so fractions of WHEEL_DELTA
+make them many times too sensitive. HADRON_PRECISE_SCROLLING overrides it,
+so a launcher can give smooth scrolling to applications that handle it.
 ---
  dlls/winemac.drv/cocoa_app.m    | 45 +++++++++++++++++++++++----------
  dlls/winemac.drv/macdrv_cocoa.h |  2 ++
- dlls/winemac.drv/macdrv_main.c  | 12 ++++++++-
- 3 files changed, 44 insertions(+), 15 deletions(-)
+ dlls/winemac.drv/macdrv_main.c  | 16 +++++++++++-
+ 3 files changed, 48 insertions(+), 15 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
 index 34d550d943..4dafa80651 100644
@@ -116,7 +117,7 @@ index 3038ac9325..8f2e9664eb 100644
  extern CFDictionaryRef localized_strings;
  extern bool retina_enabled;  /* Whether Retina mode is enabled via registry setting. */
 diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
-index b50068bc50..d98a13f7bd 100644
+index b50068bc50..ffe93357c7 100644
 --- a/dlls/winemac.drv/macdrv_main.c
 +++ b/dlls/winemac.drv/macdrv_main.c
 @@ -49,7 +49,11 @@ bool allow_software_rendering = false;
@@ -124,27 +125,38 @@ index b50068bc50..d98a13f7bd 100644
  bool use_confinement_cursor_clipping = true;
  bool cursor_clipping_locks_windows = true;
 -bool use_precise_scrolling = true;
-+/* Fractions of WHEEL_DELTA are valid Win32 but many games only handle whole notches;
-+   UsePreciseScrolling=Y brings back fractional deltas for applications that scroll smoothly. */
++/* Fractions of WHEEL_DELTA are valid Win32, but many games move a fixed step per wheel message and
++   become many times too sensitive; whole notches are the default, UsePreciseScrolling=Y opts in. */
 +bool use_precise_scrolling = false;
 +bool scroll_momentum = false;
 +bool accelerate_scroll_wheel = false;
  int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
  bool retina_enabled = false;
  bool enable_app_nap = false;
-@@ -346,6 +350,12 @@ static void setup_options(void)
+@@ -271,6 +275,7 @@ static void setup_options(void)
+     WCHAR buffer[MAX_PATH + 16], *p, *appname;
+     HKEY hkey, appkey = 0;
+     DWORD len;
++    const char *env_str;
+ 
+     /* @@ Wine registry key: HKCU\Software\Wine\Mac Driver */
+     hkey = open_hkcu_key("Software\\Wine\\Mac Driver");
+@@ -345,6 +350,15 @@ static void setup_options(void)
+ 
      if (!get_config_key(hkey, appkey, "UsePreciseScrolling", buffer, sizeof(buffer)))
          use_precise_scrolling = IS_OPTION_TRUE(buffer[0]);
- 
++    /* A launcher can choose per game. */
++    if ((env_str = getenv("HADRON_PRECISE_SCROLLING")))
++        use_precise_scrolling = IS_OPTION_TRUE(env_str[0]);
++
 +    if (!get_config_key(hkey, appkey, "ScrollMomentum", buffer, sizeof(buffer)))
 +        scroll_momentum = IS_OPTION_TRUE(buffer[0]);
 +
 +    if (!get_config_key(hkey, appkey, "AccelerateScrollWheel", buffer, sizeof(buffer)))
 +        accelerate_scroll_wheel = IS_OPTION_TRUE(buffer[0]);
-+
+ 
      if (!get_config_key(hkey, appkey, "OpenGLSurfaceMode", buffer, sizeof(buffer)))
      {
-         static const WCHAR transparentW[] = {'t','r','a','n','s','p','a','r','e','n','t',0};
 -- 
 2.54.0 (Apple Git-157)
 
