@@ -67,6 +67,14 @@ make install >/dev/null
 for loader in "$PREFIX/bin/wine" "$PREFIX/lib/wine/aarch64-unix/wine"; do
     codesign -f -s - --entitlements "$ROOT/packaging/dev.entitlements" "$loader" 2>/dev/null
 done
+# make install replaces the links into the loader bundle with a bare loader, which lacks the
+# cross-architecture entitlement; wrap it again with the profile the bundle already carries.
+profile="$PREFIX/lib/wine/aarch64-unix/wine.app/Contents/embedded.provisionprofile"
+if [[ $variant == release && -f "$profile" ]]; then
+    cp "$profile" "$BUILD/loader.provisionprofile"
+    "$ROOT/scripts/package-loader.sh" "$BUILD/loader.provisionprofile" >/dev/null
+    log "wrapped the loader in wine.app again"
+fi
 # make install replaces xtajit64.dll with Wine's stub; put FEX back as the default emulators.
 W="$PREFIX/lib/wine/aarch64-windows"
 if [[ -f "$W/libarm64ecfex.dll" ]]; then
