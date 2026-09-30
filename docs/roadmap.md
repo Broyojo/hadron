@@ -10,20 +10,26 @@
    - a real nesting counter for write windows (thread-local storage crashed in FEX's Windows DLLs; use
      another per-thread slot, e.g. a TEB field);
    - a stress test in the regression suite hammering code writes, invalidation and relinking across threads.
-3. Steam Play integration: games must be launched by Mac Steam for the lsteamclient bridge to work
-   ("Timed out waiting for game mapping"). **Decision pending:** patch Mac Steam NotProton-style (re-sign
-   Steam.app, inject a dylib, hook CCompatManager; fragile across Steam updates, gray area under the Steam
-   Subscriber Agreement) versus Hadron shipping its own launcher. Needs the user's call.
+3. Steam Play integration (decided 2026-09-30: inside the macOS Steam client, NotProton-style; never the
+   Windows Steam client under Wine). **Prototype works:** Among Us installs and launches from the Mac Steam
+   library through Hadron, and its online sign-in succeeds through the bridge (docs/findings.md #21). Next:
+   - per-game `.app` wrappers so games get Game Mode and a Dock icon, and the overlay shim for Steam's overlay;
+   - replace NotProton's "CrossOver options" panel with Hadron's options (vsync, D3D9 backend, HUD);
+   - first-launch prefix creation takes minutes; seed new prefixes from a template instead;
+   - Steam updates: detect a build the signatures don't cover and say so instead of failing silently.
 4. Run the rest of the test game set (docs/test-games.md) to find the next general bugs.
-5. Packaging: signed, notarized Hadron.app. Needs a Developer ID Application certificate and a Developer
+5. Distribution: a Hadron.app that installs the runtime into ~/Library/Application Support/Hadron and the
+   Steam integration into Steam.app (what scripts/steam-install does), notices when a Steam update undoes the
+   injection and re-applies it, and offers a small GUI: repair, per-game settings, logs, and self-updates
+   (Sparkle). Signing: a Developer ID Application certificate and a Developer Needs a Developer ID Application certificate and a Developer
    ID provisioning profile for com.broyojo.hadron.loader (only the team's Account Holder can create the
    certificate).
 
-Later: mtld3d should fail an allocation cleanly when a 32-bit process runs out of address space (it
+Later: lower vsync input latency (fewer queued drawables while display sync is on); mtld3d should fail an allocation cleanly when a 32-bit process runs out of address space (it
 crashed on a null pointer in `LeaseCompletion::consume` with 79 MB left); hardware TSO limited to emulated code (a toggle costs ~0.27 us; enabling it on whole threads made
 Portal unplayably slow); mtld3d/DXMT presenting through Wine's client surfaces (removes Wine 0012's special
-case); D3D12 (vkd3d-proton on KosmicKrisp or DXMT's D3D12); the remaining ~50 ms steamclient retry cost
-disappears with Steam Play integration.
+case); D3D12 (vkd3d-proton on KosmicKrisp or DXMT's D3D12); the remaining ~50 ms steamclient retry cost should be gone for
+Steam launches (re-measure).
 
 ## Facts established by experiment
 
@@ -44,6 +50,9 @@ disappears with Steam Play integration.
   toolchains/xwin only when `MTLD3D_ACCEPT_MSVC_LICENSE=1`). A build agent accepted that licence on this
   machine without asking; the user should confirm they're fine with it, or we switch to llvm-mingw's
   runtime.
+- NotProton (the Steam-side integration, src/notproton + patches/notproton) is GPLv3; only its authors can
+  relicense it (worth asking them about LGPL or dual licensing). Hadron's own code keeps its licence: the GPL
+  component only executes scripts/steam-run as a separate program.
 - lsteamclient includes Steamworks-SDK-derived code (Valve's SDK licence) and NotProton overlays (GPLv3):
   fine to build locally; check both before redistributing binaries.
 - Portal's Mac saves from January 2026 are in ~/Library/Application Support/Steam/steamapps/common/Portal
