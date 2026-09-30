@@ -34,3 +34,4 @@ also keeps games from loading the Windows `steamclient.dll`, so they run without
 | Game | Result | Notes |
 |---|---|---|
 | Portal | **Playable and smooth** at 3024x1964 (full Retina), long sessions, no crashes; Bink intro videos play, then the menu | mtld3d (`HADRON_D3D9=mtld3d`), Steam bridge off until Steam Play integration. Earlier stutter/crash (wined3d buffer copies), lag spikes (W^X flips) and the black/crashing intro (hidden Metal view, steamclient address-space leak) fixed; see docs/findings.md. |
+| Five Nights at Freddy's | **Runs**, menu renders and plays | Image offset down/right in fullscreen. mtld3d log: fullscreen 1280x800 back buffer, no mode-set, window covers 1512x982, layer 1512x982pt @1x — sizes consistent, so suspect the Metal view/client surface keeps a stale origin after FNaF's window goes fullscreen (Portal's fullscreen is fine). Next: check client-surface/view frame updates in winemac for Wine patch 0007/0012 views on window resize. |
