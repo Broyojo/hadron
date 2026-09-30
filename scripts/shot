@@ -1,0 +1,10 @@
+#!/bin/sh
+# Screenshot a window by title/owner substring, even when it's covered by other windows.
+# Usage: scripts/shot <substring> [out.png]    e.g. scripts/shot "Direct3D 9"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+tool="$ROOT/build/winshot"
+[ -x "$tool" ] || swiftc -O "$ROOT/tools/winshot.swift" -o "$tool" || exit 1
+id=$("$tool" "$1" | head -1 | cut -d' ' -f1)
+[ -n "$id" ] || { echo "no window matching '$1'" >&2; exit 1; }
+out="${2:-$ROOT/build/logs/shot-$(date +%H%M%S).png}"
+screencapture -x -o -l "$id" "$out" && sips -Z 1200 "$out" >/dev/null && echo "$out"
