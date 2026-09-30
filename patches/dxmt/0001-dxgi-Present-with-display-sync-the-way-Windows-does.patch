@@ -1,0 +1,106 @@
+From bb2d8bd6cd1a2375edf696bde24c56605c8329ff Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 12:04:22 -0400
+Subject: [PATCH] dxgi: Present with display sync the way Windows does
+
+The presenter always turned Metal display sync off and paced presents by
+the sync interval alone, so every game could tear. Follow Windows: a
+fullscreen swap chain waits for a display refresh when its sync interval
+is non-zero; a windowed one is composited by DWM at a refresh unless the
+game opts into tearing (sync interval 0 with DXGI_PRESENT_ALLOW_TEARING).
+A dxgi.vsync option (game, on, off; default game) overrides the game for
+titles that offer no vsync setting.
+---
+ src/d3d11/d3d11_swapchain.cpp | 27 +++++++++++++++++++++++++++
+ src/dxmt/dxmt_presenter.cpp   |  8 ++++++++
+ src/dxmt/dxmt_presenter.hpp   |  3 +++
+ 3 files changed, 38 insertions(+)
+
+diff --git a/src/d3d11/d3d11_swapchain.cpp b/src/d3d11/d3d11_swapchain.cpp
+index d182587..2235dfd 100644
+--- a/src/d3d11/d3d11_swapchain.cpp
++++ b/src/d3d11/d3d11_swapchain.cpp
+@@ -178,6 +178,10 @@ public:
+ 
+     handle_alt_tab_ = Config::getInstance().getOption<bool>("dxgi.handleAltTab", false);
+ 
++    // dxgi.vsync: "game" (default) does what Windows does, "on"/"off" override the game.
++    auto vsync = Config::getInstance().getOption<std::string>("dxgi.vsync", "game");
++    vsync_policy_ = vsync == "on" ? VsyncPolicy::On : vsync == "off" ? VsyncPolicy::Off : VsyncPolicy::Game;
++
+     hud.initialize(GetVersionDescriptionText(device_->GetDirectXVersion(), device_->GetFeatureLevel()));
+ 
+     backbuffer_desc_ = D3D11_TEXTURE2D_DESC1 {
+@@ -765,6 +769,8 @@ public:
+       return hr;
+     }
+ 
++    presenter->changeDisplaySync(WantsDisplaySync(SyncInterval, PresentFlags));
++
+     double vsync_duration =
+         std::max(SyncInterval * 1.0 /
+                      (preferred_max_frame_rate ? preferred_max_frame_rate
+@@ -1087,6 +1093,27 @@ private:
+ 
+   bool handle_alt_tab_;
+ 
++  enum class VsyncPolicy { Game, On, Off };
++  VsyncPolicy vsync_policy_ = VsyncPolicy::Game;
++
++  /* Whether a present waits for a display refresh, as on Windows: a fullscreen swap chain
++     follows its sync interval, and a windowed one is composited by DWM at a refresh unless
++     the game opts into tearing (sync interval 0 with DXGI_PRESENT_ALLOW_TEARING).
++     dxgi.vsync = on/off overrides the game. */
++  bool WantsDisplaySync(UINT SyncInterval, UINT PresentFlags) const {
++    switch (vsync_policy_) {
++    case VsyncPolicy::On:
++      return true;
++    case VsyncPolicy::Off:
++      return false;
++    case VsyncPolicy::Game:
++      break;
++    }
++    if (!fullscreen_desc_.Windowed)
++      return SyncInterval > 0;
++    return SyncInterval > 0 || !(PresentFlags & DXGI_PRESENT_ALLOW_TEARING);
++  }
++
+   std::conditional<EnableMetalFX, Rc<SpatialScaler>, std::monostate>::type metalfx_scaler;
+   std::conditional<EnableMetalFX, Com<D3D11ResourceCommon>, std::monostate>::type upscaled_backbuffer_;
+   float scale_factor = 1.0;
+diff --git a/src/dxmt/dxmt_presenter.cpp b/src/dxmt/dxmt_presenter.cpp
+index e5aec04..1e3783b 100644
+--- a/src/dxmt/dxmt_presenter.cpp
++++ b/src/dxmt/dxmt_presenter.cpp
+@@ -101,6 +101,14 @@ Presenter::changeGammaRamp(const DXMTGammaRamp *gamma_ramp) {
+   }
+ }
+ 
++void
++Presenter::changeDisplaySync(bool display_sync) {
++  if (layer_props_.display_sync_enabled == display_sync)
++    return;
++  layer_props_.display_sync_enabled = display_sync;
++  layer_.setProps(layer_props_);
++}
++
+ Presenter::PresentState
+ Presenter::synchronizeLayerProperties() {
+   uint64_t display_setting_version = 0;
+diff --git a/src/dxmt/dxmt_presenter.hpp b/src/dxmt/dxmt_presenter.hpp
+index 77eb35c..df35087 100644
+--- a/src/dxmt/dxmt_presenter.hpp
++++ b/src/dxmt/dxmt_presenter.hpp
+@@ -65,6 +65,9 @@ public:
+ 
+   PresentState synchronizeLayerProperties();
+ 
++  /* Whether the layer shows a drawable at a display refresh (true) or at once (false). */
++  void changeDisplaySync(bool display_sync);
++
+   WMT::MetalDrawable encodeCommands(
+       WMT::CommandBuffer cmdbuf, WMT::Texture backbuffer, DXMTPresentMetadata metadata,
+       std::function<void(WMT::RenderCommandEncoder)> &&wait_fences,
+-- 
+2.54.0 (Apple Git-157)
+

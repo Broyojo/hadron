@@ -52,6 +52,8 @@ esac
 # follows each game's own vsync choice as a Windows driver does; on and off override it.
 mtld3d_config="${MTLD3D_CONFIG:-color.hdr.enable=false}"
 [ -n "$HADRON_VSYNC" ] && mtld3d_config="$mtld3d_config;present.vsync=$HADRON_VSYNC"
+dxmt_config="$DXMT_CONFIG"
+[ -n "$HADRON_VSYNC" ] && dxmt_config="${dxmt_config:+$dxmt_config;}dxgi.vsync=$HADRON_VSYNC"
 # The watchdog logs memory to build/logs/ and stops the game before it can make the Mac
 # thrash (see scripts/watchdog for the limits). HADRON_WATCHDOG=0 turns it off.
 mkdir -p "$ROOT/build/logs"
@@ -78,6 +80,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     WINE_LARGE_ADDRESS_AWARE="${HADRON_LARGE_ADDRESS_AWARE:-1}" \
     MTLD3D_NO_CRASH_HANDLER=1 \
     MTLD3D_CONFIG="$mtld3d_config" \
+    ${dxmt_config:+DXMT_CONFIG=$dxmt_config} \
     ${RUST_LOG:+RUST_LOG=$RUST_LOG} \
     SteamAppId="$appid" SteamGameId="$appid" \
     STEAM_COMPAT_CLIENT_INSTALL_PATH="$MAC_STEAM" \
