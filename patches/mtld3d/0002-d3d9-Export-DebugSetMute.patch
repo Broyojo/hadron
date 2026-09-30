@@ -1,4 +1,4 @@
-From f456f6d083df47d2c87352b464d8ccc1ed14afed Mon Sep 17 00:00:00 2001
+From 0c501a575629ee66c5817c22185b55fb772812ea Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Wed, 30 Sep 2026 10:22:47 -0400
 Subject: [PATCH 2/2] d3d9: Export DebugSetMute

@@ -1,4 +1,4 @@
-From 83fe8894d716d84469b49d821f14fc2c62dca3dd Mon Sep 17 00:00:00 2001
+From 723f5bd71512f5446e78af138d1856827ace242d Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Wed, 30 Sep 2026 10:39:57 -0400
 Subject: [PATCH 1/2] d3d9: Draw from system-memory vertex buffers the way
@@ -31,12 +31,12 @@ to read, forcing a rename with a whole-buffer GPU copy.
 Ultimate Custom Night's menu: vertex buffer time 65 ms -> 0 per frame,
 no staging uploads or retention, encoder 8 -> 1 ms per frame.
 ---
- windows/d3d9/src/device.rs        | 222 +++++++++++++++++++++++++++++-
+ windows/d3d9/src/device.rs        | 232 +++++++++++++++++++++++++++++-
  windows/d3d9/src/vertex_buffer.rs |  74 +++++++++-
- 2 files changed, 291 insertions(+), 5 deletions(-)
+ 2 files changed, 301 insertions(+), 5 deletions(-)
 
 diff --git a/windows/d3d9/src/device.rs b/windows/d3d9/src/device.rs
-index 34e499c..9177dfd 100644
+index 34e499c..dd02f20 100644
 --- a/windows/d3d9/src/device.rs
 +++ b/windows/d3d9/src/device.rs
 @@ -10131,6 +10131,16 @@ extern "system" fn device_draw_primitive(
@@ -87,14 +87,16 @@ index 34e499c..9177dfd 100644
  
      // Flush any bound buffer that's drawn while still mapped, before the draw
      // snapshot reads it.
-@@ -10470,13 +10493,16 @@ extern "system" fn device_draw_indexed_primitive(
+@@ -10470,13 +10493,20 @@ extern "system" fn device_draw_indexed_primitive(
  ///
  /// A buffer drawn while locked never reached `Unlock`'s upload, so its latest
  /// CPU writes are flushed here. The lock stays open and `dirty` stays set, so
 -/// `Unlock` still flushes afterwards.
 +/// `Unlock` still flushes afterwards. A system-memory buffer whose `Unlock`
-+/// left its range for the next GPU read uploads it here too.
++/// left its range for the next GPU read uploads it here too, when the draw's
++/// declaration reads its stream: a buffer merely left bound is not read.
  fn flush_mapped_bound_buffers(dev: &mut DeviceInner) {
++    let read_streams = declared_stream_mask(dev);
      for stream in 0..mtld3d_types::MAX_STREAMS as usize {
          let vb = dev.bound_buffers().stream_vertex_buffer(stream);
          if !vb.is_null() {
@@ -102,14 +104,27 @@ index 34e499c..9177dfd 100644
 -            unsafe { (*vb).inner_mut() }.flush_staged_if_mapped(dev);
 +            let inner = unsafe { (*vb).inner_mut() };
 +            inner.flush_staged_if_mapped(dev);
-+            inner.upload_deferred(dev);
++            if read_streams & (1 << stream) != 0 {
++                inner.upload_deferred(dev);
++            }
          }
      }
      let ib = dev.bound_buffers().index_buffer();
-@@ -10610,6 +10636,194 @@ fn snapshot_bound_index_source(dev: &DeviceInner, start_index: u32) -> Option<In
+@@ -10610,6 +10640,200 @@ fn snapshot_bound_index_source(dev: &DeviceInner, start_index: u32) -> Option<In
      })
  }
  
++/// The streams the bound vertex declaration reads, one bit per stream; an FVF reads stream 0.
++fn declared_stream_mask(dev: &DeviceInner) -> u16 {
++    let decl_ptr = dev.vertex_decl();
++    if decl_ptr.is_null() {
++        return 1;
++    }
++    // SAFETY: non-null; the device slot's refcount keeps the declaration
++    // alive while bound.
++    unsafe { &*decl_ptr }.inner().stream_mask()
++}
++
 +/// A draw from bound streams, as [`draw_system_memory_as_up`] takes it.
 +enum SystemMemoryDraw {
 +    Vertices {
@@ -125,7 +140,9 @@ index 34e499c..9177dfd 100644
 +    },
 +}
 +
-+/// Largest vertex span a system-memory draw copies inline; larger draws read the uploaded buffer.
++/// Largest vertex span, and largest index span, a system-memory draw copies inline.
++///
++/// Larger draws read the uploaded buffers instead.
 +const SYSTEM_MEMORY_UP_MAX_BYTES: usize = 64 * 1024;
 +
 +/// Record a draw from a `D3DPOOL_SYSTEMMEM` vertex buffer with the vertices it reads copied inline.
@@ -142,26 +159,18 @@ index 34e499c..9177dfd 100644
 +/// `None`, leaving the draw to the bound-buffer path, unless stream 0 is the
 +/// only stream the declaration reads, it steps per vertex, its buffer is in
 +/// system memory, the span lies inside it and fits
-+/// [`SYSTEM_MEMORY_UP_MAX_BYTES`], and every index falls inside the window
-+/// the draw declares.
++/// [`SYSTEM_MEMORY_UP_MAX_BYTES`], its indices fit the same bound, and every
++/// index falls inside the window the draw declares.
 +fn draw_system_memory_as_up(
 +    obj: &Direct3DDevice9,
 +    metal_prim: mtld3d_shared::mtl::PrimitiveType,
 +    draw: &SystemMemoryDraw,
 +) -> Option<i32> {
 +    let dev = obj.inner();
-+    let decl_ptr = dev.vertex_decl();
-+    let decl_mask = if decl_ptr.is_null() {
-+        1
-+    } else {
-+        // SAFETY: non-null; the device slot's refcount keeps the declaration
-+        // alive while bound.
-+        unsafe { &*decl_ptr }.inner().stream_mask()
-+    };
 +    let bound = dev.bound_buffers();
 +    let vb = bound.stream_vertex_buffer(0);
 +    let stride = bound.stream_stride(0);
-+    if decl_mask != 1 || vb.is_null() || stride == 0 || bound.stream_freq(0) != 1 {
++    if declared_stream_mask(dev) != 1 || vb.is_null() || stride == 0 || bound.stream_freq(0) != 1 {
 +        return None;
 +    }
 +    // SAFETY: a bound vertex buffer is a live wrapper while bound.
@@ -243,7 +252,8 @@ index 34e499c..9177dfd 100644
 +/// The bound index buffer's indices for a system-memory draw, rebased by `-min_vertex`.
 +///
 +/// `None` when no index buffer is bound, its format is unknown, it holds no
-+/// current CPU copy, the draw reads past it, or an index falls outside
++/// current CPU copy, the indices exceed [`SYSTEM_MEMORY_UP_MAX_BYTES`], the
++/// draw reads past the buffer, or an index falls outside
 +/// `[min_vertex, min_vertex + num_vertices)`: D3D9 leaves such a draw
 +/// undefined, and the bound-buffer path reads the whole buffer instead.
 +fn rebased_system_memory_indices(
@@ -269,7 +279,7 @@ index 34e499c..9177dfd 100644
 +    };
 +    let first = usize::try_from(start_index).ok()? * index_size;
 +    let len = usize::try_from(index_count).ok()? * index_size;
-+    if first + len > inner.current_backing_len() {
++    if len > SYSTEM_MEMORY_UP_MAX_BYTES || first + len > inner.current_backing_len() {
 +        return None;
 +    }
 +    // SAFETY: `[first, first + len)` lies inside the live backing box
