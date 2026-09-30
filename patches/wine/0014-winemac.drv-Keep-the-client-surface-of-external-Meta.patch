@@ -1,6 +1,6 @@
-From 18387859a883ccced14dbe15cc68d509dfe1ff3f Mon Sep 17 00:00:00 2001
+From 5df0f4966af62cd7b3d0494a451f88f3f1e01f04 Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
-Date: Wed, 30 Sep 2026 08:59:10 -0400
+Date: Wed, 30 Sep 2026 10:23:41 -0400
 Subject: [PATCH 14/15] winemac.drv: Keep the client surface of external Metal
  views in use.
 
@@ -14,9 +14,9 @@ with the window, so win32u keeps the view in step with the client area.
 ---
  dlls/win32u/win32u_private.h |  2 --
  dlls/winemac.drv/macdrv.h    |  1 +
- dlls/winemac.drv/window.c    | 34 ++++++++++++++++++++++++++++++++--
+ dlls/winemac.drv/window.c    | 46 ++++++++++++++++++++++++++++++++++--
  include/wine/gdi_driver.h    |  2 ++
- 4 files changed, 35 insertions(+), 4 deletions(-)
+ 4 files changed, 47 insertions(+), 4 deletions(-)
 
 diff --git a/dlls/win32u/win32u_private.h b/dlls/win32u/win32u_private.h
 index 5e3f7550a4..0e7f421c51 100644
@@ -44,7 +44,7 @@ index 6643cc6770..6322d52a8b 100644
      int                 pixel_format;           /* pixel format for GL */
      HANDLE              drag_event;             /* event to signal that Cocoa-driven window dragging has ended */
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 02c6788170..b416c95166 100644
+index 02c6788170..872e317ad7 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
 @@ -1258,6 +1258,7 @@ LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -69,7 +69,7 @@ index 02c6788170..b416c95166 100644
  }
  
  
-@@ -2236,8 +2241,33 @@ static struct dxmt_win_data *dxmt_get_win_data(HWND hwnd)
+@@ -2236,8 +2241,45 @@ static struct dxmt_win_data *dxmt_get_win_data(HWND hwnd)
      has_client_view = data->client_view != NULL;
      release_win_data(data);
  
@@ -78,12 +78,24 @@ index 02c6788170..b416c95166 100644
 +    /* The client view only exists once a client surface has been created. Take one the way
 +     * the Vulkan surfaces do, and keep it in use until the window is destroyed: win32u then
 +     * keeps the view's frame in step with the window's client area, which DXMT and mtld3d,
-+     * presenting to their own layer rather than through client_surface_present, never ask for. */
++     * presenting to their own layer rather than through client_surface_present, never ask for.
++     * A window that kept one from an earlier device, whose view a window surface flush has
++     * since hidden, presents it again instead. */
 +    if (!has_client_view)
 +    {
-+        struct client_surface *client;
++        struct client_surface *client = NULL;
 +
-+        if ((client = get_unused_client_surface(hwnd, 0, FALSE)))
++        if ((data = get_win_data(hwnd)))
++        {
++            if ((client = data->metal_client_surface)) client_surface_add_ref(client);
++            release_win_data(data);
++        }
++        if (client)
++        {
++            client_surface_present(client);
++            client_surface_release(client);
++        }
++        else if ((client = get_unused_client_surface(hwnd, 0, FALSE)))
 +        {
 +            use_window_client_surface(client, TRUE);
 +            if ((data = get_win_data(hwnd)))

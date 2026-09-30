@@ -1,4 +1,4 @@
-From 18370d8f8483d8baeddb4930590597b96f69700a Mon Sep 17 00:00:00 2001
+From 89af2f8e9e1f282f1cb79929aa5edc4785ff2de9 Mon Sep 17 00:00:00 2001
 From: hadron <dev@hadron.invalid>
 Date: Wed, 30 Sep 2026 08:59:10 -0400
 Subject: [PATCH 15/15] ntdll: Add WINE_LARGE_ADDRESS_AWARE to give 32-bit
