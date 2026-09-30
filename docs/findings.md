@@ -123,6 +123,47 @@ Note: a real mode change captures the display (Wine's normal behavior): other ap
 until the game quits or Cmd-Tab releases the display. Testing: `scripts/shot` skips windows
 above the normal window level, and captured-display game windows are raised above it.
 
+## Ultimate Custom Night drawn in the top-left quarter (resolved, #16)
+
+The menu filled only the top-left quarter of its window on mtld3d. The back buffer was full size
+(Reset to 1512x982) and the drawable follows the layer, but the Metal view stayed at 756x491 pt,
+the window's size when the device was created; the game grows its window afterwards. Wine 0007
+created the client surface behind the view with `macdrv_CreateClientSurface` and never registered
+it with win32u, so `update_client_surfaces` never resized it on window moves (and it leaked).
+
+Fix (Wine 0014): winemac takes the surface through `get_unused_client_surface` and
+`use_window_client_surface`, as win32u's Vulkan surfaces do (both now exported to drivers), keeps
+it in the window data and releases it on `DestroyWindow`. win32u then keeps the view in step with
+the client area and disposes of it with the window. DXMT gets the same fix. What remains of the
+cleanup below is the per-present notification, which would retire 0012.
+
+## Ultimate Custom Night crash on GO (resolved, #17)
+
+Pressing GO crashed in mtld3d (`LeaseCompletion::consume`, a null read) with 79 MB of address
+space left. The exe is 32-bit and not large address aware, so it had 2 GB; mtld3d's staging and
+retention alone reached several hundred MB. Wine 0015 adds `WINE_LARGE_ADDRESS_AWARE=1`, like
+Proton's default `PROTON_FORCE_LARGE_ADDRESS_AWARE`, and `scripts/play` sets it
+(`HADRON_LARGE_ADDRESS_AWARE=0` to opt out). mtld3d should still fail cleanly rather than crash.
+
+## Ultimate Custom Night lag (in progress, #18)
+
+mtld3d's telemetry build (`MTLD3D_PERF=1 scripts/build-mtld3d.sh`) logs `perf-kv` rows every 2 s.
+The menu ran at 12 fps: 65 ms of each 83 ms frame in vertex buffer Lock/Unlock. Clickteam's
+runtime keeps sprites in one 384 KiB `D3DPOOL_SYSTEMMEM` DYNAMIC buffer and, for each of ~1000
+sprites a frame, locks the whole buffer (offset 0, size 0, `NOOVERWRITE`), writes one quad and
+draws it. mtld3d's Staged path uploaded all 384 KiB at every Unlock (x86 memcpy under FEX) and
+the stale copies filled the 512 MB retention cap, forcing mid-frame GPU waits.
+
+Fix (mtld3d 0001): such an Unlock leaves the range pending and each draw uploads only the
+vertices it reads, as a Windows driver does for system memory. Vertex buffer time 65 ms ->
+0.05 ms, 12 -> 20 fps, no retention waits.
+
+Remaining at 20 fps: the game thread spends ~56% in 32-bit ntdll (`wcslen`,
+`RtlHashUnicodeString`, `RtlCompareUnicodeStrings`), found by mapping samples through FEX's
+block map (`FEX_BLOCKJITNAMING=1 FEX_DISKCACHE=0 scripts/play ...` writes /tmp/perf-<pid>.map).
+`trace+module` shows `GetModuleHandle("d3d9d.dll")` and a load of `d3d9.dll` by name ~1100
+times a second.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
