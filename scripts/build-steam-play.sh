@@ -17,7 +17,13 @@ if [[ ! -d "$NP/vendor/dobby/.git" ]]; then
     git clone -q https://github.com/jmpews/Dobby.git "$NP/vendor/dobby"
 fi
 git -C "$NP/vendor/dobby" checkout -q "$DOBBY_COMMIT"
-[[ -f "$NP/build/dobby/libdobby.a" ]] || { log "building Dobby"; make -C "$NP" dobby >/dev/null; }
+# Rebuilt whenever the built revision isn't the pinned one, not only when the archive is missing.
+if [[ ! -f "$NP/build/dobby/libdobby.a" || "$(cat "$NP/build/dobby/.hadron-revision" 2>/dev/null)" != "$DOBBY_COMMIT" ]]; then
+    log "building Dobby"
+    rm -rf "$NP/build/dobby"
+    make -C "$NP" dobby >/dev/null
+    echo "$DOBBY_COMMIT" > "$NP/build/dobby/.hadron-revision"
+fi
 
 log "building the Steam client library"
 # NotProton's Makefile expects Apple's clang, not Homebrew LLVM's.

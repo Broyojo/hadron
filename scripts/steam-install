@@ -31,11 +31,17 @@ cp -f "$ROOT/src/notproton/signatures/macos.arm64/"*.json "$HOME/Library/Applica
 echo "quitting Steam"
 osascript -e 'quit app "Steam"' 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+if pgrep -x steam_osx >/dev/null; then  # didn't quit: force it, never patch a running Steam
+    pkill -x steam_osx
+    for _ in 1 2 3 4 5; do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+    if pgrep -x steam_osx >/dev/null; then echo "Steam is still running; quit it and try again" >&2; exit 1; fi
+fi
 
 cp -f "$LIB" "$INSERT"
-# The backup lives outside the bundle: codesign refuses unknown files in Contents/.
-[ -f "$BACKUP" ] || cp "$APP/Contents/Info.plist" "$BACKUP"
+# A safety copy of Steam's own plist, taken fresh while it doesn't carry our setting (so it follows
+# Steam updates); outside the bundle, as codesign refuses unknown files in Contents/.
 if [ -z "$existing" ]; then
+    cp "$APP/Contents/Info.plist" "$BACKUP"
     /usr/libexec/PlistBuddy -c "Add :LSEnvironment:DYLD_INSERT_LIBRARIES string $INSERT" "$APP/Contents/Info.plist"
 fi
 codesign -f -s - "$INSERT"
