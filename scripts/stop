@@ -8,6 +8,6 @@ for p in "$ROOT"/prefix/*; do
     [ -x "$ROOT/dist-dev/bin/wineserver" ] && WINEPREFIX="$p" "$ROOT/dist-dev/bin/wineserver" -k 2>/dev/null
 done
 sleep 1
-ps -Ao pid,command | grep -E 'C:\\windows|C:\\Program Files|Z:\\|proton-apple/dist|wineserver' \
+ps -Ao pid,command | grep -E 'C:\\windows|C:\\Program Files|Z:\\|proton-apple/dist|wineserver|winedbg' \
     | grep -v grep | awk '{print $1}' | xargs kill -9 2>/dev/null; true
-echo "remaining Hadron processes: $(ps -Ao command | grep -E 'C:\\windows|C:\\Program Files|Z:\\|proton-apple/dist|wineserver' | grep -v grep | wc -l | tr -d ' ')"
+echo "remaining Hadron processes: $(ps -Ao command | grep -E 'C:\\windows|C:\\Program Files|Z:\\|proton-apple/dist|wineserver|winedbg' | grep -v grep | wc -l | tr -d ' ')"
