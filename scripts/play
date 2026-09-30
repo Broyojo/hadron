@@ -96,7 +96,7 @@ fi
 # Renderer and translator settings (a game's Steam launch options, or the caller's environment) pass
 # through by name; the variables set explicitly below keep their computed values.
 set -- "$ROOT/dist/bin/wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
-for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
+for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|MESA)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
     case "$var" in
         WINEPREFIX|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
         VKD3D_SHADER_CACHE_PATH) [ -n "${vkd3d_cache:-}" ] && continue ;;
@@ -106,7 +106,7 @@ for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX)_[
 done
 # Paths may contain spaces (Steam runs this through ~/Library/Application Support), so these go
 # through the argument list too rather than as unquoted expansions below.
-[ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "$@"
+[ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "MESA_KK_EXPERIMENTAL=${MESA_KK_EXPERIMENTAL:-dgc}" "$@"
 [ -n "$vkd3d_cache" ] && set -- "VKD3D_SHADER_CACHE_PATH=$vkd3d_cache" "$@"
 
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \

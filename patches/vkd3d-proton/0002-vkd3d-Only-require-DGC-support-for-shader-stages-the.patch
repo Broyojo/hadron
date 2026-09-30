@@ -1,0 +1,35 @@
+From ad46ef8fe6b350842eb5a61ac90b101bf0659383 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 30 Sep 2026 15:54:28 -0400
+Subject: [PATCH] vkd3d: Only require DGC support for shader stages the device
+ has.
+
+vkd3d-proton turned device-generated commands off unless the driver lists
+every graphics stage in supportedIndirectCommandsShaderStages, including
+geometry and tessellation on devices that don't support those stages at all.
+Require them only when the matching feature is present, as is already done
+for mesh and task shaders.
+---
+ libs/vkd3d/device.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/libs/vkd3d/device.c b/libs/vkd3d/device.c
+index 63a82c33..55e4bfa3 100644
+--- a/libs/vkd3d/device.c
++++ b/libs/vkd3d/device.c
+@@ -3275,6 +3275,12 @@ static HRESULT vkd3d_init_device_caps(struct d3d12_device *device,
+         if (physical_device_info->mesh_shader_features.meshShader)
+             required_stages |= VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_TASK_BIT_EXT;
+ 
++        /* Stages the device can't run don't need indirect command support either. */
++        if (!physical_device_info->features2.features.geometryShader)
++            required_stages &= ~VK_SHADER_STAGE_GEOMETRY_BIT;
++        if (!physical_device_info->features2.features.tessellationShader)
++            required_stages &= ~(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
++
+         if ((supported_stages & required_stages) != required_stages)
+         {
+             /* Can be relaxed if needed in the wild, but in principle, everything needs to be supported
+-- 
+2.54.0 (Apple Git-157)
+

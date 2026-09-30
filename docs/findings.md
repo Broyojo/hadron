@@ -296,6 +296,29 @@ picks the lower mip (D3D rounds up; Vulkan allows either), one depth-compare sam
 creating a pipeline statistics query pool asserts (KosmicKrisp supports only occlusion and timestamp
 queries; D3D12 requires pipeline statistics).
 
+Teardown's voxels are drawn GPU-driven: ExecuteIndirect with per-object root CBV, vertex and index
+buffers. vkd3d-proton implements that with VK_EXT_device_generated_commands, which KosmicKrisp lacked,
+so it dropped the per-draw state and the voxels vanished. Mesa patch 0001 adds the extension (behind
+`MESA_KK_EXPERIMENTAL=dgc`, which `play` sets): at execute time a compute kernel (libkk `kk_dgc.cl`)
+writes one copy of the root descriptor table per sequence with its push constants, sequence index and
+vertex buffer bases patched in, and the draw or dispatch arguments (zeroed past the count buffer or
+under failed predication); per-sequence index buffers are copied into the device heap by poly's unroll,
+since Metal takes an index buffer only from the CPU; the CPU then encodes one indirect draw per sequence
+with its own root bound. Preprocessing is a no-op because KosmicKrisp re-records command buffers on
+resubmit, so the work has to happen at execute. vkd3d-proton patch 0002 stops requiring DGC support for
+geometry/tessellation stages the device doesn't have. `tools/dgc-test/run.sh [2]` tests the three
+signature shapes Teardown uses, natively against the driver. The bug that took longest: non-indexed
+sequences were issued as indexed draws with whatever index buffer was bound (the draw path decides on
+the index size), which drew Teardown's boxes with stale indices, as spikes and half faces.
+
+With DGC, Teardown renders correctly on D3D12 (still with the diagnostics: relaxed transform-feedback and
+texel-alignment checks, forced feature level 12_0). Remaining driver work for an honest device:
+transform feedback, single-texel buffer alignment, sparse resources (feature level 12_0), pipeline
+statistics queries, timestamp query pools above Metal's 4096-entry counter heaps, and geometry shaders.
+
+The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
+back slowly, and swap left over from earlier runs stopped Teardown at launch.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
