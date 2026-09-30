@@ -1,0 +1,325 @@
+From 927afc9718b214b0464035582c3442b38e813aab Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Tue, 29 Sep 2026 21:27:33 -0400
+Subject: [PATCH] ntdll: Back x86 emulator JIT code buffers with MAP_JIT memory
+ on arm64 macOS.
+
+W^X page flipping costs two faults and two mprotect() calls (with TLB
+shootdowns) every time a thread alternates between writing and running
+code on a 16K host page. That is exactly what an x86 emulator's JIT does
+when it compiles, loads from its disk cache or links blocks: in Portal
+under FEX, every reload of steamclient.dll caused ~40k flips and a
+~250 ms stall of the main thread.
+
+Add a Wine-specific allocation attribute,
+MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT, for NtAllocateVirtualMemoryEx.
+On W^X hosts a MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE
+allocation with it is backed by MAP_JIT memory (mapped with an address
+hint into the hole left by the view's own mapping, as MAP_JIT can't be
+combined with MAP_FIXED). The caller switches per-thread write access
+itself with pthread_jit_write_protect_np() around code writes, so these
+pages never fault. mprotect() fails on MAP_JIT memory, so pages whose
+protection stops being exec+write are replaced with ordinary mappings
+(keeping their contents) and remapped if they become exec+write again.
+Faults in such memory can't be fixed up from the signal handler (the
+per-thread state is restored on sigreturn), so report them loudly and
+raise an access violation. Other exec+write memory keeps using page
+flipping.
+---
+ dlls/ntdll/unix/virtual.c | 197 ++++++++++++++++++++++++++++++++++++++
+ include/winternl.h        |   8 ++
+ 2 files changed, 205 insertions(+)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 168ca0f228..7ad666faa2 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -144,6 +144,7 @@ struct file_view
+ #define VPROT_SYSTEM           0x0200  /* system view (underlying mmap not under our control) */
+ #define VPROT_PLACEHOLDER      0x0400
+ #define VPROT_FREE_PLACEHOLDER 0x0800
++#define VPROT_JIT              0x1000  /* W^X hosts: view backed by MAP_JIT memory */
+ 
+ /* Conversion from VPROT_* to Win32 flags */
+ static const BYTE VIRTUAL_Win32Flags[16] =
+@@ -265,6 +266,15 @@ static inline BOOL is_vprot_exec_write( BYTE vprot )
+  * both in Windows terms are mapped either writable or executable, and flipped on fault. */
+ #if defined(__APPLE__) && defined(__aarch64__)
+ #define WX_EXCLUSIVE_HOST
++#include <pthread.h>
++#include <libkern/OSCacheControl.h>
++
++static unsigned int jit_view_count;  /* number of views backed by MAP_JIT memory */
++
++static inline BOOL is_jit_view( const struct file_view *view )
++{
++    return (view->protect & VPROT_JIT) != 0;
++}
+ #endif
+ 
+ /* address-space layout randomization */
+@@ -1855,6 +1865,9 @@ static void unregister_view( struct file_view *view )
+  */
+ static void delete_view( struct file_view *view ) /* [in] View */
+ {
++#ifdef WX_EXCLUSIVE_HOST
++    if (is_jit_view( view )) jit_view_count--;
++#endif
+     if (!(view->protect & VPROT_SYSTEM)) unmap_area( view->base, view->size );
+     set_page_vprot( view->base, view->size, 0 );
+     if (view->protect & VPROT_ARM64EC) clear_arm64ec_range( view->base, view->size );
+@@ -2004,6 +2017,132 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
+ }
+ 
+ 
++#ifdef WX_EXCLUSIVE_HOST
++/* Views allocated with MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT are backed by MAP_JIT memory: mapped
++ * RWX, but writable or executable per thread (pthread_jit_write_protect_np). The owner, an x86
++ * emulator's JIT, toggles write access itself around code writes, so its code never takes W^X
++ * flip faults. In such views VPROT_EXECMODE marks the host pages that are MAP_JIT-backed.
++ * mprotect() fails on MAP_JIT memory, so pages whose protection stops being exec+write are
++ * replaced with ordinary mappings, and pages that become exec+write again are remapped. */
++static inline BOOL jit_page_wanted( BYTE vprot )
++{
++    return (vprot & VPROT_COMMITTED) && is_vprot_exec_write( vprot ) &&
++           !(vprot & (VPROT_GUARD | VPROT_WRITEWATCH));
++}
++
++static BOOL is_host_page_readable( const void *addr )
++{
++    mach_vm_address_t region = (mach_vm_address_t)addr;
++    mach_vm_size_t size;
++    vm_region_basic_info_data_64_t info;
++    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
++    mach_port_t object;
++
++    if (mach_vm_region( mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64,
++                        (vm_region_info_t)&info, &count, &object )) return FALSE;
++    return region <= (mach_vm_address_t)addr && (info.protection & VM_PROT_READ);
++}
++
++/* save the readable contents of a host page range, zero-filling the rest */
++static void *save_host_pages( char *base, size_t size )
++{
++    char *save = anon_mmap_alloc( size, PROT_READ | PROT_WRITE );
++    size_t i;
++
++    if (save == MAP_FAILED) return NULL;
++    for (i = 0; i < size; i += host_page_size)
++        if (is_host_page_readable( base + i )) memcpy( save + i, base + i, host_page_size );
++    return save;
++}
++
++/* replace a host page range with MAP_JIT memory; virtual_mutex must be held by caller */
++static BOOL map_jit_pages( char *base, size_t size, BOOL preserve )
++{
++    char *save = preserve ? save_host_pages( base, size ) : NULL;
++    void *ptr;
++
++    munmap( base, size );
++    /* MAP_JIT can't be combined with MAP_FIXED, but a hint into the hole we just made is honored */
++    ptr = mmap( base, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0 );
++    if (ptr != base)
++    {
++        if (ptr != MAP_FAILED) munmap( ptr, size );
++        WARN( "failed to map %p-%p as MAP_JIT\n", base, base + size );
++        anon_mmap_fixed( base, size, PROT_READ | PROT_WRITE, 0 );
++        if (save) memcpy( base, save, size );
++    }
++    else if (save)
++    {
++        pthread_jit_write_protect_np( 0 );
++        memcpy( base, save, size );
++        pthread_jit_write_protect_np( 1 );
++        sys_icache_invalidate( base, size );
++    }
++    if (save) munmap( save, size );
++    return ptr == base;
++}
++
++/* replace a MAP_JIT host page range with an ordinary mapping; virtual_mutex must be held by caller */
++static void unmap_jit_pages( char *base, size_t size, int unix_prot, BOOL preserve )
++{
++    char *save = NULL;
++
++    if (preserve && (save = anon_mmap_alloc( size, PROT_READ | PROT_WRITE )) != MAP_FAILED)
++        memcpy( save, base, size );
++    else save = NULL;
++    anon_mmap_fixed( base, size, save ? PROT_READ | PROT_WRITE : unix_prot, 0 );
++    if (!save) return;
++    memcpy( base, save, size );
++    munmap( save, size );
++    mprotect( base, size, unix_prot );
++}
++
++/* mprotect_range() for JIT views */
++static int mprotect_jit_range( char *addr, size_t size, BYTE set, BYTE clear )
++{
++    char *start, *end = addr + size;
++    BYTE cur, vprot, run_vprot;
++    BOOL want, is_jit;
++    int prot, ret = 0;
++
++    while (addr < end)
++    {
++        cur = get_host_page_vprot( addr );
++        run_vprot = (cur & ~clear) | set;
++        want = jit_page_wanted( run_vprot );
++        is_jit = (cur & VPROT_EXECMODE) != 0;
++        prot = get_unix_prot( run_vprot & ~VPROT_EXECMODE );
++
++        for (start = addr, addr += host_page_size; addr < end; addr += host_page_size)
++        {
++            cur = get_host_page_vprot( addr );
++            vprot = (cur & ~clear) | set;
++            if (jit_page_wanted( vprot ) != want || ((cur & VPROT_EXECMODE) != 0) != is_jit) break;
++            if (!want && get_unix_prot( vprot & ~VPROT_EXECMODE ) != prot) break;
++        }
++
++        if (want && !is_jit)
++        {
++            if (map_jit_pages( start, addr - start, TRUE ))
++                set_page_vprot_bits( start, addr - start, VPROT_EXECMODE, 0 );
++            else
++            {
++                ERR( "%p-%p lost its MAP_JIT backing\n", start, addr );
++                ret |= mprotect_exec( start, addr - start, prot );
++            }
++        }
++        else if (!want && is_jit)
++        {
++            unmap_jit_pages( start, addr - start, prot, (run_vprot & VPROT_COMMITTED) != 0 );
++            set_page_vprot_bits( start, addr - start, 0, VPROT_EXECMODE );
++        }
++        else if (!want) ret |= mprotect_exec( start, addr - start, prot );
++    }
++    return ret;
++}
++#endif
++
++
+ /***********************************************************************
+  *           mprotect_range
+  *
+@@ -2018,6 +2157,14 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+ 
+     size = ROUND_SIZE( base, size, host_page_mask );
+ 
++#ifdef WX_EXCLUSIVE_HOST
++    if (jit_view_count)
++    {
++        struct file_view *view = find_view( addr, 0 );
++        if (view && is_jit_view( view )) return mprotect_jit_range( addr, size, set, clear );
++    }
++#endif
++
+     vprot = get_host_page_vprot( addr );
+     prot = get_unix_prot( (vprot & ~clear) | set );
+     for (count = i = 1; i < size / host_page_size; i++, count++)
+@@ -2050,6 +2197,12 @@ static BOOL set_vprot( struct file_view *view, void *base, size_t size, BYTE vpr
+     {
+         if (enable_write_exceptions && is_vprot_exec_write( vprot )) vprot |= VPROT_WRITEWATCH;
+         else if (use_kernel_writewatch && view->protect & VPROT_WRITEWATCH) vprot &= ~VPROT_WRITEWATCH;
++#ifdef WX_EXCLUSIVE_HOST
++        /* in JIT views VPROT_EXECMODE tracks the MAP_JIT backing, which mprotect_range() updates */
++        if (is_jit_view( view ))
++            set_page_vprot_bits( base, size, vprot & ~VPROT_EXECMODE, (BYTE)~VPROT_EXECMODE );
++        else
++#endif
+         set_page_vprot( base, size, vprot );
+     }
+     return !mprotect_range( base, size, 0, 0 );
+@@ -2499,6 +2652,13 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+     else host_end = ROUND_ADDR( base + size, host_page_mask );
+ 
+     if (host_start < host_end) anon_mmap_fixed( host_start, host_end - host_start, PROT_NONE, 0 );
++#ifdef WX_EXCLUSIVE_HOST
++    if (is_jit_view( view ))
++    {
++        /* the replaced host pages are no longer MAP_JIT-backed */
++        if (host_start < host_end) set_page_vprot_bits( host_start, host_end - host_start, 0, VPROT_EXECMODE );
++    }
++#endif
+     set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );
+     if (host_start < host_end) kernel_writewatch_register_range( view, host_start, host_end - host_start );
+     return STATUS_SUCCESS;
+@@ -4735,6 +4895,24 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+ #endif
+ 
+ #ifdef WX_EXCLUSIVE_HOST
++    if (jit_view_count && is_vprot_exec_write( vprot ) && !(vprot & VPROT_GUARD) &&
++        (err == EXCEPTION_WRITE_FAULT || err == EXCEPTION_EXECUTE_FAULT))
++    {
++        struct file_view *view = find_view( page, 0 );
++        if (view && is_jit_view( view ))
++        {
++            /* the owner must toggle write access itself; flipping can't help, it would be undone on sigreturn */
++            if (!(vprot & VPROT_EXECMODE))
++                MESSAGE( "wine: %s fault at %p in JIT memory that lost its MAP_JIT backing\n",
++                         err == EXCEPTION_WRITE_FAULT ? "write" : "execute", addr );
++            else
++                MESSAGE( "wine: %s fault at %p in MAP_JIT memory, %s\n",
++                         err == EXCEPTION_WRITE_FAULT ? "write" : "execute", addr,
++                         err == EXCEPTION_WRITE_FAULT ? "written outside a JIT write window"
++                                                      : "executed inside a JIT write window" );
++            goto done;
++        }
++    }
+     if (is_vprot_exec_write( vprot ) && !(vprot & VPROT_GUARD))
+     {
+         /* another thread may already have flipped the page the way we need it */
+@@ -5275,6 +5453,16 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+     }
+     if (type & MEM_RESERVE_PLACEHOLDER && (protect != PAGE_NOACCESS)) return STATUS_INVALID_PARAMETER;
+     if (!arm64ec_view && (attributes & MEM_EXTENDED_PARAMETER_EC_CODE)) return STATUS_INVALID_PARAMETER;
++    if (attributes & MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT)
++    {
++        if ((type & (MEM_RESERVE | MEM_COMMIT)) != (MEM_RESERVE | MEM_COMMIT) ||
++            (type & (MEM_WRITE_WATCH | MEM_RESERVE_PLACEHOLDER | MEM_REPLACE_PLACEHOLDER)) ||
++            protect != PAGE_EXECUTE_READWRITE || is_dos_memory)
++            return STATUS_INVALID_PARAMETER;
++#ifndef WX_EXCLUSIVE_HOST
++        attributes &= ~MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT;  /* RWX mappings work as they are */
++#endif
++    }
+ 
+     /* Reserve the memory */
+ 
+@@ -5297,6 +5485,15 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+             if (status == STATUS_SUCCESS)
+             {
+                 base = view->base;
++#ifdef WX_EXCLUSIVE_HOST
++                if ((attributes & MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT) &&
++                    map_jit_pages( base, ROUND_SIZE( 0, view->size, host_page_mask ), FALSE ))
++                {
++                    view->protect |= VPROT_JIT;
++                    jit_view_count++;
++                    set_page_vprot_bits( base, view->size, VPROT_EXECMODE, 0 );
++                }
++#endif
+                 if (vprot & VPROT_EXEC || force_exec_prot) mprotect_range( base, size, 0, 0 );
+             }
+         }
+diff --git a/include/winternl.h b/include/winternl.h
+index 8b51f023c9..848dbe70ea 100644
+--- a/include/winternl.h
++++ b/include/winternl.h
+@@ -2442,6 +2442,14 @@ typedef enum _MEMORY_INFORMATION_CLASS {
+ #endif
+ } MEMORY_INFORMATION_CLASS;
+ 
++#ifdef __WINESRC__
++/* Wine extension to the MemExtendedParameterAttributeFlags of NtAllocateVirtualMemoryEx: on hosts
++ * that refuse RWX mappings, back a new MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE allocation
++ * with JIT memory (MAP_JIT on macOS) whose write access the caller toggles per thread
++ * (pthread_jit_write_protect_np) around code writes, instead of W^X page flipping on faults. */
++#define MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT 0x80000000
++#endif
++
+ typedef struct _MEMORY_SECTION_NAME
+ {
+     UNICODE_STRING SectionFileName;
+-- 
+2.54.0 (Apple Git-157)
+

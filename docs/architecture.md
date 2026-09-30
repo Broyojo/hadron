@@ -62,8 +62,9 @@ This is almost certainly how CrossOver's ARM64 preview works, and explains its m
 
 FEX never executes x86 guest pages natively; only its own JIT output runs. So Wine can
 back Windows RWX requests with RW host pages and flip a host page to RX on an execute
-fault (and back to RW on a write fault). This needs no FEX changes. Later, FEX can
-toggle explicitly around code emission for speed.
+fault (and back to RW on a write fault). FEX's own code buffers are the exception: page
+flipping made every compile or block link cost two faults (findings #14), so they are MAP_JIT
+memory (Wine 0011) and FEX switches the thread to write mode around its code writes (FEX 0005).
 
 ## Repository layout
 
