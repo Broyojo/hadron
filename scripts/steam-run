@@ -84,37 +84,41 @@ if [ ! -f "$ready" ] && { [ ! -f "$WINEPREFIX/system.reg" ] || [ -f "$WINEPREFIX
 fi
 touch "$ready"
 
-# The profile Steam Cloud expects: users/steamuser, with the XP-era paths Steam's Cloud rules still
-# name ("Local Settings/Application Data" and so on) as aliases of the modern folders. A prefix
-# made before this, under the Mac user's name, is folded into steamuser, the old name kept as a
-# link so paths already in its registry still resolve.
+# The profile Steam Cloud expects, as Proton lays it out: users/steamuser, its Documents, Desktop and
+# so on real folders inside the prefix (Wine links a shell folder to the Mac user's only when it
+# doesn't exist yet), and the XP-era paths Steam's Cloud rules still name ("Local Settings/Application
+# Data" and so on) as aliases of the modern folders. Done once per prefix: a prefix made before
+# this, under the Mac user's name, is folded into steamuser, the old name kept as a link so paths
+# already in its registry still resolve.
 users="$WINEPREFIX/drive_c/users"
 profile="$users/steamuser"
-if [ -n "$real_user" ] && [ "$real_user" != steamuser ] && [ -d "$users/$real_user" ] && [ ! -L "$users/$real_user" ]; then
-    mkdir -p "$profile"
-    cp -Rn "$users/$real_user/." "$profile/" 2>> "$log" && rm -rf "$users/$real_user" && ln -s steamuser "$users/$real_user"
-    echo "folded users/$real_user into users/steamuser" >> "$log"
-fi
-# Wine links the profile's Documents, Desktop and so on to the Mac user's folders; like Proton, keep
-# each game's profile inside its prefix, where Steam Cloud looks for it.
-for folder in Desktop Documents Downloads Music Pictures Videos Templates; do
-    case "$(readlink "$profile/$folder" 2>/dev/null)" in
-        /*) rm -f "$profile/$folder" ;;
-    esac
-done
-mkdir -p "$profile/AppData/Local" "$profile/AppData/Roaming" "$profile/Documents"
-for alias in "Local Settings/Application Data|AppData/Local|../AppData/Local" \
-             "Application Data|AppData/Roaming|AppData/Roaming" \
-             "My Documents|Documents|Documents"; do
-    old="$profile/${alias%%|*}" rest="${alias#*|}"
-    new="$profile/${rest%%|*}" target="${rest#*|}"
-    [ -L "$old" ] && continue
-    if [ -d "$old" ]; then  # written before the alias existed (Steam Cloud does this): merge it in
-        cp -Rn "$old/." "$new/" 2>> "$log" && rm -rf "$old"
+if [ ! -f "$WINEPREFIX/.hadron-profile-v1" ]; then
+    if [ -n "$real_user" ] && [ "$real_user" != steamuser ] && [ -d "$users/$real_user" ] && [ ! -L "$users/$real_user" ]; then
+        mkdir -p "$profile"
+        cp -Rn "$users/$real_user/." "$profile/" 2>> "$log" && rm -rf "$users/$real_user" && ln -s steamuser "$users/$real_user"
+        echo "folded users/$real_user into users/steamuser" >> "$log"
     fi
-    mkdir -p "$(dirname "$old")"
-    ln -s "$target" "$old"
-done
+    for folder in Desktop Documents Downloads Music Pictures Videos Templates AppData/Local AppData/Roaming; do
+        case "$(readlink "$profile/$folder" 2>/dev/null)" in
+            /*) rm -f "$profile/$folder" ;;
+        esac
+        mkdir -p "$profile/$folder"
+    done
+    for alias in "Local Settings/Application Data|AppData/Local|../AppData/Local" \
+                 "Application Data|AppData/Roaming|AppData/Roaming" \
+                 "My Documents|Documents|Documents"; do
+        old="$profile/${alias%%|*}" rest="${alias#*|}"
+        new="$profile/${rest%%|*}" target="${rest#*|}"
+        [ -L "$old" ] && continue
+        if [ -d "$old" ]; then  # written before the alias existed (Steam Cloud does this): merge it in
+            cp -Rn "$old/." "$new/" 2>> "$log" && rm -rf "$old"
+        fi
+        mkdir -p "$(dirname "$old")"
+        ln -s "$target" "$old"
+    done
+    touch "$WINEPREFIX/.hadron-profile-v1"
+    echo "laid out the steamuser profile" >> "$log"
+fi
 
 # Valve's Windows client DLLs, fetched from Valve's CDN (never redistributed): the game's
 # steam_api loads them from the Steam directory hadron-steam.exe registers, and Wine redirects
