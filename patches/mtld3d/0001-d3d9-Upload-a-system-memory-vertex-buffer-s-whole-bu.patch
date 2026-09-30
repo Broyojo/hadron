@@ -1,0 +1,280 @@
+From 001ac24236617b7209aedcaa57407ecd36799755 Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 09:12:23 -0400
+Subject: [PATCH] d3d9: Upload a system-memory vertex buffer's whole-buffer
+ locks at draw time
+
+A lock that names no usable window (SizeToLock 0, DISCARD) dirties the
+whole of a Staged buffer, and Unlock uploaded all of it. Clickteam Fusion
+titles lock their entire D3DPOOL_SYSTEMMEM vertex buffer with NOOVERWRITE
+for every sprite: Ultimate Custom Night uploaded its 384 KiB buffer about
+a thousand times a frame, 65 ms of an 83 ms frame, and filled the
+retention cap, forcing mid-frame GPU waits.
+
+A Windows driver reads a system-memory buffer at draw time and copies
+only the vertices a draw names. Do the same: such an Unlock leaves the
+range pending, and each draw uploads the part of it the draw reads
+(BaseVertexIndex + MinVertexIndex and NumVertices for indexed draws,
+StartVertex and the vertex count otherwise). NOOVERWRITE promises that
+nothing drawn since the last lock without it is rewritten, so a range
+drawn again is not uploaded twice. Draws whose range is not worked out
+(triangle fans, instancing, zero strides) and any lock with a window
+upload the whole pending range as before.
+
+Ultimate Custom Night's menu: vertex buffer time 65 ms -> 0.05 ms per
+frame, 12 -> 20 fps, no retention-cap waits.
+---
+ windows/d3d9/src/device.rs        |  51 ++++++++++++---
+ windows/d3d9/src/vertex_buffer.rs | 100 +++++++++++++++++++++++++++++-
+ 2 files changed, 140 insertions(+), 11 deletions(-)
+
+diff --git a/windows/d3d9/src/device.rs b/windows/d3d9/src/device.rs
+index 34e499c..ff8f3d9 100644
+--- a/windows/d3d9/src/device.rs
++++ b/windows/d3d9/src/device.rs
+@@ -10133,7 +10133,7 @@ extern "system" fn device_draw_primitive(
+     }
+     // Flush any bound buffer that's drawn while still mapped, before the draw
+     // snapshot reads it.
+-    flush_mapped_bound_buffers(obj.inner());
++    flush_mapped_bound_buffers(obj.inner(), Some((i64::from(start_vertex), vtx_count)));
+     if let Err(hr) = obj.inner().latched_encoder_status() {
+         std::hint::cold_path();
+         return hr;
+@@ -10210,8 +10210,9 @@ fn draw_bound_triangle_fan(
+     no_vertex_buffer_hr: i32,
+ ) -> i32 {
+     // Flush any bound buffer that's drawn while still mapped, before the draw
+-    // snapshot reads it.
+-    flush_mapped_bound_buffers(obj.inner());
++    // snapshot reads it. A fan's vertex range is not worked out here, so a
++    // buffer waiting for its draws uploads whole.
++    flush_mapped_bound_buffers(obj.inner(), None);
+     if let Err(hr) = obj.inner().known_encoder_status() {
+         return hr;
+     }
+@@ -10375,8 +10376,8 @@ extern "system" fn device_draw_indexed_primitive(
+     this: *mut c_void,
+     primitive_type: u32,
+     base_vertex_index: i32,
+-    _min_vertex_index: u32,
+-    _num_vertices: u32,
++    min_vertex_index: u32,
++    num_vertices: u32,
+     start_index: u32,
+     primitive_count: u32,
+ ) -> i32 {
+@@ -10419,8 +10420,16 @@ extern "system" fn device_draw_indexed_primitive(
+     }
+ 
+     // Flush any bound buffer that's drawn while still mapped, before the draw
+-    // snapshot reads it.
+-    flush_mapped_bound_buffers(obj.inner());
++    // snapshot reads it. `MinVertexIndex` and `NumVertices` bound the
++    // vertices the indices address, relative to `BaseVertexIndex`: the range
++    // a driver copies out of a system-memory buffer.
++    flush_mapped_bound_buffers(
++        obj.inner(),
++        Some((
++            i64::from(base_vertex_index) + i64::from(min_vertex_index),
++            num_vertices,
++        )),
++    );
+     if let Err(hr) = obj.inner().latched_encoder_status() {
+         std::hint::cold_path();
+         return hr;
+@@ -10470,13 +10479,20 @@ extern "system" fn device_draw_indexed_primitive(
+ ///
+ /// A buffer drawn while locked never reached `Unlock`'s upload, so its latest
+ /// CPU writes are flushed here. The lock stays open and `dirty` stays set, so
+-/// `Unlock` still flushes afterwards.
+-fn flush_mapped_bound_buffers(dev: &mut DeviceInner) {
++/// `Unlock` still flushes afterwards. A system-memory buffer whose `Unlock`
++/// left its range to the draws uploads the part this draw reads: `vertices`
++/// is the draw's first vertex and vertex count, or `None` when unknown.
++fn flush_mapped_bound_buffers(dev: &mut DeviceInner, vertices: Option<(i64, u32)>) {
+     for stream in 0..mtld3d_types::MAX_STREAMS as usize {
+         let vb = dev.bound_buffers().stream_vertex_buffer(stream);
+         if !vb.is_null() {
++            let range = vertices.and_then(|(first, count)| {
++                stream_byte_range(dev.bound_buffers(), stream, first, count)
++            });
+             // SAFETY: a bound vertex buffer is a live wrapper while bound.
+-            unsafe { (*vb).inner_mut() }.flush_staged_if_mapped(dev);
++            let inner = unsafe { (*vb).inner_mut() };
++            inner.flush_staged_if_mapped(dev);
++            inner.upload_for_draw(dev, range);
+         }
+     }
+     let ib = dev.bound_buffers().index_buffer();
+@@ -10486,6 +10502,21 @@ fn flush_mapped_bound_buffers(dev: &mut DeviceInner) {
+     }
+ }
+ 
++/// The bytes `[start, end)` a draw of `count` vertices from `first` reads from a bound stream.
++///
++/// `None` when the stream is not a plain per-vertex stream (instanced or
++/// indexed-data frequencies, a zero stride) or the range does not fit.
++fn stream_byte_range(bound: &BoundBuffers, stream: usize, first: i64, count: u32) -> Option<(u32, u32)> {
++    let stride = i64::from(bound.stream_stride(stream));
++    if bound.stream_freq(stream) != 1 || stride == 0 || first < 0 || count == 0 {
++        return None;
++    }
++    let offset = i64::from(bound.stream_offset(stream));
++    let start = offset + first * stride;
++    let end = start + i64::from(count) * stride;
++    Some((u32::try_from(start).ok()?, u32::try_from(end).ok()?))
++}
++
+ /// Snapshot the bound vertex streams the declaration reads for borrowed capture.
+ ///
+ /// Only streams the bound declaration names are snapshotted (an implicit
+diff --git a/windows/d3d9/src/vertex_buffer.rs b/windows/d3d9/src/vertex_buffer.rs
+index 51117fb..4c71000 100644
+--- a/windows/d3d9/src/vertex_buffer.rs
++++ b/windows/d3d9/src/vertex_buffer.rs
+@@ -31,7 +31,7 @@ use mtld3d_core::{
+ use mtld3d_shared::{InPtr, InPtrMut};
+ use mtld3d_types::{
+     D3DFMT_VERTEXDATA, D3DLOCK_DISCARD, D3DLOCK_KNOWN_BITS, D3DLOCK_NOOVERWRITE, D3DLOCK_READONLY,
+-    D3DRTYPE_VERTEXBUFFER, D3DVERTEXBUFFER_DESC, Guid, IDirect3DVertexBuffer9Vtbl,
++    D3DPOOL_SYSTEMMEM, D3DRTYPE_VERTEXBUFFER, D3DVERTEXBUFFER_DESC, Guid, IDirect3DVertexBuffer9Vtbl,
+ };
+ 
+ use super::{
+@@ -90,6 +90,25 @@ pub struct VertexBufferInner {
+     /// Accumulated across `Lock`s and flushed on `Unlock`. Unused for
+     /// `Direct`.
+     dirty: DirtyRange,
++    /// `Staged` `D3DPOOL_SYSTEMMEM` only: `dirty` waits for the draws that read it.
++    ///
++    /// Set by a lock that names no usable window (`SizeToLock == 0`,
++    /// `D3DLOCK_DISCARD`), which dirties the whole buffer. Uploading all of
++    /// it at `Unlock` makes every such lock a whole-buffer copy, and
++    /// Clickteam Fusion titles lock their entire system-memory buffer with
++    /// `NOOVERWRITE` for every sprite they draw: Ultimate Custom Night's
++    /// 384 KiB buffer, a thousand times a frame. A Windows driver reads a
++    /// system-memory buffer at draw time and copies only the vertices a draw
++    /// names, so `Unlock` leaves the range pending and each draw uploads the
++    /// part of it that it reads ([`VertexBufferInner::upload_for_draw`]).
++    defer_to_draws: bool,
++    /// The span draws have uploaded since the last lock without `D3DLOCK_NOOVERWRITE`.
++    ///
++    /// `NOOVERWRITE` promises the application rewrites nothing a draw has used
++    /// since then, so a range drawn again is still on the GPU and is not
++    /// uploaded twice (which would also make the encoder rename the buffer
++    /// for writing under a range this frame already read).
++    drawn_since_overwrite: Option<(u32, u32)>,
+     /// Canonical CPU backing.
+     ///
+     /// For `Direct`, the GPU reads this directly and rename swaps it out
+@@ -240,6 +259,75 @@ impl VertexBufferInner {
+         dev.push_stage_upload(self.buffer_id, transient, min, max - min);
+     }
+ 
++    /// Upload the part of a pending dirty range that a draw reads.
++    ///
++    /// `range` is the byte span `[start, end)` the draw reads from this
++    /// buffer, or `None` when it cannot be bounded (instancing, a triangle
++    /// fan), which uploads the whole pending range and ends the deferral.
++    /// No-op unless `Unlock` left the range for the draws
++    /// ([`Self::defer_to_draws`]) and the buffer is not mapped: a mapped
++    /// buffer is flushed whole by [`Self::flush_staged_if_mapped`].
++    pub fn upload_for_draw(&mut self, dev: &mut DeviceInner, range: Option<(u32, u32)>) {
++        if !self.defer_to_draws || self.locked {
++            return;
++        }
++        let Some((dirty_min, dirty_max)) = self.dirty.span() else {
++            self.defer_to_draws = false;
++            return;
++        };
++        let Some((start, end)) = range else {
++            if self.upload_span(dev, dirty_min, dirty_max) {
++                self.dirty.clear();
++                self.defer_to_draws = false;
++            }
++            return;
++        };
++        let (start, end) = (start.max(dirty_min), end.min(dirty_max));
++        if start >= end {
++            return;
++        }
++        if let Some((done_min, done_max)) = self.drawn_since_overwrite
++            && done_min <= start
++            && end <= done_max
++        {
++            return;
++        }
++        if !self.upload_span(dev, start, end) {
++            return;
++        }
++        // One span is kept: joined with the last when they touch, which is
++        // how a batcher appends, and replaced otherwise.
++        self.drawn_since_overwrite = Some(match self.drawn_since_overwrite {
++            Some((done_min, done_max)) if start <= done_max && done_min <= end => {
++                (done_min.min(start), done_max.max(end))
++            }
++            _ => (start, end),
++        });
++    }
++
++    /// Queue an upload of `[min, max)` of the CPU backing to the device buffer.
++    ///
++    /// `false` when nothing was queued: no CPU backing, or no staging memory.
++    fn upload_span(&mut self, dev: &mut DeviceInner, min: u32, max: u32) -> bool {
++        let Some(src) = self.backing.read_ptr_at(min as usize) else {
++            mtld3d_shared::log_once_warn!(target: crate::LOG_TARGET,
++                "vb: no CPU backing behind a pending dirty range, dropping the upload");
++            return false;
++        };
++        let size = (max - min) as usize;
++        let Ok(mut transient) = dev.alloc_pagebox_capped(size) else {
++            return false;
++        };
++        // SAFETY: `src` spans `[min, max)` of the backing; `transient` is a
++        // fresh `PageBox` of ≥ `size` bytes; the two allocations are disjoint.
++        unsafe {
++            core::ptr::copy_nonoverlapping(src, transient.as_mut_ptr(), size);
++        }
++        self.backing.note_upload(min, max);
++        dev.push_stage_upload(self.buffer_id, transient, min, max - min);
++        true
++    }
++
+     pub const fn map_mode(&self) -> BufferMapMode {
+         self.map_mode
+     }
+@@ -317,6 +405,8 @@ impl Direct3DVertexBuffer9 {
+             private_data: PrivateDataStore::default(),
+             map_mode,
+             dirty,
++            defer_to_draws: false,
++            drawn_since_overwrite: None,
+             backing,
+             last_submit_seq: 0,
+             locked: false,
+@@ -716,6 +806,13 @@ extern "system" fn vb_lock(
+                 (offset_to_lock, size_to_lock)
+             };
+             inner.dirty.conjoin(dirty_offset, dirty_size, inner.length);
++            // A whole-buffer lock of a system-memory buffer leaves its upload
++            // to the draws; any other lock ends that, and its `Unlock`
++            // uploads the whole pending range as before.
++            inner.defer_to_draws = widen && inner.pool == D3DPOOL_SYSTEMMEM;
++            if flags & D3DLOCK_NOOVERWRITE == 0 {
++                inner.drawn_since_overwrite = None;
++            }
+         }
+     }
+ 
+@@ -849,6 +946,7 @@ extern "system" fn vb_unlock(this: *mut c_void) -> i32 {
+     }
+     inner.locked = false;
+     if matches!(inner.map_mode, BufferMapMode::Staged)
++        && !inner.defer_to_draws
+         && let Some((min, max)) = inner.dirty.span()
+         && !inner.device_inner.is_null()
+     {
+-- 
+2.54.0 (Apple Git-157)
+
