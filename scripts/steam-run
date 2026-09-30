@@ -1,0 +1,76 @@
+#!/bin/sh
+# Hadron's Steam compatibility tool: Mac Steam runs this (through the tool's `run` stub) as
+#   steam-run <verb> <program> [args...]
+# with STEAM_COMPAT_DATA_PATH, STEAM_COMPAT_INSTALL_PATH, STEAM_COMPAT_APP_ID and
+# STEAM_COMPAT_CLIENT_INSTALL_PATH set, like Proton's `proton` script on Linux.
+#
+# Each game gets its own prefix in STEAM_COMPAT_DATA_PATH/pfx, created on first launch. The
+# Steam bridge files (Valve's Windows steamclient DLLs, which Wine redirects to lsteamclient) are
+# staged into the prefix's Steam directory, and the game runs through scripts/play, so it gets
+# everything a manual launch does: mtld3d, vsync, the watchdog, hadron-steam.exe.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+verb="$1"; shift
+
+case "$verb" in
+    getcompatpath) printf '%s\n' "$STEAM_COMPAT_DATA_PATH"; exit 0 ;;
+    run|waitforexitandrun) ;;
+    *) echo "steam-run: unsupported verb '$verb'" >&2; exit 1 ;;
+esac
+[ -n "$STEAM_COMPAT_DATA_PATH" ] || { echo "steam-run: STEAM_COMPAT_DATA_PATH is not set" >&2; exit 1; }
+
+log="$STEAM_COMPAT_DATA_PATH/hadron-run.log"
+mkdir -p "$STEAM_COMPAT_DATA_PATH"
+{
+    echo "=== hadron steam-run $(date) ==="
+    echo "verb=$verb args=$*"
+    env | grep -E '^(Steam|STEAM_)' | sort
+} >> "$log" 2>&1
+
+export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
+# As in scripts/play: Wine finds FreeType and friends in Homebrew's library directory.
+export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
+wine="$ROOT/dist/bin/wine"
+
+if [ ! -f "$WINEPREFIX/system.reg" ]; then
+    echo "creating prefix $WINEPREFIX" >> "$log"
+    # mscoree/mshtml off, as in scripts/play: otherwise wineboot waits on the Wine Mono and Gecko
+    # install dialogs.
+    WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$wine" wineboot --init >> "$log" 2>&1
+    WINEDEBUG=-all "$ROOT/dist/bin/wineserver" -w
+    "$ROOT/scripts/mtld3d-prefix" enable "$WINEPREFIX" >> "$log" 2>&1
+fi
+
+# Valve's Windows client DLLs, fetched from Valve's CDN (never redistributed): the game's
+# steam_api loads them from the Steam directory hadron-steam.exe registers, and Wine redirects
+# them to lsteamclient.
+valve="$ROOT/build/valve/bridge"
+steam_dir="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
+mkdir -p "$steam_dir"
+for f in steamclient.dll steamclient64.dll tier0_s64.dll vstdlib_s64.dll; do
+    [ -f "$valve/$f" ] && ! cmp -s "$valve/$f" "$steam_dir/$f" && cp "$valve/$f" "$steam_dir/$f"
+done
+# Steam runs installer scripts through the tool with iscriptevaluator.exe from here.
+if [ -d "$valve/legacycompat" ] && [ -n "$STEAM_COMPAT_CLIENT_INSTALL_PATH" ]; then
+    mkdir -p "$STEAM_COMPAT_CLIENT_INSTALL_PATH/legacycompat"
+    cp -n "$valve/legacycompat/"* "$STEAM_COMPAT_CLIENT_INSTALL_PATH/legacycompat/" 2>/dev/null
+fi
+
+program="$1"
+case "$program" in
+    "$STEAM_COMPAT_INSTALL_PATH"/*) ;;
+    *)  # a helper Steam runs outside the game (installer scripts, redistributables)
+        echo "helper: $*" >> "$log"
+        exec "$wine" "$@" >> "$log" 2>&1 ;;
+esac
+
+shift
+echo "game: $program $*" >> "$log"
+# Keep a Wine log of every Steam launch while the integration is new (build/logs/<appid>-*.log).
+export HADRON_LOG="${HADRON_LOG:-1}"
+cd "$(dirname "$program")" || exit 1
+# Stay in the foreground: Steam tracks this process, and its Stop button sends it SIGTERM, which
+# has to end the game's whole Wine session rather than just the launcher.
+"$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" &
+game=$!
+trap '"$ROOT/dist/bin/wineserver" -k; wait "$game"; exit 143' TERM INT HUP
+wait "$game"

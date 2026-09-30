@@ -10,7 +10,11 @@ hadron_candidates() {
         | awk '{ start = $3 $4 $5 $6 $7; gsub(":", "", start); print $1, $2, start }'
 }
 
+# This checkout's real path: lsof reports mapped files by it, and ROOT may be reached through a
+# symlink (Steam launches go through ~/Library/Application Support/Hadron/runtime).
+HADRON_REAL_ROOT="$(cd "$ROOT" && pwd -P)"
+
 # Whether process $1 belongs to this checkout.
 is_hadron_process() {
-    lsof -a -p "$1" -d txt -Fn 2>/dev/null | grep -qF "$ROOT/"
+    lsof -a -p "$1" -d txt -Fn 2>/dev/null | grep -qF "$HADRON_REAL_ROOT/"
 }
