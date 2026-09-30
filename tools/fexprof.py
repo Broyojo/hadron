@@ -56,7 +56,9 @@ def main():
         parts = line.rstrip('\n').split(' ', 2)
         if len(parts) == 3:
             blocks.append((int(parts[0], 16), int(parts[1], 16), parts[2]))
-    blocks.sort()
+    # By address only: the sort is stable, so where FEX reused an address after clearing its
+    # cache, the newest translation (last in the file) stays last and bisect finds it.
+    blocks.sort(key=lambda b: b[0])
     starts = [b[0] for b in blocks]
 
     by_module, by_block = collections.Counter(), collections.Counter()
