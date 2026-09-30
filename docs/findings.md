@@ -280,6 +280,22 @@ geometry shaders (Mesa MR !44786 pending), sparse resources (caps D3D12 at featu
 an override), `VK_EXT_dynamic_rendering_unused_attachments`. vkd3d-proton also needs DXVK's dxgi.dll
 for swapchains, which conflicts with DXMT's; DXGI will have to be picked per API.
 
+Teardown through this stack (`HADRON_D3D12=vkd3d`, which installs vkd3d-proton and DXVK's dxgi.dll into
+the prefix): with the missing-feature checks in vkd3d-proton and DXVK relaxed and feature level 12_0
+forced, all as local diagnostics only, it creates its device and swapchain and renders sky, lighting,
+water and HUD, but not the voxel world. On the way, KosmicKrisp asserted writing a sampled-image null
+descriptor past the end of a mutable set: vkd3d-proton's null-descriptor template wrote the requested
+null type into every mutable set, including sets whose type list can't hold it, and KosmicKrisp sizes
+mutable descriptors by their list (16 bytes in the raw buffer set, 64 for a sampled image).
+vkd3d-proton patch 0001 writes each set a null type it can hold. DXVK's dxgi skips the GPU unless it has
+DXVK's D3D11 features (fillModeNonSolid, geometryShader), though vkd3d-proton only presents through it.
+
+vkd3d-proton's own test suite (`tests/d3d12.exe`, built with `-Denable_tests=true`) runs on KosmicKrisp
+through Wine and maps the remaining driver work. First findings: `SampleLevel` at LOD exactly 0.5/1.5
+picks the lower mip (D3D rounds up; Vulkan allows either), one depth-compare sampling case is wrong, and
+creating a pipeline statistics query pool asserts (KosmicKrisp supports only occlusion and timestamp
+queries; D3D12 requires pipeline statistics).
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

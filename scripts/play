@@ -14,6 +14,8 @@
 # fractions for smooth scrolling, for applications that scale by the wheel delta.
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
 # limits those not marked large address aware to 2GB, as on Windows.
+# HADRON_D3D12=vkd3d runs D3D12 through vkd3d-proton on KosmicKrisp (experimental; see
+# docs/findings.md #22 for what the driver still lacks).
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
@@ -50,6 +52,25 @@ esac
 # D3D9 goes through mtld3d (D3D9 -> Metal), installed in the prefix by scripts/mtld3d-prefix
 # enable; HADRON_D3D9=wined3d uses Wine's own D3D9 (over OpenGL) instead, for comparisons.
 [ "${HADRON_D3D9:-mtld3d}" = mtld3d ] && overrides="$overrides;d3d9=n,b"
+# Vulkan goes to KosmicKrisp (Mesa's Vulkan on Metal, scripts/build-vulkan.sh); MoltenVK, which the
+# Vulkan loader would find otherwise, can't create an instance under Wine.
+icd="$ROOT/dist/mesa/share/vulkan/icd.d/kosmickrisp_mesa_icd.aarch64.json"
+[ -f "$icd" ] || icd=
+# HADRON_D3D12=vkd3d: D3D12 through vkd3d-proton on Vulkan, presenting through DXVK's DXGI. Per game
+# for now, since that DXGI replaces DXMT's, which D3D10/11 games need; games load d3d12.dll at run
+# time, so the choice can't come from their imports.
+if [ "${HADRON_D3D12:-}" = vkd3d ]; then
+    [ -n "$icd" ] || { echo "HADRON_D3D12=vkd3d needs KosmicKrisp: run scripts/build-vulkan.sh" >&2; exit 1; }
+    for f in vkd3d-proton/x64/d3d12.dll vkd3d-proton/x64/d3d12core.dll dxvk/x64/dxgi.dll; do
+        src="$ROOT/dist/$f"; dst="$PREFIX/drive_c/windows/system32/$(basename "$f")"
+        [ -f "$src" ] || { echo "missing $src: run scripts/build-vulkan.sh" >&2; exit 1; }
+        cmp -s "$src" "$dst" || cp "$src" "$dst"
+    done
+    overrides="$overrides;d3d12,d3d12core,dxgi=n"
+    # vkd3d-proton caches pipelines in the working directory, the game's install, unless told otherwise.
+    mkdir -p "$PREFIX/shadercache"
+    vkd3d_cache="$PREFIX/shadercache"
+fi
 # HADRON_VSYNC=game|on|off: whether presents wait for a display refresh. game (the default)
 # follows each game's own vsync choice as a Windows driver does; on and off override it.
 mtld3d_config="${MTLD3D_CONFIG:-color.hdr.enable=false}"
@@ -78,10 +99,15 @@ set -- "$ROOT/dist/bin/wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.e
 for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
     case "$var" in
         WINEPREFIX|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
+        VKD3D_SHADER_CACHE_PATH) [ -n "${vkd3d_cache:-}" ] && continue ;;
     esac
     eval "value=\${$var}"
     set -- "$var=$value" "$@"
 done
+# Paths may contain spaces (Steam runs this through ~/Library/Application Support), so these go
+# through the argument list too rather than as unquoted expansions below.
+[ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "$@"
+[ -n "$vkd3d_cache" ] && set -- "VKD3D_SHADER_CACHE_PATH=$vkd3d_cache" "$@"
 
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     TMPDIR="${TMPDIR:-/tmp}" \

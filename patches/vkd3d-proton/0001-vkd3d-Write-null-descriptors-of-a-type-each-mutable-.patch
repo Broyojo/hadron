@@ -1,0 +1,106 @@
+From 5375d17caa333f54f99ca5c035403576e96fa958 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 30 Sep 2026 14:53:50 -0400
+Subject: [PATCH] vkd3d: Write null descriptors of a type each mutable set can
+ hold.
+
+The null descriptor template replaced every mutable write's type with the
+requested null type, including sets whose mutable type list doesn't contain
+it: an image null into the raw buffer set, or a buffer null into the typed
+set. That's invalid usage, and drivers that size mutable descriptors by
+their type list (KosmicKrisp: 16 bytes for the buffer set, 64 for a sampled
+image) write past the end of the set.
+
+Remember each mutable set's type list in the template, and write the set's
+initial null type when it can't hold the requested one.
+---
+ libs/vkd3d/resource.c      | 27 ++++++++++++++++++++++++++-
+ libs/vkd3d/state.c         |  2 +-
+ libs/vkd3d/vkd3d_private.h |  6 ++++++
+ 3 files changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/libs/vkd3d/resource.c b/libs/vkd3d/resource.c
+index 0fa8fb1e..42c7d0bc 100644
+--- a/libs/vkd3d/resource.c
++++ b/libs/vkd3d/resource.c
+@@ -5701,7 +5701,15 @@ static void d3d12_descriptor_heap_write_null_descriptor_template(vkd3d_cpu_descr
+         {
+             writes[i] = null_descriptor_template->writes.descriptors.writes[i];
+             if (writes[i].descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT)
+-                writes[i].descriptorType = vk_mutable_descriptor_type;
++            {
++                /* A mutable binding may only hold the types in its list, and drivers size its
++                 * descriptors by that list: a set that can't hold this null type (the raw buffer
++                 * set for an image, the typed set for a buffer) gets a null of a type it can hold. */
++                if (null_descriptor_template->writes.descriptors.mutable_type_masks[i] & (1u << vk_mutable_descriptor_type))
++                    writes[i].descriptorType = vk_mutable_descriptor_type;
++                else
++                    writes[i].descriptorType = null_descriptor_template->writes.descriptors.fallback_null_types[i];
++            }
+             writes[i].dstArrayElement = offset;
+         }
+ 
+@@ -8878,6 +8886,23 @@ static void d3d12_descriptor_heap_add_null_descriptor_template_descriptors(
+     /* For mutable, will be replaced when instantiating template. */
+     write->descriptorType = set_info->vk_descriptor_type;
+ 
++    if (set_info->vk_descriptor_type == VK_DESCRIPTOR_TYPE_MUTABLE_EXT)
++    {
++        VkDescriptorType types[VKD3D_MAX_MUTABLE_DESCRIPTOR_TYPES];
++        uint32_t count, mask = 0, i;
++
++        count = vkd3d_bindless_build_mutable_type_list(types,
++                descriptor_heap->device->bindless_state.flags, set_info->flags);
++        for (i = 0; i < count; i++)
++            mask |= 1u << types[i];
++
++        descriptor_heap->null_descriptor_template.writes.descriptors.mutable_type_masks[index] = mask;
++        /* The type the heap's descriptors start out as, which the set can hold. */
++        descriptor_heap->null_descriptor_template.writes.descriptors.fallback_null_types[index] =
++                (mask & (1u << set_info->vk_init_null_descriptor_type)) ?
++                set_info->vk_init_null_descriptor_type : types[0];
++    }
++
+     write->pBufferInfo = &descriptor_heap->null_descriptor_template.writes.descriptors.buffer;
+     write->pImageInfo = &descriptor_heap->null_descriptor_template.writes.descriptors.image;
+     write->pTexelBufferView = &descriptor_heap->null_descriptor_template.writes.descriptors.buffer_view;
+diff --git a/libs/vkd3d/state.c b/libs/vkd3d/state.c
+index ce7f54ec..6884d961 100644
+--- a/libs/vkd3d/state.c
++++ b/libs/vkd3d/state.c
+@@ -6710,7 +6710,7 @@ static uint32_t d3d12_max_host_descriptor_count_from_heap_type(struct d3d12_devi
+     }
+ }
+ 
+-static uint32_t vkd3d_bindless_build_mutable_type_list(VkDescriptorType *list, uint32_t bindless_flags, uint32_t set_flags)
++uint32_t vkd3d_bindless_build_mutable_type_list(VkDescriptorType *list, uint32_t bindless_flags, uint32_t set_flags)
+ {
+     uint32_t count = 0;
+ 
+diff --git a/libs/vkd3d/vkd3d_private.h b/libs/vkd3d/vkd3d_private.h
+index 63154f9d..4247773f 100644
+--- a/libs/vkd3d/vkd3d_private.h
++++ b/libs/vkd3d/vkd3d_private.h
+@@ -1540,6 +1540,10 @@ struct d3d12_null_descriptor_template
+         struct
+         {
+             struct VkWriteDescriptorSet writes[VKD3D_MAX_BINDLESS_DESCRIPTOR_SETS];
++            /* For mutable sets: the descriptor types the set's binding may hold (bit per type),
++             * and the null type to write when it can't hold the requested one. */
++            uint32_t mutable_type_masks[VKD3D_MAX_BINDLESS_DESCRIPTOR_SETS];
++            VkDescriptorType fallback_null_types[VKD3D_MAX_BINDLESS_DESCRIPTOR_SETS];
+             VkDescriptorBufferInfo buffer;
+             VkDescriptorImageInfo image;
+             VkBufferView buffer_view;
+@@ -4364,6 +4368,8 @@ static inline struct vkd3d_descriptor_binding vkd3d_bindless_state_binding_from_
+     return binding;
+ }
+ 
++uint32_t vkd3d_bindless_build_mutable_type_list(VkDescriptorType *list, uint32_t bindless_flags, uint32_t set_flags);
++
+ static inline VkDescriptorType vkd3d_bindless_state_get_cbv_descriptor_type(const struct vkd3d_bindless_state *bindless_state)
+ {
+     return bindless_state->flags & VKD3D_BINDLESS_CBV_AS_SSBO
+-- 
+2.54.0 (Apple Git-157)
+
