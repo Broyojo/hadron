@@ -18,9 +18,23 @@ mem_limit_mb=$(( ${HADRON_MEM_LIMIT_GB:-$(( ram_gb / 2 ))} * 1024 ))
 swap_limit_mb=${HADRON_SWAP_LIMIT_MB:-2048}
 disk_min_mb=$(( ${HADRON_DISK_MIN_GB:-5} * 1024 ))
 
-wine_rss_mb() {  # resident memory of this checkout's Wine processes, and how many there are
-    ps -Ao rss=,command= | grep -E 'C:\\windows|Z:\\|proton-apple/dist|wineserver' | grep -v grep \
-        | awk '{ kb += $1; n++ } END { printf "%d %d\n", kb / 1024, n }'
+# PIDs already checked, so lsof runs once per process rather than every second
+ours=" " others=" "
+wine_rss() {  # sets rss (MB) and procs for this checkout's Wine processes
+    rss=0 procs=0
+    for entry in $(ps -Ao pid=,rss=,command= | grep -E 'C:\\windows|Z:\\|wine|wineserver' | grep -v grep \
+                   | awk '{ print $1 ":" $2 }'); do
+        p=${entry%%:*} kb=${entry#*:}
+        case "$others" in *" $p "*) continue ;; esac
+        case "$ours" in
+            *" $p "*) ;;
+            *)  # like scripts/stop: ours if it has files from this checkout mapped
+                if lsof -a -p "$p" -d txt -Fn 2>/dev/null | grep -qF "$ROOT/"; then ours="$ours$p "
+                else others="$others$p "; continue
+                fi ;;
+        esac
+        rss=$((rss + kb / 1024)) procs=$((procs + 1))
+    done
 }
 swap_used_mb() {
     sysctl -n vm.swapusage | sed -E 's/.*used = ([0-9.]+)M.*/\1/' | cut -d. -f1
@@ -28,7 +42,7 @@ swap_used_mb() {
 
 echo "watchdog: limits ${mem_limit_mb} MB resident, ${swap_limit_mb} MB swap, ${disk_min_mb} MB free disk, critical pressure" >> "$log"
 while kill -0 "$pid" 2>/dev/null; do
-    set -- $(wine_rss_mb); rss=$1 procs=$2
+    wine_rss
     pressure=$(sysctl -n kern.memorystatus_vm_pressure_level)
     swap=$(swap_used_mb)
     disk=$(df -m "$ROOT" | awk 'NR == 2 { print $4 }')
