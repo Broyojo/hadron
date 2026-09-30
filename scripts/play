@@ -6,6 +6,8 @@
 #
 # Only an allowlist of environment variables reaches the game: host secrets never do.
 # HADRON_LOG=1 writes module load addresses and errors to build/logs/ for crash analysis.
+# 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
+# limits those not marked large address aware to 2GB, as on Windows.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
@@ -57,6 +59,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$overrides}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
     FEX_DISKCACHE="${FEX_DISKCACHE:-1}" \
+    WINE_LARGE_ADDRESS_AWARE="${HADRON_LARGE_ADDRESS_AWARE:-1}" \
     MTLD3D_NO_CRASH_HANDLER=1 \
     MTLD3D_CONFIG="${MTLD3D_CONFIG:-color.hdr.enable=false}" \
     ${RUST_LOG:+RUST_LOG=$RUST_LOG} \

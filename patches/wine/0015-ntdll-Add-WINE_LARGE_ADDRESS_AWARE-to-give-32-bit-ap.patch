@@ -1,0 +1,50 @@
+From 18370d8f8483d8baeddb4930590597b96f69700a Mon Sep 17 00:00:00 2001
+From: hadron <dev@hadron.invalid>
+Date: Wed, 30 Sep 2026 08:59:10 -0400
+Subject: [PATCH 15/15] ntdll: Add WINE_LARGE_ADDRESS_AWARE to give 32-bit
+ applications 4GB.
+
+Like Proton's PROTON_FORCE_LARGE_ADDRESS_AWARE: WoW64 applications not
+marked large address aware get the whole 4GB address space. Wine's
+graphics layers keep more of their memory inside the process than
+Windows drivers do, so a game that fits in 2GB on Windows can run out of
+it: Ultimate Custom Night crashed in mtld3d with 79MB left.
+---
+ dlls/ntdll/unix/virtual.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 7ad666faa2..c4dfc417e6 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -4254,6 +4254,18 @@ static struct thread_data *init_thread_data( void *ptr )
+     return data;
+ }
+ 
++/* Whether a 32-bit application gets the whole 4GB address space under WoW64. WINE_LARGE_ADDRESS_AWARE=1
++ * grants it to applications not marked large address aware, as Proton does by default: Wine's graphics
++ * layers keep more of their memory inside the process than Windows drivers do, so games that fit in 2GB
++ * on Windows can run out of it. */
++static BOOL is_large_address_aware(void)
++{
++    const char *env;
++
++    if (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) return TRUE;
++    return (env = getenv( "WINE_LARGE_ADDRESS_AWARE" )) && atoi( env );
++}
++
+ /* enable use of a large address space when allowed by the application */
+ static void set_large_address_space(void)
+ {
+@@ -4276,7 +4288,7 @@ static void set_large_address_space(void)
+             if (use_aslr()) free_reserved_memory( 0, (char *)0x7ffe0000 );
+ #endif
+         }
+-        else if (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)
++        else if (is_large_address_aware())
+         {
+             user_space_wow_limit = limit_4g - 1;
+             /* reserve space for top-down allocations; some apps break if the entire high 2G is available */
+-- 
+2.54.0 (Apple Git-157)
+
