@@ -54,19 +54,49 @@ static void clear_steam_process(void)
     RegCloseKey( key );
 }
 
+/* Hand a steam:// URL to Mac Steam: winebrowser opens it with the host's URL handler. */
+static int open_steam_url( const WCHAR *url )
+{
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    WCHAR cmd[2048];
+
+    swprintf( cmd, sizeof(cmd) / sizeof(cmd[0]), L"winebrowser \"%ls\"", url );
+    if (!CreateProcessW( NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi )) return 1;
+    WaitForSingleObject( pi.hProcess, INFINITE );
+    CloseHandle( pi.hThread );
+    CloseHandle( pi.hProcess );
+    return 0;
+}
+
+/* Games run the SteamExe registered below (this program, staged as steam.exe) to talk to the
+ * Steam client: steam:// links, "-applaunch <appid>", or nothing to bring Steam up. Forward
+ * those to Mac Steam. Returns -1 when argv is a game to launch instead. */
+static int forward_steam_request( int argc, WCHAR **argv )
+{
+    WCHAR url[64];
+
+    if (argc < 2) return open_steam_url( L"steam://open/main" );
+    if (!wcsnicmp( argv[1], L"steam:", 6 )) return open_steam_url( argv[1] );
+    if (!wcsicmp( argv[1], L"-applaunch" ) && argc > 2)
+    {
+        swprintf( url, sizeof(url) / sizeof(url[0]), L"steam://rungameid/%ls", argv[2] );
+        return open_steam_url( url );
+    }
+    return -1;
+}
+
 int wmain( int argc, WCHAR **argv )
 {
+    int forwarded = forward_steam_request( argc, argv );
+
     const WCHAR *steam_dir = L"C:\\Program Files (x86)\\Steam";
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
     WCHAR *cmdline, *game_dir, *p;
     DWORD exit_code = 1;
 
-    if (argc < 2)
-    {
-        fwprintf( stderr, L"usage: hadron-steam.exe <game.exe> [args...]\n" );
-        return 1;
-    }
+    if (forwarded >= 0) return forwarded;
 
     /* everything after our own name is the game's command line, passed through verbatim */
     cmdline = GetCommandLineW();
