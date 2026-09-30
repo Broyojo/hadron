@@ -18,23 +18,32 @@ mem_limit_mb=$(( ${HADRON_MEM_LIMIT_GB:-$(( ram_gb / 2 ))} * 1024 ))
 swap_limit_mb=${HADRON_SWAP_LIMIT_MB:-2048}
 disk_min_mb=$(( ${HADRON_DISK_MIN_GB:-5} * 1024 ))
 
-# PIDs already checked, so lsof runs once per process rather than every second
+. "$ROOT/scripts/hadron-procs.sh"
+
+# Processes already classified, as pid:start keys, so lsof runs once per process rather than
+# every second; the start time keeps a reused PID from inheriting its predecessor's answer.
 ours=" " others=" "
-wine_rss() {  # sets rss (MB) and procs for this checkout's Wine processes
-    rss=0 procs=0
-    for entry in $(ps -Ao pid=,rss=,command= | grep -E 'C:\\windows|Z:\\|wine|wineserver' | grep -v grep \
-                   | awk '{ print $1 ":" $2 }'); do
-        p=${entry%%:*} kb=${entry#*:}
-        case "$others" in *" $p "*) continue ;; esac
+wine_rss() {  # sets rss (MB) and procs for this checkout's processes
+    rss=0 procs=0 seen=" "
+    for entry in $(hadron_candidates | awk '{ print $1 ":" $2 ":" $3 }'); do
+        p=${entry%%:*} rest=${entry#*:}
+        kb=${rest%%:*} key="$p:${rest#*:}"
+        seen="$seen$key "
+        case "$others" in *" $key "*) continue ;; esac
         case "$ours" in
-            *" $p "*) ;;
-            *)  # like scripts/stop: ours if it has files from this checkout mapped
-                if lsof -a -p "$p" -d txt -Fn 2>/dev/null | grep -qF "$ROOT/"; then ours="$ours$p "
-                else others="$others$p "; continue
+            *" $key "*) ;;
+            *)  if is_hadron_process "$p"; then ours="$ours$key "
+                else others="$others$key "; continue
                 fi ;;
         esac
         rss=$((rss + kb / 1024)) procs=$((procs + 1))
     done
+    ours=$(keep_seen "$ours") others=$(keep_seen "$others")
+}
+keep_seen() {  # the keys of $1 still running, so the lists don't grow over a long session
+    kept=" "
+    for k in $1; do case "$seen" in *" $k "*) kept="$kept$k " ;; esac; done
+    printf '%s' "$kept"
 }
 swap_used_mb() {
     sysctl -n vm.swapusage | sed -E 's/.*used = ([0-9.]+)M.*/\1/' | cut -d. -f1

@@ -1,7 +1,6 @@
 #!/bin/sh
 # Stop every Hadron Wine process (all prefixes), including orphans whose wineserver is gone.
-# Leaves the native Mac Steam client and other Wine installations (CrossOver etc.) alone:
-# a process is only killed if it has files from this checkout mapped.
+# Leaves the native Mac Steam client and other Wine installations alone (see hadron-procs.sh).
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 for p in "$ROOT"/prefix/*; do
     [ -d "$p" ] || continue
@@ -9,11 +8,9 @@ for p in "$ROOT"/prefix/*; do
     [ -x "$ROOT/dist-dev/bin/wineserver" ] && WINEPREFIX="$p" "$ROOT/dist-dev/bin/wineserver" -k 2>/dev/null
 done
 sleep 1
-ours() {  # print the PIDs of Wine-looking processes that belong to this checkout
-    ps -Ao pid,command | grep -E 'C:\\windows|C:\\Program Files|Z:\\|proton-apple/dist|wineserver|winedbg' | grep -v grep \
-        | awk '{print $1}' | while read -r pid; do
-            lsof -a -p "$pid" -d txt -Fn 2>/dev/null | grep -qF "$ROOT/" && echo "$pid"
-        done
+. "$ROOT/scripts/hadron-procs.sh"
+ours() {  # print the PIDs of this checkout's processes
+    hadron_candidates | while read -r pid rss start; do is_hadron_process "$pid" && echo "$pid"; done
 }
 ours | xargs kill -9 2>/dev/null; true
 echo "remaining Hadron processes: $(ours | wc -l | tr -d ' ')"

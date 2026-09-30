@@ -191,6 +191,25 @@ the others alone. Wine 0016 captures only the display being changed and releases
 mode is restored. Using a window on the other screen still needs Cmd-Tab, much as clicking another
 monitor minimizes an exclusive-fullscreen game on Windows.
 
+## Screen tearing: vsync the way Windows does it (resolved, #20)
+
+Every game could tear: mtld3d and DXMT both set Metal display sync off (`displaySyncEnabled =
+false`) and treated a vsync request as a frame-rate throttle only. Both now follow Windows:
+
+- A fullscreen device follows the game: D3D9's presentation interval, DXGI's sync interval.
+  Vsync on waits for a display refresh and never tears; vsync off presents at once.
+- A windowed device is composited by DWM on Windows, at a refresh, whatever it asks for, so it
+  syncs here too. Source ignores its own vsync setting in a window for that reason. DXGI's one
+  exception is honored: a windowed game that presents with sync interval 0 and
+  `DXGI_PRESENT_ALLOW_TEARING` (Unity does, with vsync off) tears, as on Windows.
+- `HADRON_VSYNC=game|on|off` (default `game`) overrides the game for titles without a vsync
+  setting; `scripts/play` maps it to mtld3d's `present.vsync` and DXMT's `dxgi.vsync`.
+
+Checked by eye: FNaF (asks for immediate, fullscreen) stops tearing with `HADRON_VSYNC=on`;
+Portal's "Wait for vertical sync" re-paces the layer live in fullscreen; Among Us tears with its
+vsync off and not with it on. Vsync adds some input latency, as on Windows; fewer queued
+drawables while display sync is on would reduce it (next step).
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
