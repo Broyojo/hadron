@@ -331,6 +331,15 @@ mismatch and PS layer tests pass (527 checks; test_primitive_id_read_tess_geom h
 Patch 0010 lists the geometry stage for DGC: with geometryShader on, vkd3d-proton turns DGC off
 unless every graphics stage is supported, which briefly made Teardown's voxels vanish again.
 
+Vulkan CTS 1.4.6.2 (built in build/vk-gl-cts, run natively against KosmicKrisp): dEQP-VK.geometry.*
+passes 181/181 supported. dEQP-VK.dgc.ext.* passes most supported cases (execution sets aren't
+exposed, so most are NotSupported) but fails DGC combined with tessellation or a geometry shader when a
+sequence draws several instances: the second instance of the third sequence is missing (GS) or has
+instance index 0 (tessellation, intermittently); indexed and non-indexed, Vulkan and DXGI index modes.
+Plain multi-draw with tessellation passes (2448 cases, three runs), so the difference is the indirect
+path DGC always takes. dEQP-VK.dgc.ext.graphics.misc.reuse_dgc_for_normal_fast_lib_order_normal_dgc
+crashes the test binary. Open.
+
 The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
 back slowly, and swap left over from earlier runs stopped Teardown at launch.
 
