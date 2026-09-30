@@ -250,6 +250,75 @@ the file watcher out of prefix/, build/, dist/, src/, games/ and toolchains/, an
 Bugs found on the way: a path with a space in `STEAM_DYLD_INSERT_LIBRARIES` split `play`'s `env` call;
 the watchdog missed processes started through the symlinked runtime (lsof reports real paths).
 
+## Vulkan on Metal: KosmicKrisp through Wine, vkd3d-proton blocked on two driver features (#22)
+
+KosmicKrisp (Mesa main, `scripts/build-vulkan.sh mesa`) reports Vulkan 1.4 on the M2 Pro, and Wine's
+winevulkan reaches it through Homebrew's Khronos loader with `VK_DRIVER_FILES` pointing at its ICD JSON:
+an x86_64 program under FEX (`tools/vkprobe.c`) sees the GPU with 142 device extensions. With the
+default MoltenVK the same program gets `VK_ERROR_INCOMPATIBLE_DRIVER` from `vkCreateInstance`.
+
+vkd3d-proton 3.0.1 (`scripts/build-vulkan.sh vkd3d-proton`, x86_64 PE for now; llvm-mingw's libc++
+needs `<new>` and `<exception>` force-included) first crashed in `vkGetPhysicalDeviceProperties2`.
+That was Wine's generated thunk: `VkPhysicalDeviceLayeredApiVulkanPropertiesKHR` (maintenance7) holds
+a `VkPhysicalDeviceProperties2`, and make_vulkan skipped its input conversion because the member is
+returnedonly, so its pNext was uninitialized and the output conversion followed it. Wine patch 0017
+converts extensible returnedonly members on input; upstream master has the same bug. MoltenVK
+doesn't expose maintenance7, so nothing hit it before.
+
+With that, `D3D12CreateDevice` (`tools/d3d12probe.c`) fails on vkd3d-proton's hard requirements that
+KosmicKrisp doesn't meet yet:
+- transform feedback (`VK_EXT_transform_feedback`, D3D stream output; Metal has none, so the driver has
+  to emulate it, as Asahi's Honeykrisp does);
+- single-texel alignment for texel buffer views (KosmicKrisp requires 16 bytes; D3D12 typed buffer
+  views may start at any element, which a driver can support by folding the remainder into the shader's
+  index, again as Honeykrisp does).
+
+Everything else vkd3d-proton requires is there (Vulkan 1.3, 1M update-after-bind descriptors,
+robustness2 with nullDescriptor, push descriptors, mutable descriptors, maintenance5/6, zero instance
+divisors, samplerMirrorClampToEdge, shaderDrawParameters). Also missing, but not hard requirements:
+geometry shaders (Mesa MR !44786 pending), sparse resources (caps D3D12 at feature level 11_1 without
+an override), `VK_EXT_dynamic_rendering_unused_attachments`. vkd3d-proton also needs DXVK's dxgi.dll
+for swapchains, which conflicts with DXMT's; DXGI will have to be picked per API.
+
+Teardown through this stack (`HADRON_D3D12=vkd3d`, which installs vkd3d-proton and DXVK's dxgi.dll into
+the prefix): with the missing-feature checks in vkd3d-proton and DXVK relaxed and feature level 12_0
+forced, all as local diagnostics only, it creates its device and swapchain and renders sky, lighting,
+water and HUD, but not the voxel world. On the way, KosmicKrisp asserted writing a sampled-image null
+descriptor past the end of a mutable set: vkd3d-proton's null-descriptor template wrote the requested
+null type into every mutable set, including sets whose type list can't hold it, and KosmicKrisp sizes
+mutable descriptors by their list (16 bytes in the raw buffer set, 64 for a sampled image).
+vkd3d-proton patch 0001 writes each set a null type it can hold. DXVK's dxgi skips the GPU unless it has
+DXVK's D3D11 features (fillModeNonSolid, geometryShader), though vkd3d-proton only presents through it.
+
+vkd3d-proton's own test suite (`tests/d3d12.exe`, built with `-Denable_tests=true`) runs on KosmicKrisp
+through Wine and maps the remaining driver work. First findings: `SampleLevel` at LOD exactly 0.5/1.5
+picks the lower mip (D3D rounds up; Vulkan allows either), one depth-compare sampling case is wrong, and
+creating a pipeline statistics query pool asserts (KosmicKrisp supports only occlusion and timestamp
+queries; D3D12 requires pipeline statistics).
+
+Teardown's voxels are drawn GPU-driven: ExecuteIndirect with per-object root CBV, vertex and index
+buffers. vkd3d-proton implements that with VK_EXT_device_generated_commands, which KosmicKrisp lacked,
+so it dropped the per-draw state and the voxels vanished. Mesa patch 0001 adds the extension (behind
+`MESA_KK_EXPERIMENTAL=dgc`, which `play` sets): at execute time a compute kernel (libkk `kk_dgc.cl`)
+writes one copy of the root descriptor table per sequence with its push constants, sequence index and
+vertex buffer bases patched in, and the draw or dispatch arguments (zeroed past the count buffer or
+under failed predication); per-sequence index buffers are copied into the device heap by poly's unroll,
+since Metal takes an index buffer only from the CPU; the CPU then encodes one indirect draw per sequence
+with its own root bound. Preprocessing is a no-op because KosmicKrisp re-records command buffers on
+resubmit, so the work has to happen at execute. vkd3d-proton patch 0002 stops requiring DGC support for
+geometry/tessellation stages the device doesn't have. `tools/dgc-test/run.sh [2]` tests the three
+signature shapes Teardown uses, natively against the driver. The bug that took longest: non-indexed
+sequences were issued as indexed draws with whatever index buffer was bound (the draw path decides on
+the index size), which drew Teardown's boxes with stale indices, as spikes and half faces.
+
+With DGC, Teardown renders correctly on D3D12 (still with the diagnostics: relaxed transform-feedback and
+texel-alignment checks, forced feature level 12_0). Remaining driver work for an honest device:
+transform feedback, single-texel buffer alignment, sparse resources (feature level 12_0), pipeline
+statistics queries, timestamp query pools above Metal's 4096-entry counter heaps, and geometry shaders.
+
+The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
+back slowly, and swap left over from earlier runs stopped Teardown at launch.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

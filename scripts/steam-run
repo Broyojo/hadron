@@ -24,7 +24,7 @@ argc=$#
 while [ "$argc" -gt 0 ]; do
     arg="$1"; shift; argc=$((argc - 1))
     case "$arg" in
-        HADRON_*=*|WINE*=*|DXMT_*=*|MTLD3D_*=*|MTL_*=*|DXVK_*=*|VKD3D_*=*|FEX_*=*|CX_*=*|D3DM_*=*|NOTPROTON_*=*|ROSETTA_*=*)
+        HADRON_*=*|WINE*=*|DXMT_*=*|MTLD3D_*=*|MTL_*=*|DXVK_*=*|VKD3D_*=*|MESA_*=*|FEX_*=*|CX_*=*|D3DM_*=*|NOTPROTON_*=*|ROSETTA_*=*)
             export "$arg" ;;
         *) set -- "$@" "$arg" ;;
     esac
