@@ -2,7 +2,9 @@
 
 ## Order of work (agreed 2026-09-29)
 
-1. Ultimate Custom Night lag (in progress; see docs/test-games.md). FNaF's fullscreen offset is fixed (Wine 0013).
+1. Ultimate Custom Night: done bar the frame-time dips in nights (docs/findings.md #18). Next small items: Portal's
+   quit-time assert (worker threads terminated at exit) and a clean mtld3d failure when a 32-bit process runs out of
+   address space.
 2. Harden the MAP_JIT code buffers (Wine 0011, FEX 0005):
    - an off switch (e.g. `HADRON_FEX_MAP_JIT=0`) falling back to page flipping, for A/B testing;
    - a real nesting counter for write windows (thread-local storage crashed in FEX's Windows DLLs; use

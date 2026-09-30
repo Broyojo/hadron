@@ -134,8 +134,10 @@ it with win32u, so `update_client_surfaces` never resized it on window moves (an
 Fix (Wine 0014): winemac takes the surface through `get_unused_client_surface` and
 `use_window_client_surface`, as win32u's Vulkan surfaces do (both now exported to drivers), keeps
 it in the window data and releases it on `DestroyWindow`. win32u then keeps the view in step with
-the client area and disposes of it with the window. DXMT gets the same fix. What remains of the
-cleanup below is the per-present notification, which would retire 0012.
+the client area and disposes of it with the window; a later device on the same window presents
+the kept surface again. DXMT gets the same fix. Known limit: a window that already has a GL or
+Vulkan view keeps using that one. What remains of the cleanup below is the per-present
+notification, which would retire 0012 and remove that limit.
 
 ## Ultimate Custom Night crash on GO (resolved, #17)
 
@@ -145,24 +147,49 @@ retention alone reached several hundred MB. Wine 0015 adds `WINE_LARGE_ADDRESS_A
 Proton's default `PROTON_FORCE_LARGE_ADDRESS_AWARE`, and `scripts/play` sets it
 (`HADRON_LARGE_ADDRESS_AWARE=0` to opt out). mtld3d should still fail cleanly rather than crash.
 
-## Ultimate Custom Night lag (in progress, #18)
+## Ultimate Custom Night lag (resolved, #18)
 
-mtld3d's telemetry build (`MTLD3D_PERF=1 scripts/build-mtld3d.sh`) logs `perf-kv` rows every 2 s.
-The menu ran at 12 fps: 65 ms of each 83 ms frame in vertex buffer Lock/Unlock. Clickteam's
-runtime keeps sprites in one 384 KiB `D3DPOOL_SYSTEMMEM` DYNAMIC buffer and, for each of ~1000
-sprites a frame, locks the whole buffer (offset 0, size 0, `NOOVERWRITE`), writes one quad and
-draws it. mtld3d's Staged path uploaded all 384 KiB at every Unlock (x86 memcpy under FEX) and
-the stale copies filled the 512 MB retention cap, forcing mid-frame GPU waits.
+The menu ran at 12 fps. Two causes, both general:
 
-Fix (mtld3d 0001): such an Unlock leaves the range pending and each draw uploads only the
-vertices it reads, as a Windows driver does for system memory. Vertex buffer time 65 ms ->
-0.05 ms, 12 -> 20 fps, no retention waits.
+**System-memory vertex buffers (mtld3d 0001).** Clickteam's runtime keeps its sprites in one
+384 KiB `D3DPOOL_SYSTEMMEM` vertex buffer and, for each of ~1000 sprites a frame, locks the whole
+buffer (offset 0, size 0, `NOOVERWRITE`), writes one quad and draws it. mtld3d uploaded all
+384 KiB at every Unlock (65 ms of an 83 ms frame, and the copies filled the retention cap). A
+Windows runtime processes system-memory buffers in software: each draw copies the vertices it
+names. mtld3d now records such draws as `Draw*PrimitiveUP` with only those vertices (and rebased
+indices) copied into the frame scratch; the buffer is uploaded only if a draw reads it on the GPU.
 
-Remaining at 20 fps: the game thread spends ~56% in 32-bit ntdll (`wcslen`,
-`RtlHashUnicodeString`, `RtlCompareUnicodeStrings`), found by mapping samples through FEX's
-block map (`FEX_BLOCKJITNAMING=1 FEX_DISKCACHE=0 scripts/play ...` writes /tmp/perf-<pid>.map).
-`trace+module` shows `GetModuleHandle("d3d9d.dll")` and a load of `d3d9.dll` by name ~1100
-times a second.
+Two earlier attempts at this failed and are worth remembering. Uploading each draw's range into
+the device buffer made every upload overlap the range the previous indexed draw is assumed to
+read (from its base vertex to the end of the buffer), so each one renamed the buffer with a
+whole-buffer GPU copy: ~18 GB/s of copies, which starved unified memory and froze the whole Mac
+(it had to be force-restarted). Passing the draw's vertex window to the encoder fixed that, but
+each upload still cost a page-aligned staging allocation (16 KiB for ~100 bytes), and in a night
+those filled the 32-bit address space (`page boxes 2416 MiB`) until mtld3d panicked. Watch
+`vbib_gpu_copy_bytes_total` and the address-space warnings after any change to upload paths.
+
+**D3DX's `DebugSetMute` lookup (mtld3d 0002).** The statically linked D3DX library looks up
+`DebugSetMute` in `d3d9d.dll`/`d3d9.dll` before its calls and caches only a found pointer.
+mtld3d didn't export it, so every D3DX call did `GetModuleHandle` twice, `LoadLibrary` and
+`GetProcAddress`: ~40% of the game thread, found by mapping samples through FEX's block map
+(`FEX_BLOCKJITNAMING=1 FEX_DISKCACHE=0`, then `tools/fexprof.py`). A lookup cache in Wine's
+loader helped less than the export and was dropped (`build/logs/wine-loader-cache.diff`).
+
+Result: the menu holds 60 fps, the game's own fixed rate (Clickteam titles run at the frame rate
+their developer set, whatever the display), with no staging uploads or retention; nights mostly
+hold 60 with some 20-33 ms stretches. Every Clickteam title and anything with static D3DX gains.
+
+`scripts/play` now starts `scripts/watchdog`, which logs memory once a second to
+`build/logs/*.mem.log` and stops the game on critical memory pressure, swap, a memory cap or low
+disk, so a runaway can't take the Mac down again.
+
+## Fullscreen blacked out other displays (resolved, #19)
+
+A game that changes the display mode (FNaF, UCN) blacked out an external monitor: winemac
+captured every display with `CGCaptureAllDisplays`. Windows changes one monitor's mode and leaves
+the others alone. Wine 0016 captures only the display being changed and releases it when its
+mode is restored. Using a window on the other screen still needs Cmd-Tab, much as clicking another
+monitor minimizes an exclusive-fullscreen game on Windows.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
