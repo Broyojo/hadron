@@ -32,4 +32,4 @@ maps them and the Steam bridge hangs; run with `HADRON_DISABLE_LSTEAMCLIENT=1` m
 
 | Game | Result | Notes |
 |---|---|---|
-| Portal | Runs, 120-300 fps (60 looking through portals) | Periodic stutter; crashes on 32-bit address-space exhaustion in wined3d's OpenGL buffer mapping. Needs a D3D9 -> Metal backend. Hardware TSO (`HADRON_HARDWARE_TSO=1`) makes it unplayably slow, so it's opt-in. |
+| Portal | **Playable and smooth** at 3024x1964 (full Retina), long sessions, no crashes | mtld3d (`HADRON_D3D9=mtld3d`), `-novid` until the Bink intro is fixed, Steam bridge off until Steam Play integration. Earlier stutter/crash (wined3d buffer copies) and lag spikes (W^X flips) fixed; see docs/findings.md. |
