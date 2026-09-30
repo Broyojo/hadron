@@ -10,6 +10,8 @@
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
 # A watchdog stops the game before memory use can make the Mac thrash; HADRON_MEM_LIMIT_GB
 # (default half of RAM) and HADRON_SWAP_LIMIT_MB (default 2048) set its limits.
+# Scrolling sends whole wheel notches, which every game handles; HADRON_PRECISE_SCROLLING=1 sends
+# fractions for smooth scrolling, for applications that scale by the wheel delta.
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
 # limits those not marked large address aware to 2GB, as on Windows.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -97,6 +99,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     STEAM_COMPAT_CLIENT_INSTALL_PATH="$MAC_STEAM" \
     ${HADRON_DISABLE_LSTEAMCLIENT:+HADRON_DISABLE_LSTEAMCLIENT=$HADRON_DISABLE_LSTEAMCLIENT} \
     ${HADRON_HARDWARE_TSO:+HADRON_HARDWARE_TSO=$HADRON_HARDWARE_TSO} \
+    ${HADRON_PRECISE_SCROLLING:+HADRON_PRECISE_SCROLLING=$HADRON_PRECISE_SCROLLING} \
     ${FEX_BLOCKJITNAMING:+FEX_BLOCKJITNAMING=$FEX_BLOCKJITNAMING} \
     STEAM_DYLD_INSERT_LIBRARIES="$STEAM_DYLD_INSERT_LIBRARIES" \
     "$@"
