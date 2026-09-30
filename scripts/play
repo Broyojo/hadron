@@ -6,6 +6,8 @@
 #
 # Only an allowlist of environment variables reaches the game: host secrets never do.
 # HADRON_LOG=1 writes module load addresses and errors to build/logs/ for crash analysis.
+# FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
+# /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
 # limits those not marked large address aware to 2GB, as on Windows.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -67,4 +69,5 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     STEAM_COMPAT_CLIENT_INSTALL_PATH="$MAC_STEAM" \
     ${HADRON_DISABLE_LSTEAMCLIENT:+HADRON_DISABLE_LSTEAMCLIENT=$HADRON_DISABLE_LSTEAMCLIENT} \
     ${HADRON_HARDWARE_TSO:+HADRON_HARDWARE_TSO=$HADRON_HARDWARE_TSO} \
+    ${FEX_BLOCKJITNAMING:+FEX_BLOCKJITNAMING=$FEX_BLOCKJITNAMING} \
     "$ROOT/dist/bin/wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
