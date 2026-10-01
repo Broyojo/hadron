@@ -48,7 +48,7 @@ a third-party launcher.
 
 ## Requirements
 
-- An Apple Silicon Mac with macOS 26.4 or later (developed on macOS 27).
+- An Apple Silicon Mac with macOS 27. Hadron has only been built and run there.
 - Xcode with its Metal toolchain, and Homebrew.
 - An Apple Developer account. Windows needs memory below 4GB, which macOS only grants to a
   loader signed with the cross-architecture entitlement; see
