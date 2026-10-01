@@ -1,31 +1,33 @@
-From 767711b15e76d329980c55bf136f3bfdeca22184 Mon Sep 17 00:00:00 2001
+From de8716b46378522b0544a128522e6007db08ca81 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 10:33:07 -0400
-Subject: [PATCH 24/24] kk: Discard writes to unbound sparse buffers and report
- texel buffer residency
+Subject: [PATCH] kk: Discard writes to unbound sparse buffers and report texel
+ buffer residency
 
 Generated-by: LLM
 ---
  src/kosmickrisp/bridge/mtl_command_queue.h    |  11 +-
  src/kosmickrisp/bridge/mtl_command_queue.m    |  14 +-
- src/kosmickrisp/vulkan/kk_buffer.c            |  28 +++
- src/kosmickrisp/vulkan/kk_buffer.h            |  14 ++
- src/kosmickrisp/vulkan/kk_buffer_view.c       |  29 +++
+ src/kosmickrisp/libkk/kk_dgc.cl               |   4 +-
+ src/kosmickrisp/vulkan/kk_buffer.c            |  43 ++-
+ src/kosmickrisp/vulkan/kk_buffer.h            |  15 +
+ src/kosmickrisp/vulkan/kk_buffer_view.c       |  29 ++
  src/kosmickrisp/vulkan/kk_buffer_view.h       |   1 +
  src/kosmickrisp/vulkan/kk_cmd_buffer.c        |  11 +-
  src/kosmickrisp/vulkan/kk_cmd_buffer.h        |   3 +
+ src/kosmickrisp/vulkan/kk_cmd_dgc.c           |   6 +-
  src/kosmickrisp/vulkan/kk_descriptor_set.c    |   6 +-
  src/kosmickrisp/vulkan/kk_descriptor_types.h  |   2 +-
- src/kosmickrisp/vulkan/kk_device.c            |  36 ++-
- src/kosmickrisp/vulkan/kk_device.h            |  15 ++
- .../vulkan/kk_nir_lower_descriptors.c         | 228 +++++++++++++++++-
- .../vulkan/kk_nir_lower_ssbo_residency.c      | 195 +++++++++++++++
- src/kosmickrisp/vulkan/kk_private.h           |   3 +
- src/kosmickrisp/vulkan/kk_queue.c             |  37 ++-
+ src/kosmickrisp/vulkan/kk_device.c            |  39 +-
+ src/kosmickrisp/vulkan/kk_device.h            |  16 +
+ .../vulkan/kk_nir_lower_descriptors.c         | 232 +++++++++++-
+ .../vulkan/kk_nir_lower_ssbo_residency.c      | 344 ++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_private.h           |  10 +
+ src/kosmickrisp/vulkan/kk_queue.c             |  37 +-
  src/kosmickrisp/vulkan/kk_shader.c            |  11 +-
  src/kosmickrisp/vulkan/kk_shader.h            |   5 +-
  src/kosmickrisp/vulkan/meson.build            |   1 +
- 19 files changed, 622 insertions(+), 28 deletions(-)
+ 21 files changed, 806 insertions(+), 34 deletions(-)
  create mode 100644 src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
 
 diff --git a/src/kosmickrisp/bridge/mtl_command_queue.h b/src/kosmickrisp/bridge/mtl_command_queue.h
@@ -83,11 +85,33 @@ index 7762f5e3441..75cd389959d 100644
              beforeQueueStages:MTLStageVertex | MTLStageFragment |
                                MTLStageDispatch | MTLStageBlit
              visibilityOptions:MTL4VisibilityOptionDevice];
+diff --git a/src/kosmickrisp/libkk/kk_dgc.cl b/src/kosmickrisp/libkk/kk_dgc.cl
+index a60d7dd2d35..576402d668c 100644
+--- a/src/kosmickrisp/libkk/kk_dgc.cl
++++ b/src/kosmickrisp/libkk/kk_dgc.cl
+@@ -62,7 +62,7 @@ libkk_dgc_process(constant struct libkk_dgc_params *p)
+       }
+ 
+       info[0] = active ? seq[p->ib_src_dw + 0] : 0;
+-      info[1] = active ? seq[p->ib_src_dw + 1] : 0;
++      info[1] = active ? seq[p->ib_src_dw + 1] & 0xffffu : 0;
+       info[2] = size_B / el_B;
+       info[3] = el_B;
+    }
+@@ -83,7 +83,7 @@ libkk_dgc_process(constant struct libkk_dgc_params *p)
+    for (uint v = 0; v < p->vb_count; v++) {
+       uint32_t binding = p->vb_binding[v];
+       global uint32_t *vb = seq + p->vb_src_dw[v];
+-      uint64_t va = vb[0] | ((uint64_t)vb[1] << 32);
++      uint64_t va = vb[0] | ((uint64_t)(vb[1] & 0xffffu) << 32);
+       uint32_t size_B = vb[2];
+       uint32_t stride_B = vb[3];
+ 
 diff --git a/src/kosmickrisp/vulkan/kk_buffer.c b/src/kosmickrisp/vulkan/kk_buffer.c
-index 1d0d7a3e0dc..2a5d8f8edbc 100644
+index 1d0d7a3e0dc..84c07df8305 100644
 --- a/src/kosmickrisp/vulkan/kk_buffer.c
 +++ b/src/kosmickrisp/vulkan/kk_buffer.c
-@@ -58,6 +58,26 @@ kk_CreateBuffer(VkDevice device, const VkBufferCreateInfo *pCreateInfo,
+@@ -58,6 +58,37 @@ kk_CreateBuffer(VkDevice device, const VkBufferCreateInfo *pCreateInfo,
        buffer->vk.device_address =
           mtl_buffer_get_gpu_address(buffer->metal.handle);
        kk_device_add_buffer_to_residency_set(dev, buffer->metal.handle);
@@ -100,21 +124,32 @@ index 1d0d7a3e0dc..2a5d8f8edbc 100644
 +         simple_mtx_lock(&dev->sparse_residency.lock);
 +         uint64_t offset =
 +            util_vma_heap_alloc(&dev->sparse_residency.heap, pages, 1u);
-+         simple_mtx_unlock(&dev->sparse_residency.lock);
-+         if (offset == 0u) {
++         uint32_t tag = util_idalloc_alloc(&dev->sparse_residency.tags);
++         if (offset == 0u || tag >= KK_SPARSE_RESIDENCY_TAGS) {
++            if (offset)
++               util_vma_heap_free(&dev->sparse_residency.heap, offset, pages);
++            util_idalloc_free(&dev->sparse_residency.tags, tag);
++            simple_mtx_unlock(&dev->sparse_residency.lock);
 +            kk_DestroyBuffer(device, kk_buffer_to_handle(buffer), pAllocator);
 +            return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
 +         }
++         simple_mtx_unlock(&dev->sparse_residency.lock);
 +
-+         memset(dev->sparse_residency.bo->cpu + offset, 0, pages);
++         void *map = dev->sparse_residency.bo->cpu;
++         memset(map + offset, 0, pages);
++         uint64_t *entry = map + KK_SPARSE_TAG_TABLE_OFFSET + tag * 16;
++         entry[0] = buffer->vk.device_address;
++         entry[1] = offset + 1u;
++
 +         buffer->residency.offset = offset;
 +         buffer->residency.pages = pages;
++         buffer->residency.tag = tag;
 +         kk_device_count_sparse_residency(dev, 1);
 +      }
     }
  
     *pBuffer = kk_buffer_to_handle(buffer);
-@@ -79,6 +99,14 @@ kk_DestroyBuffer(VkDevice device, VkBuffer _buffer,
+@@ -79,6 +110,15 @@ kk_DestroyBuffer(VkDevice device, VkBuffer _buffer,
         (buffer->vk.create_flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT))
        kk_device_remove_buffer_from_residency_set(dev, buffer->metal.handle);
  
@@ -122,6 +157,7 @@ index 1d0d7a3e0dc..2a5d8f8edbc 100644
 +      simple_mtx_lock(&dev->sparse_residency.lock);
 +      util_vma_heap_free(&dev->sparse_residency.heap, buffer->residency.offset,
 +                         buffer->residency.pages);
++      util_idalloc_free(&dev->sparse_residency.tags, buffer->residency.tag);
 +      simple_mtx_unlock(&dev->sparse_residency.lock);
 +      kk_device_count_sparse_residency(dev, -1);
 +   }
@@ -129,11 +165,21 @@ index 1d0d7a3e0dc..2a5d8f8edbc 100644
     if (buffer->metal.handle)
        mtl_release(buffer->metal.handle);
  
+@@ -227,7 +267,8 @@ kk_GetBufferDeviceAddress(UNUSED VkDevice device,
+ {
+    VK_FROM_HANDLE(kk_buffer, buffer, pInfo->buffer);
+ 
+-   return vk_buffer_address(&buffer->vk, 0);
++   return vk_buffer_address(&buffer->vk, 0) |
++          ((uint64_t)buffer->residency.tag << KK_SPARSE_TAG_SHIFT);
+ }
+ 
+ VKAPI_ATTR uint64_t VKAPI_CALL
 diff --git a/src/kosmickrisp/vulkan/kk_buffer.h b/src/kosmickrisp/vulkan/kk_buffer.h
-index b50abd18f43..2812b8f138e 100644
+index b50abd18f43..61db828e239 100644
 --- a/src/kosmickrisp/vulkan/kk_buffer.h
 +++ b/src/kosmickrisp/vulkan/kk_buffer.h
-@@ -24,11 +24,25 @@ struct kk_buffer {
+@@ -24,11 +24,26 @@ struct kk_buffer {
         * offset calculations through kk_buffer_mtl_offset */
        uint64_t offset;
     } metal;
@@ -141,6 +187,7 @@ index b50abd18f43..2812b8f138e 100644
 +   struct {
 +      uint32_t offset;
 +      uint32_t pages;
++      uint32_t tag;
 +   } residency;
  };
  
@@ -262,6 +309,30 @@ index af6155ab349..9cac5bb538d 100644
  };
  
  struct kk_descriptor_state {
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_dgc.c b/src/kosmickrisp/vulkan/kk_cmd_dgc.c
+index c983d4546cd..9f6674b645a 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_dgc.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_dgc.c
+@@ -147,7 +147,7 @@ kk_dgc_prepare(struct kk_cmd_buffer *cmd,
+                struct libkk_dgc_params *params, struct kk_dgc_buffers *bufs)
+ {
+    const struct vk_indirect_command_layout *vk = &layout->vk;
+-   uint64_t base = info->preprocessAddress;
++   uint64_t base = info->preprocessAddress & KK_SPARSE_ADDRESS_MASK;
+    uint64_t size = kk_dgc_layout_buffers(vk, info->maxSequenceCount, bufs);
+ 
+    if (!base || info->preprocessSize < size)
+@@ -166,8 +166,8 @@ kk_dgc_prepare(struct kk_cmd_buffer *cmd,
+    bool dispatch = vk->dgc_info & BITFIELD_BIT(MESA_VK_DGC_DISPATCH);
+ 
+    *params = (struct libkk_dgc_params){
+-      .stream = info->indirectAddress,
+-      .count = info->sequenceCountAddress,
++      .stream = info->indirectAddress & KK_SPARSE_ADDRESS_MASK,
++      .count = info->sequenceCountAddress & KK_SPARSE_ADDRESS_MASK,
+       .predicate =
+          cmd->state.cond_render.enabled ? cmd->state.cond_render.address : 0,
+       .roots = bufs->roots,
 diff --git a/src/kosmickrisp/vulkan/kk_descriptor_set.c b/src/kosmickrisp/vulkan/kk_descriptor_set.c
 index a655f1364ab..f1c809a2b37 100644
 --- a/src/kosmickrisp/vulkan/kk_descriptor_set.c
@@ -307,10 +378,10 @@ index 1f2a099bdc2..7523bfcd465 100644
  
  static_assert(sizeof(struct kk_buffer_address) == 16,
 diff --git a/src/kosmickrisp/vulkan/kk_device.c b/src/kosmickrisp/vulkan/kk_device.c
-index 122daeb8fed..97a290d9960 100644
+index 122daeb8fed..6e841e0c611 100644
 --- a/src/kosmickrisp/vulkan/kk_device.c
 +++ b/src/kosmickrisp/vulkan/kk_device.c
-@@ -253,6 +253,19 @@ kk_get_timestamp(struct vk_device *device, uint64_t *timestamp)
+@@ -253,6 +253,20 @@ kk_get_timestamp(struct vk_device *device, uint64_t *timestamp)
     return VK_SUCCESS;
  }
  
@@ -322,6 +393,7 @@ index 122daeb8fed..97a290d9960 100644
 +
 +   util_vma_heap_finish(&dev->sparse_residency.heap);
 +   util_idalloc_fini(&dev->sparse_residency.views);
++   util_idalloc_fini(&dev->sparse_residency.tags);
 +   simple_mtx_destroy(&dev->sparse_residency.lock);
 +   kk_destroy_bo(dev, dev->sparse_residency.bo);
 +   dev->sparse_residency.bo = NULL;
@@ -330,12 +402,12 @@ index 122daeb8fed..97a290d9960 100644
  VKAPI_ATTR VkResult VKAPI_CALL
  kk_CreateDevice(VkPhysicalDevice physicalDevice,
                  const VkDeviceCreateInfo *pCreateInfo,
-@@ -330,9 +343,26 @@ kk_CreateDevice(VkPhysicalDevice physicalDevice,
+@@ -330,9 +344,28 @@ kk_CreateDevice(VkPhysicalDevice physicalDevice,
     if (result != VK_SUCCESS)
        goto fail_query_table;
  
 +   if (dev->vk.enabled_features.sparseResidencyBuffer) {
-+      uint64_t header_B = KK_SPARSE_RESIDENCY_VIEWS * sizeof(uint64_t);
++      uint64_t header_B = KK_SPARSE_RESIDENCY_HEADER_SIZE;
 +      uint64_t size_B =
 +         header_B + KK_SPARSE_ADDR_SPACE_SIZE / KK_SPARSE_PAGE_SIZE;
 +      result = kk_alloc_bo(dev, &dev->vk.base, size_B, 8u,
@@ -348,6 +420,8 @@ index 122daeb8fed..97a290d9960 100644
 +                         size_B - header_B);
 +      util_idalloc_init(&dev->sparse_residency.views, 16u);
 +      util_idalloc_alloc(&dev->sparse_residency.views);
++      util_idalloc_init(&dev->sparse_residency.tags, 16u);
++      util_idalloc_alloc(&dev->sparse_residency.tags);
 +      simple_mtx_init(&dev->sparse_residency.lock, mtx_plain);
 +   }
 +
@@ -358,7 +432,7 @@ index 122daeb8fed..97a290d9960 100644
  
     if (pdev->settings.gpu_capture_enabled) {
        const char *capture_directory =
-@@ -344,6 +374,8 @@ kk_CreateDevice(VkPhysicalDevice physicalDevice,
+@@ -344,6 +377,8 @@ kk_CreateDevice(VkPhysicalDevice physicalDevice,
  
     return VK_SUCCESS;
  
@@ -367,7 +441,7 @@ index 122daeb8fed..97a290d9960 100644
  fail_sampler_heap:
     kk_destroy_sampler_heap(dev, &dev->samplers);
  fail_query_table:
-@@ -392,6 +424,8 @@ kk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
+@@ -392,6 +427,8 @@ kk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
     if (dev->heap)
        kk_destroy_bo(dev, dev->heap);
  
@@ -377,7 +451,7 @@ index 122daeb8fed..97a290d9960 100644
        kk_queue_finish(dev, &dev->queue);
        dev->has_queue = false;
 diff --git a/src/kosmickrisp/vulkan/kk_device.h b/src/kosmickrisp/vulkan/kk_device.h
-index e3795ba54b8..13043cea9b0 100644
+index e3795ba54b8..ea535c54224 100644
 --- a/src/kosmickrisp/vulkan/kk_device.h
 +++ b/src/kosmickrisp/vulkan/kk_device.h
 @@ -19,6 +19,8 @@
@@ -389,7 +463,7 @@ index e3795ba54b8..13043cea9b0 100644
  
  #include "vk_device.h"
  #include "vk_meta.h"
-@@ -103,10 +105,23 @@ struct kk_device {
+@@ -103,10 +105,24 @@ struct kk_device {
     /* Geomtry heap */
     struct kk_bo *heap;
     util_once_flag heap_init_once;
@@ -398,6 +472,7 @@ index e3795ba54b8..13043cea9b0 100644
 +      struct kk_bo *bo;
 +      struct util_vma_heap heap;
 +      struct util_idalloc views;
++      struct util_idalloc tags;
 +      simple_mtx_t lock;
 +   } sparse_residency;
  };
@@ -414,7 +489,7 @@ index e3795ba54b8..13043cea9b0 100644
  kk_device_physical(const struct kk_device *dev)
  {
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
-index 3a9cfd1fcf5..97ebc3574e9 100644
+index 3a9cfd1fcf5..4f3b4f34b59 100644
 --- a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
 @@ -27,6 +27,7 @@ struct lower_descriptors_ctx {
@@ -483,7 +558,7 @@ index 3a9cfd1fcf5..97ebc3574e9 100644
        return true;
     }
  
-@@ -667,6 +684,201 @@ lower_tex(nir_builder *b, nir_tex_instr *tex,
+@@ -667,6 +684,205 @@ lower_tex(nir_builder *b, nir_tex_instr *tex,
     return true;
  }
  
@@ -496,9 +571,13 @@ index 3a9cfd1fcf5..97ebc3574e9 100644
 +      b, 1, 32, deref,
 +      offsetof(struct kk_storage_image_descriptor, buffer_offset_el), ctx);
 +   nir_def *view = nir_ushr_imm(b, raw, KK_TEXEL_BUFFER_VIEW_SHIFT);
++   nir_def *size = load_resource_deref_desc(
++      b, 1, 32, deref,
++      offsetof(struct kk_storage_image_descriptor, buffer_size_el), ctx);
++   nir_def *in_bounds = nir_ult(b, nir_u2u32(b, index), size);
 +
 +   nir_def *resident;
-+   nir_push_if(b, nir_ine_imm(b, view, 0));
++   nir_push_if(b, nir_iand(b, nir_ine_imm(b, view, 0), in_bounds));
 +   {
 +      nir_def *map = load_root(
 +         b, 1, 64, nir_imm_int(b, kk_root_descriptor_offset(sparse_residency)),
@@ -685,7 +764,7 @@ index 3a9cfd1fcf5..97ebc3574e9 100644
  static bool
  try_lower_descriptors_instr(nir_builder *b, nir_instr *instr, void *_data)
  {
-@@ -839,7 +1051,8 @@ bool
+@@ -839,7 +1055,8 @@ bool
  kk_nir_lower_descriptors(nir_shader *nir,
                           const struct vk_pipeline_robustness_state *rs,
                           uint32_t set_layout_count,
@@ -695,7 +774,7 @@ index 3a9cfd1fcf5..97ebc3574e9 100644
  {
     struct lower_descriptors_ctx ctx = {
        .clamp_desc_array_bounds =
-@@ -848,6 +1061,7 @@ kk_nir_lower_descriptors(nir_shader *nir,
+@@ -848,6 +1065,7 @@ kk_nir_lower_descriptors(nir_shader *nir,
           rs->uniform_buffers !=
              VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED ||
           rs->images != VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DISABLED,
@@ -703,7 +782,7 @@ index 3a9cfd1fcf5..97ebc3574e9 100644
        .ssbo_addr_format = kk_buffer_addr_format(rs->storage_buffers),
        .ubo_addr_format = kk_buffer_addr_format(rs->uniform_buffers),
     };
-@@ -863,13 +1077,15 @@ kk_nir_lower_descriptors(nir_shader *nir,
+@@ -863,13 +1081,15 @@ kk_nir_lower_descriptors(nir_shader *nir,
      * TODO: See if we can unify this, not sure if the fast path matters on
      * Apple. This is inherited from NVK.
      */
@@ -720,7 +799,7 @@ index 3a9cfd1fcf5..97ebc3574e9 100644
  }
  
  static bool
-@@ -990,7 +1206,7 @@ kk_nir_add_device_barrier_workaround(nir_shader *nir)
+@@ -990,7 +1210,7 @@ kk_nir_add_device_barrier_workaround(nir_shader *nir)
              /* The inserted load before the new barrier must not be constant */
              nir_def *root = nir_load_buffer_ptr_kk(&b, 1, 64, .binding = 0);
              nir_def *addr = nir_iadd_imm(
@@ -731,10 +810,10 @@ index 3a9cfd1fcf5..97ebc3574e9 100644
  
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c b/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
 new file mode 100644
-index 00000000000..3065f8634af
+index 00000000000..54404dc65e8
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,344 @@
 +/*
 + * Copyright 2026 Broyojo
 + * SPDX-License-Identifier: MIT
@@ -778,6 +857,50 @@ index 00000000000..3065f8634af
 +   return &desc->def;
 +}
 +
++static nir_src *
++global_address(nir_intrinsic_instr *intr)
++{
++   switch (intr->intrinsic) {
++   case nir_intrinsic_load_global:
++   case nir_intrinsic_global_atomic:
++   case nir_intrinsic_global_atomic_swap:
++      return &intr->src[0];
++   case nir_intrinsic_store_global:
++      return &intr->src[1];
++   default:
++      return NULL;
++   }
++}
++
++static bool
++mask_global_address(nir_builder *b, nir_intrinsic_instr *intr, void *data)
++{
++   nir_src *addr = global_address(intr);
++   if (addr == NULL)
++      return false;
++
++   b->cursor = nir_before_instr(&intr->instr);
++   nir_src_rewrite(addr, nir_iand_imm(b, addr->ssa, KK_SPARSE_ADDRESS_MASK));
++   return true;
++}
++
++static bool
++has_guarded_store(nir_function_impl *impl);
++
++static bool
++mask_load_addresses(nir_shader *nir)
++{
++   bool progress = false;
++   nir_foreach_function_impl(impl, nir) {
++      if (has_guarded_store(impl))
++         continue;
++
++      progress |= nir_function_intrinsics_pass(
++         impl, mask_global_address, nir_metadata_control_flow, NULL);
++   }
++   return progress;
++}
++
 +static bool
 +is_guarded_store(nir_intrinsic_instr *intr)
 +{
@@ -786,6 +909,10 @@ index 00000000000..3065f8634af
 +   case nir_intrinsic_deref_atomic:
 +   case nir_intrinsic_deref_atomic_swap:
 +      break;
++   case nir_intrinsic_store_global:
++   case nir_intrinsic_global_atomic:
++   case nir_intrinsic_global_atomic_swap:
++      return true;
 +   default:
 +      return false;
 +   }
@@ -795,13 +922,127 @@ index 00000000000..3065f8634af
 +          ssbo_descriptor(deref) != NULL;
 +}
 +
++static nir_def *
++load_residency_map(nir_builder *b)
++{
++   nir_def *root = nir_load_buffer_ptr_kk(b, 1, 64, .binding = 0);
++   return nir_build_load_global_constant(
++      b, 1, 64,
++      nir_iadd_imm(b, root,
++                   offsetof(struct kk_root_descriptor_table, sparse_residency)),
++      .align_mul = 8, .access = ACCESS_CAN_SPECULATE);
++}
++
++static nir_def *
++ssbo_page_resident(nir_builder *b, nir_def *word, nir_def *addr,
++                   unsigned offset_B)
++{
++   nir_def *in_page =
++      nir_iand_imm(b, nir_channel(b, addr, 0), KK_SPARSE_PAGE_SIZE - 1);
++   nir_def *offset = nir_iadd_imm(b, nir_channel(b, addr, 3), offset_B);
++   nir_def *page = nir_ushr_imm(b, nir_iadd(b, in_page, offset),
++                                util_logbase2(KK_SPARSE_PAGE_SIZE));
++
++   nir_def *map = load_residency_map(b);
++   nir_def *entry = nir_iadd(
++      b, map, nir_u2u64(b, nir_iadd(b, nir_iadd_imm(b, word, -1), page)));
++   return nir_ine_imm(b, nir_build_load_global(b, 1, 8, entry, .align_mul = 1),
++                      0);
++}
++
++static nir_intrinsic_instr *
++insert_guarded(nir_builder *b, nir_intrinsic_instr *intr, nir_def *resident,
++               int component, nir_def *address)
++{
++   nir_push_if(b, resident);
++   nir_intrinsic_instr *store =
++      nir_instr_as_intrinsic(nir_instr_clone(b->shader, &intr->instr));
++   if (component >= 0)
++      nir_intrinsic_set_write_mask(store, BITFIELD_BIT(component));
++   nir_builder_instr_insert(b, &store->instr);
++   if (address)
++      nir_src_rewrite(global_address(store), address);
++   nir_pop_if(b, NULL);
++   return store;
++}
++
++static void
++finish_guard(nir_builder *b, nir_intrinsic_instr *intr, nir_def *sparse_result)
++{
++   nir_push_else(b, NULL);
++   nir_instr_remove(&intr->instr);
++   nir_builder_instr_insert(b, &intr->instr);
++   nir_pop_if(b, NULL);
++
++   if (sparse_result) {
++      nir_def *result = nir_if_phi(b, sparse_result, &intr->def);
++      nir_foreach_use_including_if_safe(use, &intr->def) {
++         if (nir_src_is_if(use) ||
++             nir_src_use_instr(use) != nir_def_instr(result))
++            nir_src_rewrite(use, result);
++      }
++   }
++}
++
++static void
++guard_global_store(nir_builder *b, nir_intrinsic_instr *intr)
++{
++   bool has_dest = nir_intrinsic_infos[intr->intrinsic].has_dest;
++   nir_def *raw = global_address(intr)->ssa;
++
++   b->cursor = nir_before_instr(&intr->instr);
++   nir_def *zero = has_dest ? nir_imm_zero(b, intr->def.num_components,
++                                           intr->def.bit_size)
++                            : NULL;
++   nir_def *tag =
++      nir_u2u32(b, nir_ushr_imm(b, raw, KK_SPARSE_TAG_SHIFT));
++
++   nir_def *sparse_result = NULL;
++   nir_push_if(b, nir_ine_imm(b, tag, 0));
++   {
++      nir_def *masked = nir_iand_imm(b, raw, KK_SPARSE_ADDRESS_MASK);
++      nir_def *map = load_residency_map(b);
++      nir_def *entry = nir_iadd(
++         b, nir_iadd_imm(b, map, KK_SPARSE_TAG_TABLE_OFFSET),
++         nir_u2u64(b, nir_imul_imm(b, tag, 16)));
++      nir_def *base = nir_build_load_global_constant(
++         b, 1, 64, entry, .align_mul = 8, .access = ACCESS_CAN_SPECULATE);
++      nir_def *first = nir_build_load_global_constant(
++         b, 1, 64, nir_iadd_imm(b, entry, 8), .align_mul = 8,
++         .access = ACCESS_CAN_SPECULATE);
++      nir_def *offset = nir_isub(b, masked, base);
++
++      bool store = intr->intrinsic == nir_intrinsic_store_global;
++      unsigned comp_B = store ? intr->src[0].ssa->bit_size / 8 : 0;
++      unsigned mask = store ? nir_intrinsic_write_mask(intr) : 1;
++      u_foreach_bit(c, mask) {
++         nir_def *page = nir_ushr_imm(b, nir_iadd_imm(b, offset, c * comp_B),
++                                      util_logbase2(KK_SPARSE_PAGE_SIZE));
++         nir_def *byte = nir_iadd(b, map,
++                                  nir_iadd(b, nir_iadd_imm(b, first, -1), page));
++         nir_def *resident = nir_ine_imm(
++            b, nir_build_load_global(b, 1, 8, byte, .align_mul = 1), 0);
++
++         nir_intrinsic_instr *guarded =
++            insert_guarded(b, intr, resident, store ? (int)c : -1, masked);
++         if (!store)
++            sparse_result = nir_if_phi(b, &guarded->def, zero);
++      }
++   }
++   finish_guard(b, intr, sparse_result);
++}
++
 +static void
 +guard_store(nir_builder *b, nir_intrinsic_instr *intr,
 +            nir_address_format addr_format)
 +{
++   if (global_address(intr)) {
++      guard_global_store(b, intr);
++      return;
++   }
++
 +   nir_deref_instr *deref = nir_src_as_deref(intr->src[0]);
 +   nir_def *desc = ssbo_descriptor(deref);
-+
 +   bool has_dest = nir_intrinsic_infos[intr->intrinsic].has_dest;
 +
 +   b->cursor = nir_before_instr(&intr->instr);
@@ -819,45 +1060,38 @@ index 00000000000..3065f8634af
 +
 +      nir_def *addr = nir_explicit_io_address_from_deref(
 +         b, deref, cast->parent.ssa, addr_format);
-+      nir_def *in_page = nir_iand_imm(b, nir_channel(b, addr, 0),
-+                                      KK_SPARSE_PAGE_SIZE - 1);
-+      nir_def *page =
-+         nir_ushr_imm(b, nir_iadd(b, in_page, nir_channel(b, addr, 3)),
-+                      util_logbase2(KK_SPARSE_PAGE_SIZE));
 +
-+      nir_def *root = nir_load_buffer_ptr_kk(b, 1, 64, .binding = 0);
-+      nir_def *map = nir_build_load_global_constant(
-+         b, 1, 64,
-+         nir_iadd_imm(b, root,
-+                      offsetof(struct kk_root_descriptor_table,
-+                               sparse_residency)),
-+         .align_mul = 8, .access = ACCESS_CAN_SPECULATE);
-+      nir_def *entry = nir_iadd(
-+         b, map, nir_u2u64(b, nir_iadd(b, nir_iadd_imm(b, word, -1), page)));
-+      nir_def *resident = nir_ine_imm(
-+         b, nir_build_load_global(b, 1, 8, entry, .align_mul = 1), 0);
-+
-+      nir_push_if(b, resident);
-+      nir_intrinsic_instr *guarded =
-+         nir_instr_as_intrinsic(nir_instr_clone(b->shader, &intr->instr));
-+      nir_builder_instr_insert(b, &guarded->instr);
-+      nir_pop_if(b, NULL);
-+      if (has_dest)
++      if (intr->intrinsic == nir_intrinsic_store_deref) {
++         nir_def *value = intr->src[1].ssa;
++         unsigned comp_B = value->bit_size / 8;
++         u_foreach_bit(c, nir_intrinsic_write_mask(intr)) {
++            insert_guarded(b, intr,
++                           ssbo_page_resident(b, word, addr, c * comp_B), c,
++                           NULL);
++         }
++      } else {
++         nir_push_if(b, ssbo_page_resident(b, word, addr, 0));
++         nir_intrinsic_instr *guarded =
++            nir_instr_as_intrinsic(nir_instr_clone(b->shader, &intr->instr));
++         nir_builder_instr_insert(b, &guarded->instr);
++         nir_pop_if(b, NULL);
 +         sparse_result = nir_if_phi(b, &guarded->def, zero);
-+   }
-+   nir_push_else(b, NULL);
-+   nir_instr_remove(&intr->instr);
-+   nir_builder_instr_insert(b, &intr->instr);
-+   nir_pop_if(b, NULL);
-+
-+   if (has_dest) {
-+      nir_def *result = nir_if_phi(b, sparse_result, &intr->def);
-+      nir_foreach_use_including_if_safe(use, &intr->def) {
-+         if (nir_src_is_if(use) ||
-+             nir_src_use_instr(use) != nir_def_instr(result))
-+            nir_src_rewrite(use, result);
 +      }
 +   }
++   finish_guard(b, intr, sparse_result);
++}
++
++static bool
++has_guarded_store(nir_function_impl *impl)
++{
++   nir_foreach_block(block, impl) {
++      nir_foreach_instr(instr, block) {
++         if (instr->type == nir_instr_type_intrinsic &&
++             is_guarded_store(nir_instr_as_intrinsic(instr)))
++            return true;
++      }
++   }
++   return false;
 +}
 +
 +bool
@@ -870,15 +1104,10 @@ index 00000000000..3065f8634af
 +   if (!guard)
 +      return progress;
 +
++   progress |= mask_load_addresses(nir);
++
 +   nir_foreach_function_impl(impl, nir) {
-+      bool has_stores = false;
-+      nir_foreach_block(block, impl) {
-+         nir_foreach_instr(instr, block) {
-+            has_stores |= instr->type == nir_instr_type_intrinsic &&
-+                          is_guarded_store(nir_instr_as_intrinsic(instr));
-+         }
-+      }
-+      if (!has_stores)
++      if (!has_guarded_store(impl))
 +         continue;
 +
 +      nir_builder b = nir_builder_create(impl);
@@ -886,13 +1115,7 @@ index 00000000000..3065f8634af
 +      b.cursor =
 +         nir_cf_extract(&body, nir_before_impl(impl), nir_after_impl(impl));
 +
-+      nir_def *root = nir_load_buffer_ptr_kk(&b, 1, 64, .binding = 0);
-+      nir_def *map = nir_build_load_global_constant(
-+         &b, 1, 64,
-+         nir_iadd_imm(&b, root,
-+                      offsetof(struct kk_root_descriptor_table,
-+                               sparse_residency)),
-+         .align_mul = 8, .access = ACCESS_CAN_SPECULATE);
++      nir_def *map = load_residency_map(&b);
 +      nir_def *live = nir_build_load_global_constant(
 +         &b, 1, 32, map, .align_mul = 4, .access = ACCESS_CAN_SPECULATE);
 +
@@ -914,10 +1137,15 @@ index 00000000000..3065f8634af
 +      struct util_dynarray stores = UTIL_DYNARRAY_INIT;
 +      foreach_list_typed(nir_cf_node, node, node, &nif->then_list) {
 +         nir_foreach_block_in_cf_node(block, node) {
-+            nir_foreach_instr(instr, block) {
-+               if (instr->type == nir_instr_type_intrinsic &&
-+                   is_guarded_store(nir_instr_as_intrinsic(instr)))
-+                  util_dynarray_append(&stores, nir_instr_as_intrinsic(instr));
++            nir_foreach_instr_safe(instr, block) {
++               if (instr->type != nir_instr_type_intrinsic)
++                  continue;
++
++               nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++               if (is_guarded_store(intr))
++                  util_dynarray_append(&stores, intr);
++               else
++                  mask_global_address(&b, intr, NULL);
 +            }
 +         }
 +      }
@@ -931,16 +1159,23 @@ index 00000000000..3065f8634af
 +   return progress;
 +}
 diff --git a/src/kosmickrisp/vulkan/kk_private.h b/src/kosmickrisp/vulkan/kk_private.h
-index 9ecd35bc081..278fd3ad032 100644
+index 9ecd35bc081..1b1ad7b566c 100644
 --- a/src/kosmickrisp/vulkan/kk_private.h
 +++ b/src/kosmickrisp/vulkan/kk_private.h
-@@ -22,6 +22,9 @@
+@@ -22,6 +22,16 @@
  #define KK_MAX_SAMPLES                   8
  #define KK_MIN_SSBO_ALIGNMENT            16
  #define KK_MIN_TEXEL_BUFFER_ALIGNMENT    16
 +#define KK_TEXEL_BUFFER_VIEW_SHIFT      16
 +#define KK_TEXEL_BUFFER_OFFSET_MASK     BITFIELD_MASK(KK_TEXEL_BUFFER_VIEW_SHIFT)
 +#define KK_SPARSE_RESIDENCY_VIEWS       BITFIELD_BIT(16)
++#define KK_SPARSE_RESIDENCY_TAGS        BITFIELD_BIT(12)
++#define KK_SPARSE_TAG_SHIFT             48
++#define KK_SPARSE_ADDRESS_MASK          BITFIELD64_MASK(KK_SPARSE_TAG_SHIFT)
++#define KK_SPARSE_TAG_TABLE_OFFSET                                             \
++   (KK_SPARSE_RESIDENCY_VIEWS * sizeof(uint64_t))
++#define KK_SPARSE_RESIDENCY_HEADER_SIZE                                        \
++   (KK_SPARSE_TAG_TABLE_OFFSET + KK_SPARSE_RESIDENCY_TAGS * 2 * sizeof(uint64_t))
  #define KK_MIN_UBO_ALIGNMENT             64
  #define KK_MAX_VIEWPORTS                 16
  #define KK_MAX_XFB_BUFFERS               4

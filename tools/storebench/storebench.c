@@ -1,7 +1,8 @@
 /* storebench: time of a compute shader dominated by storage buffer stores, to price the
  * residency guard KosmicKrisp puts on stores when sparseResidencyBuffer is enabled. Runs each
  * case on a device with the feature off, with it on, and with it on while a sparse residency
- * buffer exists on the device; the buffers written are ordinary (not sparse).
+ * buffer exists on the device; the buffers written are ordinary (not sparse). The pointer cases
+ * go through buffer device addresses.
  *
  *   tools/storebench/run.sh
  */
@@ -42,13 +43,18 @@ static int cmp(const void *a, const void *b)
     return x < y ? -1 : x > y;
 }
 
-static void run(int sparse_feature, int sparse_buffer, double out[3])
+#define CASES 5
+
+static void run(int sparse_feature, int sparse_buffer, double out[CASES])
 {
-    VkPhysicalDeviceFeatures features = {0};
-    features.sparseBinding = features.sparseResidencyBuffer = sparse_feature;
+    VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    f12.bufferDeviceAddress = VK_TRUE;
+    VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f12 };
+    f2.features.shaderInt64 = VK_TRUE;
+    f2.features.sparseBinding = f2.features.sparseResidencyBuffer = sparse_feature;
     float prio = 1;
     VkDeviceQueueCreateInfo qci = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, NULL, 0, 0, 1, &prio };
-    VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, NULL, 0, 1, &qci, 0, NULL, 0, NULL, &features };
+    VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f2, 0, 1, &qci };
     VkDevice dev;
     CHECK(vkCreateDevice(pdev, &dci, NULL, &dev));
     VkQueue queue;
@@ -65,11 +71,13 @@ static void run(int sparse_feature, int sparse_buffer, double out[3])
     VkBuffer bufs[2];
     VkDeviceSize sizes[2] = { (VkDeviceSize)THREADS * 16 * 4, 16 };
     for (int i = 0; i < 2; i++) {
-        VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, sizes[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT };
+        VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, sizes[i],
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
         CHECK(vkCreateBuffer(dev, &info, NULL, &bufs[i]));
         VkMemoryRequirements req;
         vkGetBufferMemoryRequirements(dev, bufs[i], &req);
-        VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, NULL, req.size,
+        VkMemoryAllocateFlagsInfo flags = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, NULL, VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+        VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &flags, req.size,
                 memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
         VkDeviceMemory mem;
         CHECK(vkAllocateMemory(dev, &alloc, NULL, &mem));
@@ -97,7 +105,10 @@ static void run(int sparse_feature, int sparse_buffer, double out[3])
     };
     vkUpdateDescriptorSets(dev, 2, writes, 0, NULL);
 
-    VkPipelineLayoutCreateInfo plci = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 1, &dsl };
+    VkBufferDeviceAddressInfo bai = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, NULL, bufs[0] };
+    uint64_t address = vkGetBufferDeviceAddress(dev, &bai);
+    VkPushConstantRange pcr = { VK_SHADER_STAGE_COMPUTE_BIT, 0, 8 };
+    VkPipelineLayoutCreateInfo plci = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 1, &dsl, 1, &pcr };
     VkPipelineLayout pl;
     CHECK(vkCreatePipelineLayout(dev, &plci, NULL, &pl));
     VkShaderModuleCreateInfo smci = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, NULL, 0, sizeof(storebench_cs), storebench_cs };
@@ -111,7 +122,7 @@ static void run(int sparse_feature, int sparse_buffer, double out[3])
     VkCommandBuffer cmd;
     CHECK(vkAllocateCommandBuffers(dev, &cbai, &cmd));
 
-    for (int mode = 0; mode < 3; mode++) {
+    for (int mode = 0; mode < CASES; mode++) {
         VkSpecializationMapEntry entry = { 0, 0, 4 };
         VkSpecializationInfo spec = { 1, &entry, 4, &mode };
         VkComputePipelineCreateInfo pci = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, NULL, 0,
@@ -126,6 +137,7 @@ static void run(int sparse_feature, int sparse_buffer, double out[3])
             CHECK(vkBeginCommandBuffer(cmd, &cbbi));
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pl, 0, 1, &set, 0, NULL);
+            vkCmdPushConstants(cmd, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, 8, &address);
             vkCmdDispatch(cmd, THREADS / 64, 1, 1);
             CHECK(vkEndCommandBuffer(cmd));
             VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &cmd };
@@ -145,22 +157,22 @@ static void run(int sparse_feature, int sparse_buffer, double out[3])
 
 int main(void)
 {
-    VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO, NULL, "storebench", 1, NULL, 0, VK_API_VERSION_1_1 };
+    VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO, NULL, "storebench", 1, NULL, 0, VK_API_VERSION_1_2 };
     VkInstanceCreateInfo ici = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, NULL, 0, &app };
     VkInstance inst;
     CHECK(vkCreateInstance(&ici, NULL, &inst));
     uint32_t n = 1;
     CHECK(vkEnumeratePhysicalDevices(inst, &n, &pdev) < 0);
 
-    static const char *names[3] = { "64M stores", "64M load + store", "16M atomic adds" };
-    double off[2][3], on[2][3], live[2][3];
+    static const char *names[CASES] = { "64M stores", "64M load + store", "16M atomic adds", "64M pointer stores", "64M pointer loads" };
+    double off[2][CASES], on[2][CASES], live[2][CASES];
     for (int r = 0; r < 2; r++) {
         run(0, 0, off[r]);
         run(1, 0, on[r]);
         run(1, 1, live[r]);
     }
     printf("%-22s %10s %18s %22s\n", "ms, submit to idle", "feature off", "on, no sparse buffer", "on, sparse buffer alive");
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < CASES; i++) {
         double a = (off[0][i] + off[1][i]) / 2, b = (on[0][i] + on[1][i]) / 2, c = (live[0][i] + live[1][i]) / 2;
         printf("%-22s %10.3f %10.3f (%+5.1f%%) %12.3f (%+5.1f%%)\n", names[i], a, b, (b - a) / a * 100, c, (c - a) / a * 100);
     }

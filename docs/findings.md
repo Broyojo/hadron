@@ -391,11 +391,16 @@ every sparse-residency buffer in a device buffer, filled on the queue's timeline
 that follows each sparse bind. A sparse fetch from a texel buffer reads its residency from the map
 (the view's descriptor carries an index into a table of views, in bits its 16-byte-aligned offset
 leaves free). A store to a storage buffer whose descriptor marks it sparse is skipped when its page is
-unmapped. A check on every store costs 65-100% in a tight store loop however it is written (branch or
+unmapped, per component, so a vector straddling two pages writes only its bound part. A store through
+a raw device address has no descriptor, so the address the driver hands out for a sparse-residency
+buffer carries an index in bits 48-59; shaders strip it from every pointer access and look the buffer's
+map up when a store's pointer has one (DGC strips it from the vertex and index buffer addresses in its
+stream). A check on every store costs 65-100% in a tight store loop however it is written (branch or
 select, `store-guard.m`), so shaders that store to buffers get two copies of their code and pick one
 with a single read of "does a sparse-residency buffer exist on this device": programs with none run
-the original code (`tools/storebench`: stores +0%, atomics +1%, a load+store loop +5% from the read
-itself). Stores through raw device addresses into sparse buffers are not guarded.
+the original code (`tools/storebench`: stores, pointer stores and pointer loads +0%, atomics +1%, a
+load+store loop about +5% from the read itself). `tools/sparse-test` covers the cases the CTS does not
+(a straddling store, a store through a device address).
 
 vkd3d-proton's own sparse tests are stricter than the CTS here and still fail, the same before and
 after these patches: test_update_tile_mappings, test_texture_feedback_instructions_sm51/dxil and
@@ -427,7 +432,9 @@ explicit LODs, skipped nearest filtering with linear mip filtering and sparse sa
 the extension was enabled without the Vulkan 1.2 feature bit, and computed a LOD for every sample
 before looking at the sampler's mode (`tools/minmax-test`; patch 0022); sparse image queries offered
 multisampling (0023); a statistics pipeline that failed to build was silently skipped (0021); and the
-two sparse gaps above (0024).
+two sparse gaps above (0024). Its review of that fix made three more claims, all real: an
+out-of-range texel index read past the residency map, a store straddling two pages was checked only at
+its start, and stores through device addresses were not guarded.
 
 Pipeline statistics queries (patch 0019) are counted by KosmicKrisp itself: Metal exposes only the
 timestamp counter set on Apple GPUs (checked on M2 Pro and M4; statistic counter heaps are refused).
