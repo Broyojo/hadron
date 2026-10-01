@@ -1,0 +1,24 @@
+From 8d8199d5de187db29a2ca08976a3a145cb072b67 Mon Sep 17 00:00:00 2001
+From: junminlee2004 <junminlee2004@gmail.com>
+Date: Thu, 24 Sep 2026 12:24:42 -0400
+Subject: [PATCH 7/9] kk: Advertise geometryShader
+
+---
+ src/kosmickrisp/vulkan/kk_physical_device.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 87a7d8406d1..847f65d50d4 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -235,6 +235,7 @@ kk_get_device_features(
+       .dualSrcBlend = true,
+       .fragmentStoresAndAtomics = true,
+       .fullDrawIndexUint32 = true,
++      .geometryShader = true,
+       .imageCubeArray = true,
+       .independentBlend = true,
+       .inheritedQueries = true,
+-- 
+2.54.0 (Apple Git-157)
+
