@@ -1,0 +1,42 @@
+#version 450
+/* Every operation of denorm-test.c on each input triple; run.sh adds the DenormPreserve execution
+ * mode for 32-bit floats, which GLSL has no way to request. */
+layout(local_size_x = 64) in;
+layout(constant_id = 0) const uint N = 65536;
+layout(std430, set = 0, binding = 0) readonly buffer A { float a[]; };
+layout(std430, set = 0, binding = 1) readonly buffer B { float b[]; };
+layout(std430, set = 0, binding = 2) readonly buffer C { float c[]; };
+layout(std430, set = 0, binding = 3) writeonly buffer R { float r[]; };
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= N)
+        return;
+    float x = a[i], y = b[i], z = c[i];
+    uint o = 0;
+    r[N * o++ + i] = x + y;
+    r[N * o++ + i] = x - y;
+    r[N * o++ + i] = x * y;
+    r[N * o++ + i] = x / y;
+    r[N * o++ + i] = fma(x, y, z);
+    r[N * o++ + i] = min(x, y);
+    r[N * o++ + i] = max(x, y);
+    r[N * o++ + i] = abs(x);
+    r[N * o++ + i] = -x;
+    r[N * o++ + i] = x < y ? 1.0 : 0.0;
+    r[N * o++ + i] = x <= y ? 1.0 : 0.0;
+    r[N * o++ + i] = x == y ? 1.0 : 0.0;
+    r[N * o++ + i] = x != y ? 1.0 : 0.0;
+    r[N * o++ + i] = floor(x);
+    r[N * o++ + i] = ceil(x);
+    r[N * o++ + i] = trunc(x);
+    r[N * o++ + i] = sign(x);
+    r[N * o++ + i] = sqrt(abs(x));
+    r[N * o++ + i] = inversesqrt(abs(x));
+    r[N * o++ + i] = clamp(x, min(y, z), max(y, z));
+    r[N * o++ + i] = ldexp(x, int(z));
+    r[N * o++ + i] = log2(abs(x));
+    r[N * o++ + i] = exp2(z);
+    r[N * o++ + i] = x * y + z;
+}

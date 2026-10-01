@@ -19,3 +19,7 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   results in every math mode, compute and fragment; 16-bit denormals are kept)
 - `compute-quads.m`: quad and SIMD groups in compute kernels (threads 4n..4n+3 of a threadgroup, by
   linear index, form a quad for every local size tried: Vulkan's linear derivative groups)
+- `compute-lod.m`: implicit-LOD sampling and LOD queries in a compute kernel (always LOD 0: Metal takes no
+  derivatives there, so the driver passes gradients from quad operations)
+- `atomic64-lock.m`: what makes a locked 64-bit read-modify-write atomic (a plain spin lock deadlocks
+  a SIMD group; lanes taking turns works; loads, stores and texture reads need device-scope fences)

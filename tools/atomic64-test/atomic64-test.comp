@@ -1,0 +1,38 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+/* One 64-bit atomic operation per thread on words shared by many threads; MODE selects it. */
+layout(local_size_x = 64) in;
+layout(constant_id = 0) const uint MODE = 0;
+layout(std430, set = 0, binding = 0) buffer D { uint64_t word[]; };
+layout(push_constant) uniform P { uint words; };
+
+void main()
+{
+    uint tid = gl_GlobalInvocationID.x;
+    uint w = tid % words;
+    uint64_t one = 0x100000001ul;
+    switch (MODE) {
+    case 0: atomicMax(word[w], uint64_t(tid) + 1); break;
+    case 1: atomicAdd(word[w], one); break;
+    case 2: {
+        /* add through compare-and-swap */
+        uint64_t seen = word[w];
+        for (uint i = 0; i < 4096; i++) {
+            uint64_t old = atomicCompSwap(word[w], seen, seen + one);
+            if (old == seen)
+                break;
+            seen = old;
+        }
+        break;
+    }
+    case 3: atomicXor(word[w], uint64_t(1) << (tid % 64)); break;
+    case 4: {
+        /* the previous value of an exchange is handed on, so every thread's token survives */
+        uint64_t prev = atomicExchange(word[w], uint64_t(tid) + 1);
+        atomicAdd(word[words + w], prev);
+        break;
+    }
+    case 5: atomicMin(word[w], uint64_t(tid) + (uint64_t(7) << 32)); break;
+    }
+}
