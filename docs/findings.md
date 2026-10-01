@@ -250,7 +250,7 @@ the file watcher out of prefix/, build/, dist/, src/, games/ and toolchains/, an
 Bugs found on the way: a path with a space in `STEAM_DYLD_INSERT_LIBRARIES` split `play`'s `env` call;
 the watchdog missed processes started through the symlinked runtime (lsof reports real paths).
 
-## Vulkan on Metal: KosmicKrisp through Wine, vkd3d-proton blocked on two driver features (#22)
+## Vulkan on Metal: KosmicKrisp through Wine, D3D12 through vkd3d-proton (#22)
 
 KosmicKrisp (Mesa main, `scripts/build-vulkan.sh mesa`) reports Vulkan 1.4 on the M2 Pro, and Wine's
 winevulkan reaches it through Homebrew's Khronos loader with `VK_DRIVER_FILES` pointing at its ICD JSON:
@@ -348,6 +348,24 @@ which build pipeline libraries on a device without VK_EXT_graphics_pipeline_libr
 dereferences the missing input assembly state), and
 dEQP-VK.tessellation.geometry_interaction.limits.output_required_max_geometry, which hangs the GPU on the
 driver as it was before these changes too. Open.
+
+Transform feedback (Mesa patch 0014, `MESA_KK_EXPERIMENTAL=xfb`, on by default in `scripts/play`) is
+built on poly's geometry shader emulation, which already wrote transform feedback from the GS
+rasterization pass; KosmicKrisp threw away the two helper shaders it needs. The pre-GS pass (one
+thread per draw) clamps each stream's primitive count to the bound buffers and advances the offsets and
+query counters; a GS whose output count varies also needs its count shader and a prefix sum over the
+counts. A VS or TES that captures output gets a passthrough GS (poly's generator), inserted before
+linking and dropped once the pipeline is built. Two linking details mattered: `nir_opt_varyings`
+keeps an output for transform feedback only when the store intrinsic carries XFB info, which
+KosmicKrisp's `nir_lower_io` never adds, so captured varyings that nothing else read were deleted; and
+adjacency topologies can be set dynamically within a pipeline's topology class, so the passthrough is
+built for the non-adjacency class and adjacency draws are unrolled first. Four streams, rasterization
+stream select and the transform feedback stream query are exposed; vkCmdDrawIndirectByteCountEXT is
+not yet. Vulkan CTS: transform_feedback.simple, fuzz and primitive_restart pass with no failures (the
+rest need more than 4 streams or buffers, or transformFeedbackDraw), and vkd3d-proton's stream
+output tests pass on an unmodified vkd3d-proton. With single-texel alignment and transform feedback,
+D3D12CreateDevice no longer needs relaxed checks; Teardown still needs feature level 12_0 until
+sparse resources exist.
 
 The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
 back slowly, and swap left over from earlier runs stopped Teardown at launch.
