@@ -332,13 +332,22 @@ Patch 0010 lists the geometry stage for DGC: with geometryShader on, vkd3d-proto
 unless every graphics stage is supported, which briefly made Teardown's voxels vanish again.
 
 Vulkan CTS 1.4.6.2 (built in build/vk-gl-cts, run natively against KosmicKrisp): dEQP-VK.geometry.*
-passes 181/181 supported. dEQP-VK.dgc.ext.* passes most supported cases (execution sets aren't
-exposed, so most are NotSupported) but fails DGC combined with tessellation or a geometry shader when a
-sequence draws several instances: the second instance of the third sequence is missing (GS) or has
-instance index 0 (tessellation, intermittently); indexed and non-indexed, Vulkan and DXGI index modes.
-Plain multi-draw with tessellation passes (2448 cases, three runs), so the difference is the indirect
-path DGC always takes. dEQP-VK.dgc.ext.graphics.misc.reuse_dgc_for_normal_fast_lib_order_normal_dgc
-crashes the test binary. Open.
+passes 181/181 supported. dEQP-VK.dgc.ext.* (execution sets aren't exposed, so most cases are NotSupported) had two KosmicKrisp
+bugs with tessellation or a geometry shader:
+
+- The geometry heap was reset at every render pass split, but DGC unrolls every sequence's indices into
+  it before drawing; a later sequence's vertex shader outputs overwrote earlier-unrolled indices. The
+  heap now lives for the whole draw command (Mesa patch 0012). Plain multi-draws that unroll had the same
+  latent bug.
+- Indirect tessellation dispatched its VS and TCS grids, written in threads, as threadgroup counts of 64,
+  so surplus threads wrote other instances' vertex slots (an intermittent race) and past the allocation.
+  They now use exact-thread dispatch (patch 0013); this affects all indirect tessellation draws.
+
+dEQP-VK.dgc.ext, geometry and tessellation together: 1100 pass, 0 fail. Excluded: the DGC *_lib variants,
+which build pipeline libraries on a device without VK_EXT_graphics_pipeline_library (a CTS bug; KK then
+dereferences the missing input assembly state), and
+dEQP-VK.tessellation.geometry_interaction.limits.output_required_max_geometry, which hangs the GPU on the
+driver as it was before these changes too. Open.
 
 The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
 back slowly, and swap left over from earlier runs stopped Teardown at launch.
