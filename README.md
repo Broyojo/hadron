@@ -40,7 +40,7 @@ was measured and fixed along the way.
 | Among Us | Direct3D 11 | Runs, online sign-in works |
 | Teardown | Direct3D 12 | Runs; frame rate is held back by CPU translation |
 | Geometry Dash | OpenGL | Runs; signing in to a Geometry Dash account crashes |
-| Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Doesn't start: needs shader model 6.6 and 64-bit atomics, which KosmicKrisp doesn't provide yet |
+| Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Being tested: the driver now provides the shader model 6.6 features Unreal requires |
 
 [docs/test-games.md](docs/test-games.md) has the details and [docs/roadmap.md](docs/roadmap.md)
 the order of work. Not in scope for now: games with kernel-level anti-cheat, and games that need

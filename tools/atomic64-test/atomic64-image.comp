@@ -1,0 +1,48 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+#extension GL_EXT_shader_image_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+/* The operations of atomic64-test.comp on the texels of an r64ui image. MODE 100 fills the image
+ * and MODE 101 copies it to the buffer. */
+layout(local_size_x = 64) in;
+layout(constant_id = 0) const uint MODE = 0;
+layout(std430, set = 0, binding = 0) buffer D { uint64_t word[]; };
+layout(set = 0, binding = 1, r64ui) uniform u64image2D img;
+layout(push_constant) uniform P { uint words; uint fill_lo; uint fill_hi; };
+
+void main()
+{
+    uint tid = gl_GlobalInvocationID.x;
+    uint w = tid % words;
+    ivec2 p = ivec2(w % 64, w / 64);
+    uint64_t one = 0x100000001ul;
+    switch (MODE) {
+    case 0: imageAtomicMax(img, p, uint64_t(tid) + 1); break;
+    case 1: imageAtomicAdd(img, p, one); break;
+    case 2: {
+        uint64_t seen = 0;
+        for (uint i = 0; i < 4096; i++) {
+            uint64_t old = imageAtomicCompSwap(img, p, seen, seen + one);
+            if (old == seen)
+                break;
+            seen = old;
+        }
+        break;
+    }
+    case 3: imageAtomicXor(img, p, uint64_t(1) << (tid % 64)); break;
+    case 4: {
+        uint64_t prev = imageAtomicExchange(img, p, uint64_t(tid) + 1);
+        atomicAdd(word[4096 + w], prev); /* past the texels MODE 101 copies back */
+        break;
+    }
+    case 5: imageAtomicMin(img, p, uint64_t(tid) + (uint64_t(7) << 32)); break;
+    case 100:
+        if (tid < 4096)
+            imageStore(img, ivec2(tid % 64, tid / 64), u64vec4(uint64_t(fill_lo) | (uint64_t(fill_hi) << 32)));
+        break;
+    case 101:
+        if (tid < 4096)
+            word[tid] = imageLoad(img, ivec2(tid % 64, tid / 64)).x;
+        break;
+    }
+}

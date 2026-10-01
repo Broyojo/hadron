@@ -10,7 +10,9 @@
  *  - Taking turns by SIMD lane (only the lane whose turn it is spins) avoids that.
  *  - Plain loads and stores are not coherent across threads even under the lock; they are with an
  *    atomic_thread_fence at device scope on both sides, or as 32-bit atomics on the two halves.
- *  - A texture read does not see a write() from the same kernel without that fence.
+ *  - A texture read does not see a write() from the same kernel without that fence. With many
+ *    texels in play it also takes a fence between the read and the write (not shown here: 65536
+ *    threads exchanging on 4096 texels read stale values without it).
  *  - 32-bit texture atomics on RG32Uint touch the first channel only: there is no 64-bit
  *    compare-and-swap to build on. */
 #define HDR "#include <metal_stdlib>\n using namespace metal;\n"

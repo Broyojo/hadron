@@ -464,6 +464,82 @@ tuning), and the GPU side wants a look at KosmicKrisp's render pass splits and p
 The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
 back slowly, and swap left over from earlier runs stopped Teardown at launch.
 
+## Unreal Engine 5: Subnautica 2's start-up checks and shader model 6.6 (#23)
+
+Subnautica 2 (Unreal Engine 5, x86-64) stopped at four checks in a row. Each had a general cause.
+
+**Visual C++ runtime.** The launcher asked for the Visual C++ 2015-2022 redistributable although Wine
+provides it. It reads the file version of `vcruntime140_1.dll`, and that DLL had no version resource:
+Wine's makedep registers resources per enabled architecture, and modules built only as ARM64EC are
+output for aarch64 (disabled) and linked as arm64ec, so their resource list was empty. Wine 0019 takes
+the resources of the architecture the module is linked for.
+
+**SSE4.2.** FEX reads the host's ARM ID registers from the registry, where Wine publishes them from
+the SMBIOS processor information. On macOS Wine's reader was a stub, so FEX assumed a baseline
+ARMv8.0 CPU and hid SSE4.2, PCLMULQDQ, AES and SHA from x86 code (and skipped the faster code it has
+for LSE atomics, RCPC and FlagM). macOS traps reads of the ID registers from user space, so Wine 0020
+builds them from the `hw.optional.arm` features the kernel reports. Fields with no reported feature
+stay zero.
+
+**D3D12 adapter.** Wine's own d3d12 asks the DXGI adapter for a Wine-private interface, and DXGI is
+DXMT's: `D3D12CreateDevice` failed with `E_NOINTERFACE` for every game not listed in `games.conf`.
+vkd3d-proton is now the D3D12 path for all games (`HADRON_D3D12=wine` selects Wine's).
+
+**Shader model.** Unreal requires its SM6 tier: shader model 6.6, resource binding tier 3, wave
+operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on KosmicKrisp and no
+64-bit atomics, because the driver lacked four Vulkan features. Metal offers none of them directly;
+`tools/metal-probes` has the measurements behind each implementation.
+
+- *Compute shader derivatives* (Mesa 0026). Metal takes no derivatives in compute kernels, and
+  implicit sampling there uses LOD 0. But threads 4n..4n+3 of a threadgroup form a quad for every
+  local size tried, which is Vulkan's linear derivative group. Derivatives become differences of
+  `quad_broadcast` values, implicit sampling passes them as gradients, and LOD queries are computed
+  from them with the sampler's clamp and mip filter. Quad groups shuffle the local invocation ids.
+- *Denormal modes for 32-bit floats* (Mesa 0027). Apple GPUs flush 32-bit denormals to zero as
+  operands and as results, in every math mode; 16-bit denormals are kept. Flush-to-zero is therefore
+  native, except for operations that only move bits (min, max, negate, abs), which get an explicit
+  flush. Preserve is emulated for shaders that ask for it: each operation keeps the native result
+  when no operand or result is denormal, and otherwise computes it in integers with correct
+  rounding. vkd3d-proton only requests preserve when a DXIL shader does (`-denorm preserve`), so
+  ordinary shaders are unaffected. `tools/denorm-test` compares 24 operations on 65,536 inputs bit
+  for bit with the CPU.
+- *64-bit atomics* on buffers, shared memory and images (Mesa 0028, 0029). Metal has 64-bit atomic
+  `min` and `max` only, without a result, on buffers and on RG32Uint textures. Those stay native,
+  which is what Nanite's visibility buffer uses. Every other operation is a read-modify-write under
+  a lock from a device table of 4,096 32-bit atomics. What had to be found out
+  (`tools/metal-probes/atomic64-lock.m`):
+  - A plain spin lock deadlocks. The threads of a SIMD group run in lockstep, so the one that takes
+    the lock is held until the others stop spinning, and they are waiting for it. Lanes take turns
+    instead, so only one lane of a group ever waits. Stages without SIMD-group built-ins use a state
+    machine whose exit the compiler can't predict, which keeps the locked section inside the loop.
+  - Plain loads, stores and texture reads are not coherent across threads, even under the lock.
+    They are with `atomic_thread_fence` at device scope before the read, between the read and the
+    write, and after the write. Without the middle fence an exchange on a texture returned stale
+    values once 16 threads shared each of 4,096 texels.
+  - 32-bit texture atomics on RG32Uint touch only the first channel, so there is no 64-bit
+    compare-and-swap to build on, and the per-texture `fence()` breaks the locked sequence.
+  - Native `min`/`max` can't be mixed with locked operations on the same value. Once a shader that
+    needs the lock is created, a device flag sends `min` and `max` through the lock too, after the
+    queue has drained.
+  - macOS aborts a command buffer that holds up the display for about 40 ms ("Impacting
+    Interactivity"). Threads killed inside the lock leave it held, and later kernels would spin
+    forever. The device is lost at that point anyway, but the driver clears the lock table when a
+    command buffer fails and bounds the spin, so the GPU is not left busy.
+
+  R64 image views are RG32Uint views; the lock is keyed on texel coordinates so every view of an
+  image agrees. `tools/atomic64-test` checks exact totals on a buffer and on an r64ui image, with up
+  to 65,536 threads on 1, 64 or 4,096 values.
+
+Vulkan CTS, 0 failures: compute shader derivatives 152, float controls 4,051, 64-bit atomics on
+buffers, images and in the memory model tests 2,648, the R64 image formats 827, sampler and subgroup
+regressions 8,287, and a 7,559-test sample of image, format, render pass and compute tests.
+`tools/d3d12probe` now reports feature level 12_0, shader model 6.6 and 64-bit atomics on typed
+resources, descriptor heap resources and group shared memory.
+
+Open: `dEQP-VK.api.info.image_format_properties.*` fails for 64-bit formats with sparse residency
+and storage usage, a combination the sparse image support (Mesa 0016) rejects for every format, R64
+included.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
