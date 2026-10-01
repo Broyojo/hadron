@@ -1,0 +1,63 @@
+From d43dde02f7c47908a9aa6ff4a7fc090be118aec9 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 1 Oct 2026 13:09:10 -0400
+Subject: [PATCH 19/20] makedep: Link the resources of modules built only as
+ ARM64EC.
+
+A module whose aarch64 build is disabled is still output for that
+architecture and linked as ARM64EC, but its resources are only registered
+for enabled architectures, so the resource list of the aarch64 build was
+empty and the module was linked without them. vcruntime140_1.dll among
+others ended up with no version resource, and installers and launchers
+that check the runtime's file version, such as Unreal Engine's
+prerequisites check, reported the Visual C++ runtime as missing. Take the
+resources of the architecture the module is linked for.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01KCKKoKPBaWBVBojHFrLgQ9
+---
+ tools/makedep.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/tools/makedep.c b/tools/makedep.c
+index 04baabeb70..c39c3ec48b 100644
+--- a/tools/makedep.c
++++ b/tools/makedep.c
+@@ -3930,7 +3930,7 @@ static void output_module( struct makefile *make, unsigned int arch )
+     struct strarray imports = make->imports;
+     const char *p, *module_name;
+     char *spec_file = NULL;
+-    unsigned int link_arch;
++    unsigned int link_arch, res_arch;
+ 
+     if (!make->is_exe)
+     {
+@@ -3979,12 +3979,15 @@ static void output_module( struct makefile *make, unsigned int arch )
+                            strmake( "$(libdir)/wine/%s", arch_pe_dirs[arch] ), NULL );
+     }
+ 
++    /* resources are only registered for enabled architectures */
++    res_arch = make->disabled[arch] ? link_arch : arch;
++
+     strarray_add( &make->all_targets[link_arch], module_name );
+     output( "%s:", obj_dir_path( make, module_name ));
+     if (spec_file) output_filename( spec_file );
+     output_filenames_obj_dir( make, make->object_files[arch] );
+     if (link_arch != arch) output_filenames_obj_dir( make, make->object_files[link_arch] );
+-    output_filenames_obj_dir( make, make->res_files[arch] );
++    output_filenames_obj_dir( make, make->res_files[res_arch] );
+     output_filenames( dep_libs );
+     output_filename( winebuild );
+     output_filename( winegcc );
+@@ -4004,7 +4007,7 @@ static void output_module( struct makefile *make, unsigned int arch )
+     if (link_arch) output_filenames( get_expanded_arch_var_array( make, "EXTRADLLFLAGS", link_arch ));
+     output_filenames_obj_dir( make, make->object_files[arch] );
+     if (link_arch != arch) output_filenames_obj_dir( make, make->object_files[link_arch] );
+-    output_filenames_obj_dir( make, make->res_files[arch] );
++    output_filenames_obj_dir( make, make->res_files[res_arch] );
+     output_debug_files( make, module_name, link_arch );
+     output_filenames( all_libs );
+     output_filename( arch_make_variable( "LDFLAGS", link_arch ));
+-- 
+2.54.0 (Apple Git-157)
+
