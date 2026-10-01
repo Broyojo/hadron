@@ -364,8 +364,49 @@ stream select and the transform feedback stream query are exposed; vkCmdDrawIndi
 not yet. Vulkan CTS: transform_feedback.simple, fuzz and primitive_restart pass with no failures (the
 rest need more than 4 streams or buffers, or transformFeedbackDraw), and vkd3d-proton's stream
 output tests pass on an unmodified vkd3d-proton. With single-texel alignment and transform feedback,
-D3D12CreateDevice no longer needs relaxed checks; Teardown still needs feature level 12_0 until
-sparse resources exist.
+D3D12CreateDevice no longer needs relaxed checks.
+
+Sparse resources (Mesa patches 0015-0017, `MESA_KK_EXPERIMENTAL=sparse`, on in `scripts/play`) use
+Metal 4's placement sparse resources: buffers and textures created without memory whose 64 KB pages
+`MTL4CommandQueue updateBufferMappings`/`updateTextureMappings` map onto placement heaps, which is
+vkQueueBindSparse almost one to one, and 64 KB is D3D12's tile size. Device memory heaps of 64 KB or
+more are made sparse-compatible. Metal's 2D tile shapes match Vulkan's standard block shapes for every
+format probed (BC included), so residencyStandard2DBlockShape is honest; 3D tiles are flat slices
+(non-standard), so no sparseResidencyImage3D. Image binds map tile regions directly; opaque binds walk
+a per-layer layout of each mip's tiles followed by Metal's per-slice mip tail. Shader residency maps to
+MSL's sparse_sample/read/gather (a value plus a resident flag; NIR's extra residency-code component is
+split off in nir_to_msl). Findings on the way, each checked with standalone Metal probes:
+- textures with shader-write usage only get sparse tier 1, whose small mip levels and tails misreport
+  residency or fault the GPU; KosmicKrisp adds shader-write for transfer destinations and atomic
+  formats, so sparse images without Vulkan storage usage drop it (copies use blits), and sparse
+  residency with storage usage is reported unsupported;
+- a texel-buffer view of a sparse buffer works once its descriptor carries the sparse page size;
+- mapping updates need a resource-state barrier before later work; a small command buffer after each
+  sparse bind provides it (without it, reads saw pages after they were unmapped).
+Left: residency queries on texel buffers (MSL's texture_buffer has no sparse_read; plan: a per-buffer
+residency bitmap) and one strict-residency SSBO test.
+
+D3D12 feature level 12_0 needs tiled resources tier 2, which needs min/max sampler filtering. Metal
+takes a sampler reductionMode on every GPU but only honours it from Apple family 10 (M5): on M2 Pro
+(family 8) and M4 (family 9, tested on another Mac) every mode returns the weighted average, through
+both the Metal 3 and Metal 4 paths, and MSL has no shader-side reduction. Patch 0018 emulates it below
+family 10: the sampler descriptor carries the reduction and filter modes, and each filtered sample
+branches on them; the emulated path reads the 2x2 (2x2x2 for 3D) footprint at texel centres, where
+linear filtering returns texels exactly and the sampler's address modes still apply, at one or two
+mip levels, and takes the per-channel min or max of the texels with non-zero weight. Cube maps work in
+face coordinates, with footprints crossing an edge clamped onto the neighbouring face's edge texels.
+Vulkan CTS: sparse_resources 2D groups pass (2300+, the texel-buffer residency and one strict test
+aside), the sampler reduction and texture filtering groups pass (6700, 0 failures). vkd3d-proton now
+reports feature level 12_0 (tiled resources tier 2, resource binding tier 3), and Teardown runs with
+no overrides.
+
+Teardown slows down as destruction piles up. Logged over six minutes of play: memory stayed flat
+(about 1.1 GB for the process, 3.4 GB of GPU memory), while CPU went from about 35% to 140% of a core
+and the GPU from 80% to 95% busy. A sample of the main thread was about 83% busy, almost all in
+FEX-translated x86 code (Teardown and the x86 vkd3d-proton), with about 1.5% in KosmicKrisp and 3%
+in Apple's driver. That is more work per frame (debris physics on the CPU, more objects to draw),
+not a leak; the CPU side is FEX overhead, for the performance work (an ARM64EC vkd3d-proton, FEX
+tuning), and the GPU side wants a look at KosmicKrisp's render pass splits and per-sequence DGC draws.
 
 The watchdog now limits swap growth since the game started rather than swap in use: macOS gives swap
 back slowly, and swap left over from earlier runs stopped Teardown at launch.
