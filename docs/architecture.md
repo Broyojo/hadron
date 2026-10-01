@@ -6,15 +6,23 @@ arm64, and FEX translates x86 code inside Wine's ARM64EC/WoW64 emulator interfac
 
 ## Stack
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="architecture-dark.svg">
+  <img alt="Hadron's stack, from Steam for Mac down to Metal" src="architecture-light.svg">
+</picture>
+
+The diagram is drawn by `tools/arch-diagram/gen.py`.
+
 | Layer | Component | Notes |
 |---|---|---|
 | Wine | Upstream Wine master, arm64 macOS host | PE archs `aarch64,arm64ec,i386`. Proton and CrossOver game patches carried on top as needed. |
 | x86_64 emulation | FEX `libarm64ecfex.dll` | Loaded as the ARM64EC emulator (`HKLM\Software\Microsoft\Wow64\amd64`). |
 | i386 emulation | FEX `libwow64fex.dll` | Loaded as the WoW64 emulator (`HKLM\Software\Microsoft\Wow64\x86`). |
 | D3D10/11 | DXMT | Direct to Metal, ARM64X builds. |
-| D3D12 | vkd3d-proton on KosmicKrisp | Experimental; watch DXMT's D3D12 work. |
+| D3D12 | vkd3d-proton on KosmicKrisp | The default for every game; presents through DXVK's DXGI. Watch DXMT's D3D12 work. |
 | D3D8/9 | mtld3d now, DXVK on KosmicKrisp later | DXVK 3.x needs geometry shaders, transform feedback and fillModeNonSolid. |
-| Vulkan | KosmicKrisp (MoltenVK at first) | Via winevulkan. |
+| Vulkan | KosmicKrisp, Mesa's Vulkan driver on Metal 4 | Via winevulkan. Hadron's patches add what vkd3d-proton needs (docs/findings.md #22). |
+| OpenGL | Wine's OpenGL on Apple's OpenGL 4.1 | Zink on KosmicKrisp planned, for OpenGL above 4.1. |
 | Steam | NotProton's lsteamclient port, Steam Play in native Mac Steam | |
 | Fixes | umu-protonfixes | |
 
@@ -71,6 +79,7 @@ memory (Wine 0011) and FEX switches the thread to write mode around its code wri
 ```
 sources.conf          upstream repos and refs
 patches/<component>/  git format-patch queues applied by scripts/fetch.sh
-scripts/              setup-toolchain, fetch, build-wine, build-fex
+scripts/              build, install and launch scripts
+tools/                test programs, Metal probes, benchmarks
 src/ build/ dist/     checkouts, build trees, installed runtime (git-ignored)
 ```
