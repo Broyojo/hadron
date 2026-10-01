@@ -536,9 +536,21 @@ regressions 8,287, and a 7,559-test sample of image, format, render pass and com
 `tools/d3d12probe` now reports feature level 12_0, shader model 6.6 and 64-bit atomics on typed
 resources, descriptor heap resources and group shared memory.
 
-Open: `dEQP-VK.api.info.image_format_properties.*` fails for 64-bit formats with sparse residency
-and storage usage, a combination the sparse image support (Mesa 0016) rejects for every format, R64
-included.
+The first launch on this driver passed Unreal's check ("shader model 6.6 ... atomic64 supported",
+"RHI D3D12 with Feature Level SM6 is supported and will be used") and then stopped on two things.
+Metal's compiler ran out of memory on a compute shader (three pipelines failed; open). And
+`CreateReservedResource` failed for a 16384x768x2 `R32_UINT` texture with UAV access: sparse
+residency with storage usage, which Mesa 0016 had reported unsupported because on macOS 27.0
+writable sparse textures (which only get sparse tier 1) misreported residency at small mip levels or
+faulted the GPU. On 27.0.1 they behave correctly for every shape probed, mip chains and arrays
+included (`tools/metal-probes/sparse-write.m`), so Mesa 0030 allows the combination; the sparse CTS
+group still passes (3,392, 0 failures).
+
+`docs/d3d12-coverage.md` lists what vkd3d-proton can and cannot offer on KosmicKrisp, so the
+remaining driver work is a checklist.
+
+Open: `dEQP-VK.api.info.image_format_properties.*` fails for every format, because the suite
+requires sparse binding on 1D, 3D and multisampled images and KosmicKrisp has single-sampled 2D only.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 

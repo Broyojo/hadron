@@ -6,7 +6,7 @@ than something each new game discovers. Regenerate the first table with `tools/d
 missing extensions come from comparing vkd3d-proton's `VK_EXTENSION` list with
 `kk_physical_device.c`.
 
-State on 2026-10-01 (M2 Pro, macOS 27, Mesa patches 0001-0029).
+State on 2026-10-01 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0030).
 
 ## What D3D12 reports
 
@@ -39,7 +39,7 @@ State on 2026-10-01 (M2 Pro, macOS 27, Mesa patches 0001-0029).
 
 | Gap | Vulkan side | Metal | Seen in |
 |---|---|---|---|
-| Reserved (sparse) textures with UAV usage, and with array layers | sparse residency images with `STORAGE` usage | sparse textures exist; shader writes to them are unprobed | Subnautica 2: `CreateReservedResource` 16384x768x2 `R32_UINT`, fatal |
+| ~~Reserved (sparse) textures with UAV usage~~ done in Mesa 0030 | sparse residency images with `STORAGE` usage | works on macOS 27.0.1 (`tools/metal-probes/sparse-write.m`) | Subnautica 2: `CreateReservedResource` 16384x768x2 `R32_UINT`, fatal |
 | A compute shader Metal's compiler runs out of memory on | none: a driver bug, the generated MSL is too large | - | Subnautica 2: three compute pipelines fail to build |
 | Wireframe fill mode | `fillModeNonSolid` | `setTriangleFillMode` has lines; points would need emulation | DXVK refuses the device for D3D9/10/11 without it |
 
@@ -80,8 +80,12 @@ vkd3d-proton also lists vendor extensions (AMD, NVIDIA, Valve) and Windows-only 
 
 ## Known conformance gaps in what is reported
 
-- `dEQP-VK.api.info.image_format_properties.*`: sparse residency with storage usage is rejected
-  for every format (the first gap above).
+- `dEQP-VK.api.info.image_format_properties.*` fails for every format: with `sparseBinding`, the
+  suite requires sparse binding on 1D and 3D images and on multisampled 2D images, and KosmicKrisp
+  has sparse images for single-sampled 2D only.
+- A shader write to an unmapped tile of a sparse texture reads back for the rest of the kernel
+  (Metal keeps it until the command buffer ends), where `residencyNonResidentStrict` wants it
+  discarded. Buffers have a guard for this (Mesa 0024); storage images do not yet.
 - vkd3d-proton's own tiled resource tests: `test_update_tile_mappings` and its remap variants,
   `test_texture_feedback_instructions`, `test_sparse_default_mapping`, three checks of
   `test_execute_indirect_state`.

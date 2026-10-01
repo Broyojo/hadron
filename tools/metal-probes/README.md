@@ -23,3 +23,6 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   derivatives there, so the driver passes gradients from quad operations)
 - `atomic64-lock.m`: what makes a locked 64-bit read-modify-write atomic (a plain spin lock deadlocks
   a SIMD group; lanes taking turns works; loads, stores and texture reads need device-scope fences)
+- `sparse-write.m`: sparse textures with shader-write usage (sparse tier 1, where read-only ones get
+  tier 2): writes land in mapped tiles, residency is reported per tile and per level, a write to an
+  unmapped tile reads back within the kernel and is gone in the next command buffer
