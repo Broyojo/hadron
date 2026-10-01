@@ -293,8 +293,8 @@ DXVK's D3D11 features (fillModeNonSolid, geometryShader), though vkd3d-proton on
 vkd3d-proton's own test suite (`tests/d3d12.exe`, built with `-Denable_tests=true`) runs on KosmicKrisp
 through Wine and maps the remaining driver work. First findings: `SampleLevel` at LOD exactly 0.5/1.5
 picks the lower mip (D3D rounds up; Vulkan allows either), one depth-compare sampling case is wrong, and
-creating a pipeline statistics query pool asserts (KosmicKrisp supports only occlusion and timestamp
-queries; D3D12 requires pipeline statistics).
+creating a pipeline statistics query pool asserted (KosmicKrisp supported only occlusion and timestamp
+queries; D3D12 requires pipeline statistics; added in patch 0019, below).
 
 Teardown's voxels are drawn GPU-driven: ExecuteIndirect with per-object root CBV, vertex and index
 buffers. vkd3d-proton implements that with VK_EXT_device_generated_commands, which KosmicKrisp lacked,
@@ -399,6 +399,23 @@ Vulkan CTS: sparse_resources 2D groups pass (2300+, the texel-buffer residency a
 aside), the sampler reduction and texture filtering groups pass (6700, 0 failures). vkd3d-proton now
 reports feature level 12_0 (tiled resources tier 2, resource binding tier 3), and Teardown runs with
 no overrides.
+
+Pipeline statistics queries (patch 0019) are counted by KosmicKrisp itself: Metal exposes only the
+timestamp counter set on Apple GPUs (checked on M2 Pro and M4; statistic counter heaps are refused).
+Direct draws and dispatches are counted on the CPU; indirect, predicated and DGC draws are summed by
+one parallel kernel per render pass, run when the pass ends so no pass is split; tessellation and
+geometry counts come from the compute emulation, which already knows how many patches, points and
+primitives it made (a GS with dynamic output runs its count pass while a query is active). Fragment
+invocations use a copy of the fragment shader with one atomic per SIMD-group, compiled when a pipeline
+is made and turned into a Metal pipeline the first time a query counts fragments; it keeps early depth
+testing unless the shader discards or writes depth, stencil, sample mask or memory. Driver-internal
+clears, blits and copies are not counted. Clipping primitives equal clipping invocations (Metal does
+not report what its clipper outputs; the spec allows this). Vulkan CTS: query_pool.statistics_query
+passes (17,686 tests, the rest need a compute-only queue or device-address commands). Measured on M2
+Pro at 1080p: no difference without a query against the previous driver; with every statistic
+counting, 32 layers of overdraw cost 3% more, 5,000 direct or indirect draws 3-13% more GPU time, but
+a shader that discards loses early depth rejection while fragments are counted (32 layers: 12 ms to
+48 ms), because Metal shades every fragment of a shader with memory side effects.
 
 Teardown slows down as destruction piles up. Logged over six minutes of play: memory stayed flat
 (about 1.1 GB for the process, 3.4 GB of GPU memory), while CPU went from about 35% to 140% of a core
