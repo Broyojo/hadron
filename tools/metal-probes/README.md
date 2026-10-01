@@ -10,3 +10,6 @@ checked on M2 Pro and M4 instead of assumed. Build one with
 - `tiles.m`, `tail.m`, `view.m`: sparse texture tile shapes, mip tails, residency through views
 - `tb.m`, `tb2.m`, `tb3.m`: texel-buffer views of sparse buffers
 - `minmax.m`, `minmax2.m`, `minmax3.m`: sampler min/max reduction (ignored below Apple family 10)
+- `strict-write.m`: shader writes to unmapped sparse buffer pages read back within the command buffer
+- `store-guard.m`, `store-guard-versioned.m`: cost of guarding buffer stores per store (65-100% in a
+  store loop) against choosing a guarded or plain copy of the code once (free)

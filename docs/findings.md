@@ -383,8 +383,25 @@ split off in nir_to_msl). Findings on the way, each checked with standalone Meta
 - a texel-buffer view of a sparse buffer works once its descriptor carries the sparse page size;
 - mapping updates need a resource-state barrier before later work; a small command buffer after each
   sparse bind provides it (without it, reads saw pages after they were unmapped).
-Left: residency queries on texel buffers (MSL's texture_buffer has no sparse_read; plan: a per-buffer
-residency bitmap) and one strict-residency SSBO test.
+Two gaps took a residency map kept by the driver (patch 0024). MSL's texture_buffer has no sparse_read,
+and Metal does not discard a shader write to an unmapped buffer page: the value reads back at that
+address until the command buffer ends (`tools/metal-probes/strict-write.m`), where Vulkan's
+residencyNonResidentStrict wants the write discarded. KosmicKrisp keeps one byte per 64 KB page of
+every sparse-residency buffer in a device buffer, filled on the queue's timeline in the command buffer
+that follows each sparse bind. A sparse fetch from a texel buffer reads its residency from the map
+(the view's descriptor carries an index into a table of views, in bits its 16-byte-aligned offset
+leaves free). A store to a storage buffer whose descriptor marks it sparse is skipped when its page is
+unmapped. A check on every store costs 65-100% in a tight store loop however it is written (branch or
+select, `store-guard.m`), so shaders that store to buffers get two copies of their code and pick one
+with a single read of "does a sparse-residency buffer exist on this device": programs with none run
+the original code (`tools/storebench`: stores +0%, atomics +1%, a load+store loop +5% from the read
+itself). Stores through raw device addresses into sparse buffers are not guarded.
+
+vkd3d-proton's own sparse tests are stricter than the CTS here and still fail, the same before and
+after these patches: test_update_tile_mappings, test_texture_feedback_instructions_sm51/dxil and
+test_sparse_default_mapping end without a result, test_update_tile_mappings_remap_vmem/smem fail about
+980 of 7,711 checks, and test_execute_indirect_state fails 3 of 267. test_buffer_feedback_instructions
+(CheckAccessFullyMapped on buffers) passes now that texel buffers report residency. Open.
 
 D3D12 feature level 12_0 needs tiled resources tier 2, which needs min/max sampler filtering. Metal
 takes a sampler reductionMode on every GPU but only honours it from Apple family 10 (M5): on M2 Pro
@@ -395,10 +412,22 @@ branches on them; the emulated path reads the 2x2 (2x2x2 for 3D) footprint at te
 linear filtering returns texels exactly and the sampler's address modes still apply, at one or two
 mip levels, and takes the per-channel min or max of the texels with non-zero weight. Cube maps work in
 face coordinates, with footprints crossing an edge clamped onto the neighbouring face's edge texels.
-Vulkan CTS: sparse_resources 2D groups pass (2300+, the texel-buffer residency and one strict test
-aside), the sampler reduction and texture filtering groups pass (6700, 0 failures). vkd3d-proton now
+Vulkan CTS: sparse_resources passes (3,367, 0 failures; the rest need 3D or multisampled sparse images
+or device groups), the sampler reduction and texture filtering groups pass (7,499, 0 failures). vkd3d-proton now
 reports feature level 12_0 (tiled resources tier 2, resource binding tier 3), and Teardown runs with
 no overrides.
+
+An automated review of these patches (Codex, on the pull requests) made 17 distinct claims; each was
+checked against the code, the specification and a test before changing anything. Eight were wrong
+(the code already did it, an earlier NIR pass had lowered the case away, or the specification allows
+the behaviour: totals in the first multiview query, primitive restart not affecting primitive counts).
+Nine were real: DGC draws of strips with primitive restart into a geometry shader joined the strips
+(`tools/dgc-test` case 3; patch 0020); the min/max emulation ignored the sampler's LOD clamp for
+explicit LODs, skipped nearest filtering with linear mip filtering and sparse sampling, stayed off when
+the extension was enabled without the Vulkan 1.2 feature bit, and computed a LOD for every sample
+before looking at the sampler's mode (`tools/minmax-test`; patch 0022); sparse image queries offered
+multisampling (0023); a statistics pipeline that failed to build was silently skipped (0021); and the
+two sparse gaps above (0024).
 
 Pipeline statistics queries (patch 0019) are counted by KosmicKrisp itself: Metal exposes only the
 timestamp counter set on Apple GPUs (checked on M2 Pro and M4; statistic counter heaps are refused).
