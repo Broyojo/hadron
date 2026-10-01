@@ -1,0 +1,28 @@
+#version 450
+#extension GL_EXT_buffer_reference : require
+#extension GL_ARB_gpu_shader_int64 : require
+#extension GL_EXT_scalar_block_layout : require
+layout(buffer_reference, std430) buffer Ref { volatile uint v; };
+layout(set = 0, binding = 0, std430) buffer Data { volatile uint v[]; } data;
+layout(set = 0, binding = 1, scalar) buffer Straddle { uint pad[49150]; volatile uvec4 v; } straddle;
+layout(set = 0, binding = 3, std430) buffer Out { uint v[32]; } o;
+layout(push_constant) uniform PC { uint64_t address; } pc;
+layout(local_size_x = 1) in;
+void main()
+{
+    data.v[5] = 0x11u;
+    o.v[0] = data.v[5];
+    data.v[16384 + 5] = 0x77u;
+    o.v[1] = data.v[16384 + 5];
+    straddle.v = uvec4(0xa0u, 0xa1u, 0xa2u, 0xa3u);
+    uvec4 s = straddle.v;
+    o.v[2] = s.x; o.v[3] = s.y; o.v[4] = s.z; o.v[5] = s.w;
+    Ref bound = Ref(pc.address + 2ul * 65536ul + 64ul);
+    bound.v = 0x22u;
+    o.v[6] = bound.v;
+    Ref unbound = Ref(pc.address + 65536ul + 64ul);
+    unbound.v = 0x99u;
+    o.v[7] = unbound.v;
+    atomicAdd(data.v[16384 + 9], 3u);
+    o.v[8] = data.v[16384 + 9];
+}

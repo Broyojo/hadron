@@ -1,0 +1,36 @@
+#version 450
+#extension GL_EXT_buffer_reference : require
+#extension GL_ARB_gpu_shader_int64 : require
+layout(buffer_reference, std430) buffer Ref { uint v[]; };
+layout(push_constant) uniform PC { uint64_t address; } pc;
+layout(set = 0, binding = 0) buffer Data { uint v[]; } data;
+layout(set = 0, binding = 1) buffer Counter { uint n; } counter;
+layout(constant_id = 0) const int MODE = 0;
+layout(local_size_x = 64) in;
+void main()
+{
+    uint base = gl_GlobalInvocationID.x * 16u;
+    if (MODE == 0) {
+        for (uint i = 0u; i < 16u; i++)
+            data.v[base + i] = base + i * 7u;
+    } else if (MODE == 1) {
+        uint acc = 0u;
+        for (uint i = 0u; i < 16u; i++) {
+            acc += data.v[base + i];
+            data.v[base + i] = acc;
+        }
+    } else if (MODE == 2) {
+        for (uint i = 0u; i < 4u; i++)
+            atomicAdd(counter.n, data.v[base + i] & 1u);
+    } else if (MODE == 3) {
+        Ref r = Ref(pc.address);
+        for (uint i = 0u; i < 16u; i++)
+            r.v[base + i] = base + i * 7u;
+    } else {
+        Ref r = Ref(pc.address);
+        uint acc = 0u;
+        for (uint i = 0u; i < 16u; i++)
+            acc += r.v[base + i];
+        data.v[base] = acc;
+    }
+}
