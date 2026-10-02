@@ -1,5 +1,5 @@
-From 296c10f700fb9ed9584be821ca2210c2905b3cd1 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From c2e1d8e639f87acd9c117ad327d60f6be1616d78 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 22:33:18 -0400
 Subject: [PATCH] winemac.drv: Keep external Metal views visible across window
  surface flushes.

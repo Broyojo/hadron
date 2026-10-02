@@ -1,7 +1,7 @@
-From a910591da15003bd435bdd4cc1730d2e75a0f062 Mon Sep 17 00:00:00 2001
+From 2408724ab2531823aa618285ec92a97bda1c4c39 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 13:09:10 -0400
-Subject: [PATCH 20/20] ntdll: Report the ARM64 ID registers on macOS.
+Subject: [PATCH] ntdll: Report the ARM64 ID registers on macOS.
 
 The ID registers reach the registry through the SMBIOS processor
 information, and x86 emulators read them there to find out what the host

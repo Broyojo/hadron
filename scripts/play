@@ -16,6 +16,7 @@
 # limits those not marked large address aware to 2GB, as on Windows.
 # D3D12 runs through vkd3d-proton on KosmicKrisp (docs/findings.md #22); HADRON_D3D12=wine uses
 # Wine's own d3d12 instead, for comparisons.
+# OpenGL runs on Apple's OpenGL; HADRON_OPENGL=zink runs it on Zink and KosmicKrisp instead.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
@@ -151,7 +152,7 @@ fi
 set -- "$wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
 for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|MESA)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
     case "$var" in
-        WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
+        WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|WINE_MAC_OPENGL|MESA_LOADER_DRIVER_OVERRIDE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
         VKD3D_SHADER_CACHE_PATH) [ -n "${vkd3d_cache:-}" ] && continue ;;
     esac
     eval "value=\${$var}"
@@ -160,6 +161,18 @@ done
 # Paths may contain spaces (Steam runs this through ~/Library/Application Support), so these go
 # through the argument list too rather than as unquoted expansions below.
 [ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "MESA_KK_EXPERIMENTAL=${MESA_KK_EXPERIMENTAL:-dgc,xfb,sparse}" "$@"
+# OpenGL: Wine's Mac driver uses Apple's OpenGL (4.1 core, no compatibility profile above 2.1).
+# HADRON_OPENGL=zink uses Zink on KosmicKrisp instead, Mesa's OpenGL on Vulkan, through EGL.
+libpath=/opt/homebrew/lib
+if [ "${HADRON_OPENGL:-apple}" = zink ]; then
+    if [ -f "$ROOT/dist/mesa-zink/lib/libEGL.1.dylib" ] && [ -n "$icd" ]; then
+        libpath="$ROOT/dist/mesa-zink/lib:$libpath"
+        set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" "$@"
+    else
+        echo "HADRON_OPENGL=zink needs Zink and KosmicKrisp: run scripts/build-vulkan.sh mesa zink" >&2
+        exit 1
+    fi
+fi
 # A shader Metal refuses to compile is a driver bug: KosmicKrisp saves its source here.
 mkdir -p "$ROOT/build/logs/failed-msl"
 set -- "MESA_KK_FAILED_MSL_DIR=$ROOT/build/logs/failed-msl" "$@"
@@ -171,7 +184,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     WINELOADER="$wine" \
     WINEDEBUG="$debug" \
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$overrides}" \
-    DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+    DYLD_FALLBACK_LIBRARY_PATH="$libpath" \
     FEX_DISKCACHE="${FEX_DISKCACHE:-1}" \
     WINE_LARGE_ADDRESS_AWARE="${HADRON_LARGE_ADDRESS_AWARE:-1}" \
     MTLD3D_NO_CRASH_HANDLER=1 \

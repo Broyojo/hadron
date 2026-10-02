@@ -1,5 +1,5 @@
-From 7ad2a3247b53d92652ca77f28f22d1146f3a72db Mon Sep 17 00:00:00 2001
-From: proton-apple <dev@proton-apple>
+From 665043d5b2e9ec166cfb3a11bb1030b015e756a4 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 17:10:21 -0400
 Subject: [PATCH] winemac.drv: Export the function table DXMT uses to attach
  Metal views.

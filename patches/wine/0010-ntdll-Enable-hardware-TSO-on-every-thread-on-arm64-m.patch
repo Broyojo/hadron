@@ -1,5 +1,5 @@
-From bae18064b79f76a883cadc5dead98a22c5cbff51 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From b60ba9005546b75fe8b8ea406f6b2cbaa868543a Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 19:03:50 -0400
 Subject: [PATCH] ntdll: Enable hardware TSO on every thread on arm64 macOS.
 

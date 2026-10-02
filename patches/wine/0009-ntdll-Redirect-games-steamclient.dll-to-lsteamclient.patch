@@ -1,5 +1,5 @@
-From 308ec4d70339ece94c910efb25a372d8aa4419bf Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From 790d9657ddd26d896901c1b8a96147157080c18f Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 18:34:23 -0400
 Subject: [PATCH] ntdll: Redirect games' steamclient.dll to lsteamclient.
 

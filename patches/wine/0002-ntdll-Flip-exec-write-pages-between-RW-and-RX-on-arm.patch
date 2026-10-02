@@ -1,7 +1,7 @@
-From e1beb93e282053034ecf2010b31293af4d678999 Mon Sep 17 00:00:00 2001
-From: proton-apple <dev@proton-apple>
+From 28c5f5ef352d0a86db7a5ddaa6a3257d386ddeb2 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 10:11:15 -0400
-Subject: [PATCH 2/6] ntdll: Flip exec+write pages between RW and RX on arm64
+Subject: [PATCH] ntdll: Flip exec+write pages between RW and RX on arm64
  macOS.
 
 arm64 macOS refuses mappings that are both writable and executable. Map

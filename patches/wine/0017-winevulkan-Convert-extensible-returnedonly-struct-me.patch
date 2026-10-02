@@ -1,4 +1,4 @@
-From 106dd97c0ed97eec5ee3aefe73a3b0ce4b291be9 Mon Sep 17 00:00:00 2001
+From a91d789e893c694f08e651d901c69b92cb8c0cd2 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 14:16:21 -0400
 Subject: [PATCH] winevulkan: Convert extensible returnedonly struct members on

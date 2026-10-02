@@ -1,0 +1,195 @@
+From 7b26edb37c6dd113935eb6a13a4768aee4b2fe36 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 2 Oct 2026 14:07:06 -0400
+Subject: [PATCH] winemac.drv: Add an OpenGL driver on EGL.
+
+The system's OpenGL stops at 4.1, has no compatibility profile above 2.1
+and is deprecated. With WINE_MAC_OPENGL=egl the Mac driver uses win32u's
+EGL contexts instead and creates window surfaces on the CAMetalLayer of
+the window's Metal view, the one Vulkan surfaces use. That is what an EGL
+on top of a Vulkan driver for Metal presents to, such as Mesa's Zink.
+---
+ dlls/winemac.drv/Makefile.in |   1 +
+ dlls/winemac.drv/egl.c       | 131 +++++++++++++++++++++++++++++++++++
+ dlls/winemac.drv/macdrv.h    |   2 +
+ dlls/winemac.drv/opengl.c    |   1 +
+ 4 files changed, 135 insertions(+)
+ create mode 100644 dlls/winemac.drv/egl.c
+
+diff --git a/dlls/winemac.drv/Makefile.in b/dlls/winemac.drv/Makefile.in
+index 943a9b5f7b..065de38c1d 100644
+--- a/dlls/winemac.drv/Makefile.in
++++ b/dlls/winemac.drv/Makefile.in
+@@ -28,6 +28,7 @@ SOURCES = \
+ 	cocoa_window.m \
+ 	display.c \
+ 	dllmain.c \
++	egl.c \
+ 	event.c \
+ 	gdi.c \
+ 	image.c \
+diff --git a/dlls/winemac.drv/egl.c b/dlls/winemac.drv/egl.c
+new file mode 100644
+index 0000000000..7a13cf7994
+--- /dev/null
++++ b/dlls/winemac.drv/egl.c
+@@ -0,0 +1,131 @@
++/*
++ * Mac driver OpenGL support through EGL
++ *
++ * Copyright 2026 David Andrews
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include "config.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++#include "macdrv.h"
++#include "wine/debug.h"
++#include "wine/opengl_driver.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(wgl);
++
++/* An OpenGL implementation on EGL that renders into a CAMetalLayer, such as Mesa's Zink on a
++ * Vulkan driver for Metal, used in place of the system's OpenGL when WINE_MAC_OPENGL is "egl".
++ * win32u does the contexts and pixel formats; this gives it the window surfaces. */
++
++static const struct egl_platform *egl;
++static const struct opengl_funcs *funcs;
++static struct opengl_driver_funcs macdrv_egl_driver_funcs;
++static const struct opengl_drawable_funcs macdrv_egl_surface_funcs;
++
++static void macdrv_egl_init_egl_platform(struct egl_platform *platform)
++{
++    platform->type = EGL_PLATFORM_SURFACELESS_MESA;
++    platform->native_display = 0;
++    egl = platform;
++}
++
++static BOOL macdrv_egl_surface_create(struct client_surface *client, int format, struct opengl_drawable **drawable)
++{
++    struct macdrv_client_surface *surface = impl_from_client_surface(client);
++    EGLConfig config = egl->configs[(format - 1) % egl->config_count];
++    struct opengl_drawable *gl;
++
++    TRACE("client %s, format %d\n", debugstr_client_surface(client), format);
++
++    if (!macdrv_client_surface_acquire_metal_swapchain(surface)) return FALSE;
++    if (!(gl = opengl_drawable_create(&macdrv_egl_surface_funcs, format, client, NULL))) return FALSE;
++
++    opengl_drawable_map_buffer(gl, GL_FRONT_LEFT, GL_BACK_LEFT);
++    opengl_drawable_map_buffer(gl, GL_FRONT, GL_BACK);
++    opengl_drawable_map_buffer(gl, GL_FRONT_AND_BACK, GL_BACK);
++
++    gl->surface = funcs->p_eglCreateWindowSurface(egl->display, config,
++            (EGLNativeWindowType)macdrv_swapchain_get_layer(surface->metal_swapchain), NULL);
++    if (!gl->surface)
++    {
++        ERR("Failed to create an EGL surface for %s, error %#x\n", debugstr_client_surface(client),
++            funcs->p_eglGetError());
++        opengl_drawable_release(gl);
++        return FALSE;
++    }
++
++    TRACE("Created drawable %s with egl_surface %p\n", debugstr_opengl_drawable(gl), gl->surface);
++    *drawable = gl;
++    return TRUE;
++}
++
++static void macdrv_egl_surface_destroy(struct opengl_drawable *base)
++{
++    TRACE("drawable %s\n", debugstr_opengl_drawable(base));
++}
++
++static void macdrv_egl_surface_flush(struct opengl_drawable *base, UINT flags)
++{
++    TRACE("drawable %s, flags %#x\n", debugstr_opengl_drawable(base), flags);
++
++    if (flags & GL_FLUSH_INTERVAL) funcs->p_eglSwapInterval(egl->display, abs(base->interval));
++}
++
++static BOOL macdrv_egl_surface_swap(struct opengl_drawable *base)
++{
++    client_surface_present(base->client);
++    funcs->p_eglSwapBuffers(egl->display, base->surface);
++    return TRUE;
++}
++
++static const struct opengl_drawable_funcs macdrv_egl_surface_funcs =
++{
++    .size = sizeof(struct opengl_drawable),
++    .destroy = macdrv_egl_surface_destroy,
++    .flush = macdrv_egl_surface_flush,
++    .swap = macdrv_egl_surface_swap,
++};
++
++bool macdrv_egl_wanted(void)
++{
++    const char *env = getenv("WINE_MAC_OPENGL");
++    return env && !strcmp(env, "egl");
++}
++
++UINT macdrv_egl_init(const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs)
++{
++    if (!opengl_funcs->egl_handle)
++    {
++        ERR("WINE_MAC_OPENGL is \"egl\", but no EGL library was loaded.\n");
++        return STATUS_NOT_SUPPORTED;
++    }
++    funcs = opengl_funcs;
++
++    /* win32u's own EGL driver for everything but the platform and the window surfaces */
++    macdrv_egl_driver_funcs = **driver_funcs;
++    macdrv_egl_driver_funcs.p_init_egl_platform = macdrv_egl_init_egl_platform;
++    macdrv_egl_driver_funcs.p_surface_create = macdrv_egl_surface_create;
++
++    *driver_funcs = &macdrv_egl_driver_funcs;
++    return STATUS_SUCCESS;
++}
+diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
+index 6322d52a8b..c37b2b993d 100644
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -298,6 +298,8 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+ extern void macdrv_lost_pasteboard_ownership(HWND hwnd);
+ 
+ extern UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs);
++extern bool macdrv_egl_wanted(void);
++extern UINT macdrv_egl_init(const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs);
+ extern UINT macdrv_VulkanInit(UINT version, void *vulkan_handle, const struct vulkan_driver_funcs **driver_funcs);
+ 
+ extern CGImageRef create_cgimage_from_icon_bitmaps(HDC hdc, HANDLE icon, HBITMAP hbmColor,
+diff --git a/dlls/winemac.drv/opengl.c b/dlls/winemac.drv/opengl.c
+index 956dc41c40..b78ce40891 100644
+--- a/dlls/winemac.drv/opengl.c
++++ b/dlls/winemac.drv/opengl.c
+@@ -2229,6 +2229,7 @@ UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, co
+         ERR("version mismatch, opengl32 wants %u but macdrv has %u\n", version, WINE_OPENGL_DRIVER_VERSION);
+         return STATUS_INVALID_PARAMETER;
+     }
++    if (macdrv_egl_wanted()) return macdrv_egl_init(opengl_funcs, driver_funcs);
+     funcs = opengl_funcs;
+ 
+     opengl_handle = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY|RTLD_LOCAL|RTLD_NOLOAD);
+-- 
+2.54.0 (Apple Git-157)
+

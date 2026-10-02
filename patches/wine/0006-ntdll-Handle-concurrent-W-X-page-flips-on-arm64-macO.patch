@@ -1,7 +1,7 @@
-From 1180fb058d2dac3c0d2c4f5dc72c65ef81eda812 Mon Sep 17 00:00:00 2001
-From: proton-apple <dev@proton-apple>
+From 95e507f8b041f313ebe7e34015ad3a219f47c38d Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 15:12:20 -0400
-Subject: [PATCH 6/6] ntdll: Handle concurrent W^X page flips on arm64 macOS.
+Subject: [PATCH] ntdll: Handle concurrent W^X page flips on arm64 macOS.
 
 Two threads can fault on the same page at once; by the time the second
 takes the virtual mutex, the first may already have flipped the page the

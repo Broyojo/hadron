@@ -1,4 +1,4 @@
-From 693a2217cd20736a45c8e3afd1a1dee0d5cff444 Mon Sep 17 00:00:00 2001
+From 371391b530be9138394b6902168bc9e79f590aad Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 12:40:04 -0400
 Subject: [PATCH] winemac.drv: Copy the application icon entries off the

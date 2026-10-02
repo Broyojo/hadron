@@ -1,7 +1,7 @@
-From 2c4115da8556b0067d08b701132121db0a2f6ab0 Mon Sep 17 00:00:00 2001
-From: proton-apple <dev@proton-apple>
+From 638a1357ccd98e74056a4ce19cd3de33dbfe1960 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 14:49:43 -0400
-Subject: [PATCH 3/6] ntdll: Allow building with KUSER_SHARED_DATA above 4GB.
+Subject: [PATCH] ntdll: Allow building with KUSER_SHARED_DATA above 4GB.
 
 Hosts that can't map memory below 4GB (arm64 macOS without the
 cross-architecture entitlement) can define WINE_HIGH_USER_SHARED_DATA to
