@@ -51,6 +51,18 @@ done
 log "assembling lsteamclient sources"
 mkdir -p "$OUT"
 WORK="$OUT/fetch" TREE="$OUT/src.new" "$NOTPROTON/lsteamclient/fetch.sh" | sed 's/^/    /'
+# Hadron's addition: overlay requests go to the Mac Steam client (launcher/lsteamclient-overlay.cpp).
+cp "$ROOT/launcher/lsteamclient-overlay.cpp" "$OUT/src.new/hadron_overlay.cpp"
+for f in "$OUT/src.new"/cppISteamFriends_SteamFriends*.cpp; do
+    sed -i '' \
+        -e '1i\
+extern void hadron_overlay_open_url( const char *url ); extern void hadron_overlay_open_store( unsigned int app );
+' \
+        -e 's/^\( *\)iface->ActivateGameOverlayToWebPage( u_pchURL/\1hadron_overlay_open_url( u_pchURL ); &/' \
+        -e 's/^\( *\)iface->ActivateGameOverlayToStore( params->nAppID/\1hadron_overlay_open_store( params->nAppID ); &/' "$f"
+done
+hooks=$(cat "$OUT/src.new"/cppISteamFriends_SteamFriends*.cpp | grep -c 'hadron_overlay_open_[a-z]*( [a-z]')
+(( hooks >= 40 )) || die "only $hooks overlay calls were redirected, lsteamclient's generated code changed"
 # No -t: files whose content is unchanged keep their old mtime, so objects stay current.
 rsync -rlp --checksum --delete "$OUT/src.new/" "$TREE/"
 rm -rf "$OUT/src.new"
@@ -61,7 +73,7 @@ sources() {
     sed -n "s/^[[:space:]]*\([A-Za-z0-9_]*\.$1\)[[:space:]]*\\\\*[[:space:]]*\$/\1/p" "$TREE/Makefile.in"
 }
 PE_SOURCES=($(sources c))
-UNIX_SOURCES=($(sources cpp))
+UNIX_SOURCES=($(sources cpp) hadron_overlay.cpp)
 (( ${#PE_SOURCES[@]} > 10 && ${#UNIX_SOURCES[@]} > 10 )) || die "could not parse SOURCES from Makefile.in"
 log "${#PE_SOURCES[@]} PE sources, ${#UNIX_SOURCES[@]} unix sources"
 
