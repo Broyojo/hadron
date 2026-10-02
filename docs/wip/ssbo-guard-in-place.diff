@@ -1,0 +1,107 @@
+diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c b/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
+index 54404dc65e8..5a6a1e9f005 100644
+--- a/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
++++ b/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
+@@ -278,6 +278,24 @@ has_guarded_store(nir_function_impl *impl)
+    return false;
+ }
+ 
++#define KK_SSBO_GUARD_CLONE_LIMIT 2000u
++
++static void
++collect_guarded_block(nir_builder *b, nir_block *block,
++                      struct util_dynarray *stores)
++{
++   nir_foreach_instr_safe(instr, block) {
++      if (instr->type != nir_instr_type_intrinsic)
++         continue;
++
++      nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++      if (is_guarded_store(intr))
++         util_dynarray_append(stores, intr);
++      else
++         mask_global_address(b, intr, NULL);
++   }
++}
++
+ bool
+ kk_nir_lower_ssbo_residency(nir_shader *nir, nir_address_format addr_format,
+                             bool guard)
+@@ -295,42 +313,42 @@ kk_nir_lower_ssbo_residency(nir_shader *nir, nir_address_format addr_format,
+          continue;
+ 
+       nir_builder b = nir_builder_create(impl);
+-      nir_cf_list body;
+-      b.cursor =
+-         nir_cf_extract(&body, nir_before_impl(impl), nir_after_impl(impl));
+-
+-      nir_def *map = load_residency_map(&b);
+-      nir_def *live = nir_build_load_global_constant(
+-         &b, 1, 32, map, .align_mul = 4, .access = ACCESS_CAN_SPECULATE);
+-
+-      nir_if *nif = nir_push_if(&b, nir_ine_imm(&b, live, 0));
+-      {
+-         nir_cf_list guarded;
+-         nir_cf_node *parent = &nir_cursor_current_block(b.cursor)->cf_node;
+-         nir_cf_list_clone(&guarded, &body, parent, NULL);
+-         nir_cf_reinsert(&guarded, b.cursor);
+-         b.cursor = nir_after_cf_list(&nif->then_list);
+-      }
+-      nir_push_else(&b, nif);
+-      {
+-         nir_cf_reinsert(&body, b.cursor);
+-         b.cursor = nir_after_cf_list(&nif->else_list);
+-      }
+-      nir_pop_if(&b, nif);
+-
+       struct util_dynarray stores = UTIL_DYNARRAY_INIT;
+-      foreach_list_typed(nir_cf_node, node, node, &nif->then_list) {
+-         nir_foreach_block_in_cf_node(block, node) {
+-            nir_foreach_instr_safe(instr, block) {
+-               if (instr->type != nir_instr_type_intrinsic)
+-                  continue;
+-
+-               nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
+-               if (is_guarded_store(intr))
+-                  util_dynarray_append(&stores, intr);
+-               else
+-                  mask_global_address(&b, intr, NULL);
+-            }
++
++      unsigned instr_count = 0;
++      nir_foreach_block(block, impl)
++         instr_count += exec_list_length(&block->instr_list);
++
++      if (instr_count > KK_SSBO_GUARD_CLONE_LIMIT) {
++         nir_foreach_block(block, impl)
++            collect_guarded_block(&b, block, &stores);
++      } else {
++         nir_cf_list body;
++         b.cursor =
++            nir_cf_extract(&body, nir_before_impl(impl), nir_after_impl(impl));
++
++         nir_def *map = load_residency_map(&b);
++         nir_def *live = nir_build_load_global_constant(
++            &b, 1, 32, map, .align_mul = 4, .access = ACCESS_CAN_SPECULATE);
++
++         nir_if *nif = nir_push_if(&b, nir_ine_imm(&b, live, 0));
++         {
++            nir_cf_list guarded;
++            nir_cf_node *parent = &nir_cursor_current_block(b.cursor)->cf_node;
++            nir_cf_list_clone(&guarded, &body, parent, NULL);
++            nir_cf_reinsert(&guarded, b.cursor);
++            b.cursor = nir_after_cf_list(&nif->then_list);
++         }
++         nir_push_else(&b, nif);
++         {
++            nir_cf_reinsert(&body, b.cursor);
++            b.cursor = nir_after_cf_list(&nif->else_list);
++         }
++         nir_pop_if(&b, nif);
++
++         foreach_list_typed(nir_cf_node, node, node, &nif->then_list) {
++            nir_foreach_block_in_cf_node(block, node)
++               collect_guarded_block(&b, block, &stores);
+          }
+       }
+ 

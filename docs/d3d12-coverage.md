@@ -6,7 +6,7 @@ than something each new game discovers. Regenerate the first table with `tools/d
 missing extensions come from comparing vkd3d-proton's `VK_EXTENSION` list with
 `kk_physical_device.c`.
 
-State on 2026-10-01 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0030).
+State on 2026-10-01 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0033).
 
 ## What D3D12 reports
 
@@ -39,8 +39,9 @@ State on 2026-10-01 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0030).
 
 | Gap | Vulkan side | Metal | Seen in |
 |---|---|---|---|
-| ~~Reserved (sparse) textures with UAV usage~~ done in Mesa 0030 | sparse residency images with `STORAGE` usage | works on macOS 27.0.1 (`tools/metal-probes/sparse-write.m`) | Subnautica 2: `CreateReservedResource` 16384x768x2 `R32_UINT`, fatal |
-| A compute shader Metal's compiler runs out of memory on | none: a driver bug, the generated MSL is too large | - | Subnautica 2: three compute pipelines fail to build |
+| ~~Reserved (sparse) textures with UAV usage~~ done in Mesa 0030, 0032 | sparse residency images with `STORAGE` usage | reads and writes work; residency queries don't, so a read-only twin answers them (findings #23) | Subnautica 2: `CreateReservedResource` 16384x768x2 `R32_UINT`, fatal |
+| ~~Shaders Metal's compiler runs out of memory on~~ done in Mesa 0031 | none: a driver bug in the shape of the generated MSL | - | Subnautica 2: compute pipelines fail to build, fatal |
+| Shaders that take a minute each to compile | none: the driver's emulations inflate large shaders about tenfold (findings #23 has the list) | - | Subnautica 2: stays on the loading screen |
 | Wireframe fill mode | `fillModeNonSolid` | `setTriangleFillMode` has lines; points would need emulation | DXVK refuses the device for D3D9/10/11 without it |
 
 ### Optional D3D12 features that some games require

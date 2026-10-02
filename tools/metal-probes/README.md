@@ -26,3 +26,11 @@ checked on M2 Pro and M4 instead of assumed. Build one with
 - `sparse-write.m`: sparse textures with shader-write usage (sparse tier 1, where read-only ones get
   tier 2): writes land in mapped tiles, residency is reported per tile and per level, a write to an
   unmapped tile reads back within the kernel and is gone in the next command buffer
+- `sparse-residency-views.m`: residency through views of a writable sparse texture (a view's first
+  level is ignored: levels 1-2 report the residency of levels 0-1; read-only textures are right)
+- `sparse-residency-fault.m`: `sparse_read` on writable sparse textures of some sizes ends the
+  command buffer with a GPU address fault (129x129 and 11x37 do, 128x128 does not)
+- `sparse-twin.m`: mip tail layouts of read-only and writable sparse textures of one shape, and a
+  read-only texture mapped to the same heap pages as a writable one reporting residency for it
+- `sparse-mapping-order.m`: mapping a read-only sparse texture, a writable one and the read-only one
+  again in one batch crashes in `updateTextureMappings`; a signal or a commit in between avoids it

@@ -537,14 +537,87 @@ regressions 8,287, and a 7,559-test sample of image, format, render pass and com
 resources, descriptor heap resources and group shared memory.
 
 The first launch on this driver passed Unreal's check ("shader model 6.6 ... atomic64 supported",
-"RHI D3D12 with Feature Level SM6 is supported and will be used") and then stopped on two things.
-Metal's compiler ran out of memory on a compute shader (three pipelines failed; open). And
-`CreateReservedResource` failed for a 16384x768x2 `R32_UINT` texture with UAV access: sparse
-residency with storage usage, which Mesa 0016 had reported unsupported because on macOS 27.0
-writable sparse textures (which only get sparse tier 1) misreported residency at small mip levels or
-faulted the GPU. On 27.0.1 they behave correctly for every shape probed, mip chains and arrays
-included (`tools/metal-probes/sparse-write.m`), so Mesa 0030 allows the combination; the sparse CTS
-group still passes (3,392, 0 failures).
+"RHI D3D12 with Feature Level SM6 is supported and will be used") and then stopped on two things: a
+reserved texture, and Metal's shader compiler dying.
+
+**Reserved textures with UAV access.** `CreateReservedResource` failed for a 16384x768x2 `R32_UINT`
+texture: sparse residency with storage usage, which Mesa 0016 had reported unsupported. Mesa 0030
+and 0032 allow it. Writable sparse textures only get Metal's sparse tier 1, and on macOS 27.0.1 its
+residency queries can't be used:
+
+- A view's first mip level is ignored: `sparse_read` through a view of levels 1-2 reports the
+  residency of levels 0-1 (`tools/metal-probes/sparse-residency-views.m`).
+- For some texture sizes `sparse_read` ends the command buffer with a GPU address fault: 11x37,
+  64x64, 129x129, 257x257 and 513x513 fault, 128x128, 200x200 and 512x512 don't
+  (`sparse-residency-fault.m`). Plain reads and writes are fine, and so is everything on read-only
+  (tier 2) textures.
+
+So a writable sparse image gets a read-only twin of the same shape that exists only to answer
+residency queries (`sparse-twin.m`). Every bind maps the twin's tile to the same heap page as the
+real one, which Metal allows. A sparse read in a shader becomes a plain read of the real texture for
+the value and a sparse read of the twin for the residency code; descriptors carry both. The two
+textures start their mip tails at different levels (the writable one at the same level or one
+later), so the tail Vulkan sees starts at the earlier level and covers the writable texture's extra
+tiled level too. One more thing Metal gets wrong: mapping a tier 2 texture, then a tier 1 texture,
+then the tier 2 one again with nothing committed in between crashes inside
+`updateTextureMappings` (`sparse-mapping-order.m`), so each bind call maps the writable textures
+first and the rest after.
+
+**Metal's compiler running out of memory.** `MTLCompilerService` aborted with a failed allocation,
+and every library being compiled at that moment failed with `XPC_ERROR_CONNECTION_INTERRUPTED`;
+Unreal treats a failed pipeline as fatal. Two causes, both in the shape of the generated MSL, which
+declares every temporary at the top of the function (Mesa 0031):
+
+- The declarations were zero-initialised, which made LLVM's mem2reg and SROA see two stores per
+  temporary. Dropping the initialiser took one shader from 25 s and 2.5 GB to 5 s and 0.6 GB.
+- Clang's uninitialised-variable analysis keeps a bit per tracked variable per basic block. A
+  shader with 97,000 temporaries and 19,000 selects needed 2.6 GB just to parse. Three
+  `#pragma clang diagnostic ignored` lines turn the analysis off: 160 MB.
+
+The driver now saves any MSL that Metal refuses to compile (Mesa 0033, `MESA_KK_FAILED_MSL_DIR`;
+`scripts/play` points it at `build/logs/failed-msl`), which is how the second cause was found.
+
+**Where it stands (2026-10-01, paused).** With those fixes a launch initialises the engine in about
+two minutes, creates the reserved texture, compiles every pipeline without a failure and reaches
+the first frames behind the loading screen. It then waits on pipelines that take about a minute
+each: the largest compute shaders reach Metal as 12-17 MB of MSL (88,000 temporaries, 240,000
+lines) and cost its compiler 40-75 s and about 2 GB apiece. Most of that size is added by the
+driver. Instruction counts for one such shader, pass by pass:
+
+| After | Instructions | Texture ops |
+|---|---|---|
+| SPIR-V to NIR | 6,600 | 55 |
+| compute derivatives, texture lowering | 7,700 | 107 |
+| sparse buffer store guard (Mesa 0024) | 16,100 | 214 |
+| explicit I/O | 21,500 | 214 |
+| sampler min/max emulation (Mesa 0018) | 48,800 | 1,558 |
+| descriptor lowering | 93,400 | 1,350 |
+| null descriptor checks | 101,600 | 1,350 |
+| NIR optimisation, as emitted | 63,200 | 1,350 |
+
+What to do about it, in order:
+
+1. Sampler min/max emulation: it unrolls 8 samples (16 for 3D) at every sample site, behind a
+   check of the sampler's mode. Make it one sample in a loop over the corners and the two levels.
+   Not started.
+2. Sparse buffer store guard: it clones the whole shader body and picks the guarded or the plain
+   copy at run time. Guard in place above a size limit instead. Written, untested:
+   `docs/wip/ssbo-guard-in-place.diff`.
+3. What is left of the compile cost after that is in LLVM's mem2reg, whose rename pass copies a
+   vector of all multi-store variables per basic block: about 4,400 registers from `if`/`else`
+   around every checked load and every texture operation (null descriptor checks, robust buffer
+   access). Fewer branches means fewer of both; null descriptors could select a dummy texture of
+   the right type instead of branching.
+4. Clang's code generator walks every live local variable on each call
+   (`EHScopeStack::requiresLandingPad`), which is quadratic with all temporaries declared at the
+   top. Declaring a temporary where it is assigned, when its uses allow, keeps that list short.
+5. Compile one oversized library at a time, build the driver without NIR validation, and cache
+   compiled pipelines on disk so the cost is paid once.
+
+Vulkan CTS for the sparse changes: all 1,036 `sparse_resources.shader_intrinsics.*sparse_read*`
+tests (600 pass, the rest not supported, 0 fail) and a 1-in-10 sample of the whole sparse group.
+The no-initialiser change touches every shader; the broad regression sample for it has not been run
+to the end.
 
 `docs/d3d12-coverage.md` lists what vkd3d-proton can and cannot offer on KosmicKrisp, so the
 remaining driver work is a checklist.
