@@ -45,13 +45,14 @@ static void register_steam_process( const WCHAR *steam_dir )
     RegCloseKey( key );
 
     /* The steam:// protocol, as Steam's installer registers it: games open their store and
-     * workshop pages with ShellExecute("steam://url/..."). */
-    if (RegCreateKeyExW( HKEY_CURRENT_USER, L"Software\\Classes\\steam", 0, NULL, 0,
+     * workshop pages with ShellExecute("steam://url/..."). Machine-wide, like the installer:
+     * Wine's shell looks protocols up in HKLM's classes only. */
+    if (RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"Software\\Classes\\steam", 0, NULL, 0,
                          KEY_ALL_ACCESS, NULL, &key, NULL )) return;
     set_string( key, NULL, L"URL:steam protocol" );
     set_string( key, L"URL Protocol", L"" );
     RegCloseKey( key );
-    if (RegCreateKeyExW( HKEY_CURRENT_USER, L"Software\\Classes\\steam\\shell\\open\\command", 0, NULL, 0,
+    if (RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"Software\\Classes\\steam\\shell\\open\\command", 0, NULL, 0,
                          KEY_ALL_ACCESS, NULL, &key, NULL )) return;
     swprintf( path, MAX_PATH, L"\"%ls\\steam.exe\" -- \"%%1\"", steam_dir );
     set_string( key, NULL, path );
