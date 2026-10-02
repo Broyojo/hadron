@@ -184,6 +184,13 @@ esac
 
 shift
 echo "game: $program $*" >> "$log"
+# The game's name as Steam shows it, for the Dock and the menu bar: every Wine process is the
+# same loader, which would be "wine" there.
+if [ -z "${WINE_MAC_APP_NAME:-}" ]; then
+    manifest="$install_path/../../appmanifest_${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}.acf"
+    name=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$manifest" 2>/dev/null | head -1)
+    [ -n "$name" ] && export WINE_MAC_APP_NAME="$name"
+fi
 # Keep a Wine log of every Steam launch while the integration is new (build/logs/<appid>-*.log).
 export HADRON_LOG="${HADRON_LOG:-1}"
 cd "$(dirname "$program")" || exit 1

@@ -1,0 +1,100 @@
+From 36fec61b2298157d11a470d988afc1ca9ed30a58 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 2 Oct 2026 12:47:58 -0400
+Subject: [PATCH] winemac.drv: Name the application after WINE_MAC_APP_NAME.
+
+Every Wine process runs the same loader, so the Dock, the menu bar and the
+application switcher call each Windows program "wine". When the launcher
+says what the program is called, register that name with LaunchServices as
+the process becomes a foreground application, and use it for the
+application menu and its Hide and Quit items.
+
+LaunchServices only lets a running process change its display name through
+its private interface; the symbols are looked up at run time and the name
+stays as it was when they are missing.
+---
+ dlls/winemac.drv/cocoa_app.m | 40 +++++++++++++++++++++++++++++++++---
+ 1 file changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index 4dafa80651..0e1e7dd7a6 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -26,6 +26,8 @@
+ #import "cocoa_event.h"
+ #import "cocoa_window.h"
+ 
++#include <dlfcn.h>
++
+ #pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
+ 
+ 
+@@ -37,6 +39,30 @@
+ static NSString* const NSWindowWillStartDraggingNotification = @"NSWindowWillStartDraggingNotification";
+ static NSString* const NSWindowDidEndDraggingNotification = @"NSWindowDidEndDraggingNotification";
+ 
++/* The name to show for this application: WINE_MAC_APP_NAME, when the launcher knows what
++ * the Windows program is called. Every Wine process runs the same loader, so without it
++ * they are all "wine" in the Dock, the menu bar and the application switcher. */
++static NSString* macdrv_app_name(void)
++{
++    const char* name = getenv("WINE_MAC_APP_NAME");
++    return (name && name[0]) ? [NSString stringWithUTF8String:name] : nil;
++}
++
++/* The Dock and the menu bar take an application's name from LaunchServices, which has it
++ * from the bundle or the executable. It can only be changed for a running process through
++ * LaunchServices' private interface, as other programs that host foreign applications do. */
++static void macdrv_set_display_name(NSString* name)
++{
++    CFTypeRef (*get_asn)(void) = dlsym(RTLD_DEFAULT, "_LSGetCurrentApplicationASN");
++    OSStatus (*set_item)(int, CFTypeRef, CFStringRef, CFTypeRef, CFDictionaryRef*) =
++        dlsym(RTLD_DEFAULT, "_LSSetApplicationInformationItem");
++    CFStringRef* key = dlsym(RTLD_DEFAULT, "_kLSDisplayNameKey");
++    CFTypeRef asn;
++
++    if (!get_asn || !set_item || !key || !*key || !(asn = get_asn())) return;
++    set_item(-2 /* kLSDefaultSessionID */, asn, *key, (CFStringRef)name, NULL);
++}
++
+ // Internal distributed notification to handle cooperative app activation in Sonoma.
+ static NSString* const WineAppWillActivateNotification = @"WineAppWillActivateNotification";
+ static NSString* const WineActivatingAppPIDKey = @"ActivatingAppPID";
+@@ -233,6 +259,13 @@ - (void) transformProcessToForeground:(BOOL)activateIfTransformed
+ 
+             [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+ 
++            bundleName = macdrv_app_name();
++            if (bundleName)
++            {
++                [[NSProcessInfo processInfo] setProcessName:bundleName];
++                macdrv_set_display_name(bundleName);
++            }
++
+             if (activateIfTransformed)
+                 [self tryToActivateIgnoringOtherApps:YES];
+ 
+@@ -245,8 +278,9 @@ - (void) transformProcessToForeground:(BOOL)activateIfTransformed
+             mainMenu = [[[NSMenu alloc] init] autorelease];
+ 
+             // Application menu
+-            submenu = [[[NSMenu alloc] initWithTitle:WineLocalizedString(STRING_MENU_WINE)] autorelease];
+-            bundleName = [[NSBundle mainBundle] objectForInfoDictionaryKey:(NSString*)kCFBundleNameKey];
++            submenu = [[[NSMenu alloc] initWithTitle:bundleName ? bundleName : WineLocalizedString(STRING_MENU_WINE)] autorelease];
++            if (!bundleName)
++                bundleName = [[NSBundle mainBundle] objectForInfoDictionaryKey:(NSString*)kCFBundleNameKey];
+ 
+             if ([bundleName length])
+                 title = [NSString stringWithFormat:WineLocalizedString(STRING_MENU_ITEM_HIDE_APPNAME), bundleName];
+@@ -272,7 +306,7 @@ - (void) transformProcessToForeground:(BOOL)activateIfTransformed
+             item = [submenu addItemWithTitle:title action:@selector(terminate:) keyEquivalent:@"q"];
+             [item setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagOption];
+             item = [[[NSMenuItem alloc] init] autorelease];
+-            [item setTitle:WineLocalizedString(STRING_MENU_WINE)];
++            [item setTitle:[submenu title]];
+             [item setSubmenu:submenu];
+             [mainMenu addItem:item];
+ 
+-- 
+2.54.0 (Apple Git-157)
+

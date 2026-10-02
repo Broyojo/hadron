@@ -110,6 +110,9 @@ if [ -n "$HADRON_LOG" ]; then
     exec > "$log" 2>&1
 fi
 
+# What the Dock and the menu bar call the game (scripts/steam-run sets Steam's name for it).
+export WINE_MAC_APP_NAME="${WINE_MAC_APP_NAME:-$(basename "$exe" .exe)}"
+
 # Renderer and translator settings (a game's Steam launch options, or the caller's environment) pass
 # through by name; the variables set explicitly below keep their computed values.
 set -- "$ROOT/dist/bin/wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
