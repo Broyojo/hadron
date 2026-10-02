@@ -83,13 +83,15 @@ fi
 # A prefix is complete once this marker exists: a wineboot that fails part way leaves system.reg
 # behind, and that prefix must not be reused.
 ready="$WINEPREFIX/.hadron-prefix-ready"
+setup_overrides="mscoree,mshtml=;winemac.drv=d"
 if [ ! -f "$ready" ] && { [ ! -f "$WINEPREFIX/system.reg" ] || [ -f "$WINEPREFIX/.hadron-prefix-creating" ]; }; then
     echo "creating prefix $WINEPREFIX" >> "$log"
     rm -rf "$WINEPREFIX"
     mkdir -p "$WINEPREFIX" && touch "$WINEPREFIX/.hadron-prefix-creating"
     # mscoree/mshtml off, as in scripts/play: otherwise wineboot waits on the Wine Mono and Gecko
-    # install dialogs.
-    if WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$wine" wineboot --init >> "$log" 2>&1 &&
+    # install dialogs. winemac.drv off: wineboot and the setup programs it runs each put up a
+    # "The Wine configuration is being updated" window, and without a display driver they can't.
+    if WINEDEBUG=-all WINEDLLOVERRIDES="$setup_overrides" "$wine" wineboot --init >> "$log" 2>&1 &&
        WINEDEBUG=-all "$wineserver" -w &&
        "$ROOT/scripts/mtld3d-prefix" enable "$WINEPREFIX" >> "$log" 2>&1; then
         rm -f "$WINEPREFIX/.hadron-prefix-creating"
@@ -108,7 +110,7 @@ touch "$ready"
 stamp=$(cat "$WINEPREFIX/.update-timestamp" 2>/dev/null)
 if [ "$stamp" != disable ] && [ "$stamp" != "$(stat -f %m "$ROOT/dist/share/wine/wine.inf" 2>/dev/null)" ]; then
     echo "updating prefix $WINEPREFIX for a new Wine build" >> "$log"
-    WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$wine" wineboot --update >> "$log" 2>&1
+    WINEDEBUG=-all WINEDLLOVERRIDES="$setup_overrides" "$wine" wineboot --update >> "$log" 2>&1
 fi
 
 # The profile Steam Cloud expects, as Proton lays it out: users/steamuser, its Documents, Desktop and
