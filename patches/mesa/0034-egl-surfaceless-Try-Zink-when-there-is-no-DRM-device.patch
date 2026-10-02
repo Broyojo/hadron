@@ -1,4 +1,4 @@
-From 5883d270451d68a27137e989ebb021d86bbe2b68 Mon Sep 17 00:00:00 2001
+From 8a3a29e126b7a358d23958748e5cd852c7d742b0 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 13:12:49 -0400
 Subject: [PATCH] egl/surfaceless: Try Zink when there is no DRM device

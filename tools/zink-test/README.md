@@ -2,7 +2,7 @@
 
 Zink (Mesa's OpenGL on Vulkan) on KosmicKrisp, through EGL's surfaceless platform.
 
-    scripts/build-vulkan.sh zink            # Mesa with Zink and EGL into build/mesa-zink-install
+    scripts/build-vulkan.sh zink            # Mesa with Zink and EGL into dist/mesa-zink
     tools/zink-test/run.sh                  # without a window
     tools/zink-test/run.sh "" window 4      # in a window, for 4 seconds
 

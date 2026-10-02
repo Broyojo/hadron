@@ -1,9 +1,9 @@
 #!/bin/sh
-# Build and run zink-test against a Mesa built with Zink (default: build/mesa-zink-install) on
+# Build and run zink-test against a Mesa built with Zink (default: dist/mesa-zink) on
 # Hadron's KosmicKrisp. usage: tools/zink-test/run.sh [mesa prefix] [window [seconds]]
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-MESA="${1:-$ROOT/build/mesa-zink-install}"
-[ -n "$1" ] || MESA="$ROOT/build/mesa-zink-install"
+MESA="${1:-$ROOT/dist/mesa-zink}"
+[ -n "$1" ] || MESA="$ROOT/dist/mesa-zink"
 OUT="${TMPDIR:-/tmp}/zink-test"
 if [ "$2" = window ]; then
     # In a window, for a few seconds: tools/zink-test/run.sh "" window [seconds]

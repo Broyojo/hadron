@@ -1,7 +1,7 @@
-From d5f51f039afa213b37b9f7f943f209bdc0d88ba6 Mon Sep 17 00:00:00 2001
+From 57f351b7f02776742ba4abd0f1f9b1a2edc37bcf Mon Sep 17 00:00:00 2001
 From: junminlee2004 <junminlee2004@gmail.com>
 Date: Thu, 24 Sep 2026 12:24:41 -0400
-Subject: [PATCH 5/9] kk: Implement geometry shaders with poly
+Subject: [PATCH] kk: Implement geometry shaders with poly
 
 ---
  src/kosmickrisp/libkk/kk_draws.cl             |  14 +

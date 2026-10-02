@@ -1,4 +1,4 @@
-From b37ccc5dea42cdd5b98006fd84ff3c80fb5fb1ad Mon Sep 17 00:00:00 2001
+From 3003c801dce9a6d2a3a83a761e6817c2a2b80c99 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 22:01:36 -0400
 Subject: [PATCH] kk: Order sparse mapping updates and allow texel views of

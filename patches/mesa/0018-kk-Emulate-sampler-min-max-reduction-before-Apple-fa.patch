@@ -1,4 +1,4 @@
-From 9d5be7b2882b117ec88479fd7163720f79b873ac Mon Sep 17 00:00:00 2001
+From 0853f376e0de50067957942fe9b6de163c3fbc37 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 22:01:36 -0400
 Subject: [PATCH] kk: Emulate sampler min/max reduction before Apple family 10
@@ -147,12 +147,12 @@ index 4bb28924c33..3a9cfd1fcf5 100644
  
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_sampler_minmax.c b/src/kosmickrisp/vulkan/kk_nir_lower_sampler_minmax.c
 new file mode 100644
-index 00000000000..aff033340db
+index 00000000000..723bf7a934e
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_sampler_minmax.c
 @@ -0,0 +1,327 @@
 +/*
-+ * Copyright 2026 Broyojo
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +

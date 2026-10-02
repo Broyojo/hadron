@@ -1,7 +1,7 @@
-From 0c501a575629ee66c5817c22185b55fb772812ea Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From 6334c0da53e9e76721aef297831b849e9f6129d3 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 10:22:47 -0400
-Subject: [PATCH 2/3] d3d9: Export DebugSetMute
+Subject: [PATCH] d3d9: Export DebugSetMute
 
 D3DX, which many games link statically, resolves DebugSetMute from
 d3d9d.dll and d3d9.dll with GetProcAddress before its debug output and

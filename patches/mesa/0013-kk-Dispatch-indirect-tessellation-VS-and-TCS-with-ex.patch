@@ -1,8 +1,8 @@
-From 9f76e33ce62c699c440d588298fbaa140df169c5 Mon Sep 17 00:00:00 2001
+From eb7fbd8dde0fc2771234174f2d96e3240b11b5da Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 19:54:38 -0400
-Subject: [PATCH 13/13] kk: Dispatch indirect tessellation VS and TCS with
- exact thread counts
+Subject: [PATCH] kk: Dispatch indirect tessellation VS and TCS with exact
+ thread counts
 
 Generated-by: LLM
 ---

@@ -1,4 +1,4 @@
-From faa378dd3948e774b46cb80fd51ffb47b8680651 Mon Sep 17 00:00:00 2001
+From 2483a5ade32b6a6f2e1790eeba05b3b9ec7f0b41 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 18:54:54 -0400
 Subject: [PATCH] kk: Split timestamp query pools across Metal counter heaps

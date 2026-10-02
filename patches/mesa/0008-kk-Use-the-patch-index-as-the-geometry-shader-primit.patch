@@ -1,8 +1,7 @@
-From 398797a737058405c4c3b0356f556824f2346a26 Mon Sep 17 00:00:00 2001
+From a6422d3ce6e8d40bbf119c56cac790d61fcf5137 Mon Sep 17 00:00:00 2001
 From: junminlee2004 <junminlee2004@gmail.com>
 Date: Sun, 27 Sep 2026 12:12:01 -0400
-Subject: [PATCH 8/9] kk: Use the patch index as the geometry shader primitive
- ID
+Subject: [PATCH] kk: Use the patch index as the geometry shader primitive ID
 
 ---
  src/kosmickrisp/vulkan/kk_shader.c | 46 ++++++++++++++++++++++++++++++

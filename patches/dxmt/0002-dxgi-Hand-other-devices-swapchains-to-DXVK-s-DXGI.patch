@@ -1,4 +1,4 @@
-From cb65819c3ea910aa601a095d35091ef3218df582 Mon Sep 17 00:00:00 2001
+From 6f095bff863712ca03171bc7cd00ed678e1cdd05 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 16:28:36 -0400
 Subject: [PATCH] dxgi: Hand other devices' swapchains to DXVK's DXGI

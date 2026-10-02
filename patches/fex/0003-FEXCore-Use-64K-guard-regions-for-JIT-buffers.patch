@@ -1,5 +1,5 @@
-From 438bfee8ee4de042945e393b8699d4cf9853e332 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From 844701bf7a0319ead157c0a1e7a86d9f999f3471 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 18:58:19 -0400
 Subject: [PATCH] FEXCore: Use 64K guard regions for JIT buffers.
 

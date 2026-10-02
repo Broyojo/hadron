@@ -1,8 +1,8 @@
-From 59c8754524e7d57d6ede24e9134f9d4a9cb67036 Mon Sep 17 00:00:00 2001
+From 4812d89a20a909213f6f44a25bec73e87ddbf596 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 19:54:38 -0400
-Subject: [PATCH 12/13] kk: Keep the geometry heap alive across the draws of
- one command
+Subject: [PATCH] kk: Keep the geometry heap alive across the draws of one
+ command
 
 Generated-by: LLM
 ---

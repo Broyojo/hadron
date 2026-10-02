@@ -1,5 +1,5 @@
-From 34442a6f1a6fc1eea66512198235817c7a29a3f4 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From 47b648c88affefc05dc7c534b81ff38fb4dc766b Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 21:27:54 -0400
 Subject: [PATCH] Windows: Use per-thread W^X JIT code buffers on macOS.
 

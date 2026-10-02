@@ -1,5 +1,5 @@
-From bb2d8bd6cd1a2375edf696bde24c56605c8329ff Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From a45a89cff2dbf1032c0c0789a8ac2db61eb92144 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 12:04:22 -0400
 Subject: [PATCH] dxgi: Present with display sync the way Windows does
 

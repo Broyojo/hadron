@@ -41,7 +41,7 @@ if [[ ! -f Makefile || -n $reconfigure ]]; then
     log "configuring wine ($variant)"
     # Unix side: Apple clang (Objective-C/AppKit for winemac.drv, SDK defaults).
     # PE side: Homebrew clang targeting *-windows, linked with lld-link.
-    PKG_CONFIG_PATH="$BREW/opt/freetype/lib/pkgconfig:$BREW/opt/gnutls/lib/pkgconfig" \
+    PKG_CONFIG_PATH="$BREW/opt/freetype/lib/pkgconfig:$BREW/opt/gnutls/lib/pkgconfig:$ROOT/dist/mesa-zink/lib/pkgconfig" \
     CPPFLAGS="-I$BREW/include $DEFS" \
     LDFLAGS="-L$BREW/lib" \
     CROSSCFLAGS="-g -O2 $DEFS" \

@@ -1,4 +1,4 @@
-From 88c5af019507d286b6fff61a3109b46c6ee9110c Mon Sep 17 00:00:00 2001
+From 69aebff13c223db4a24b0ad22b4ed53cc68eacd8 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 23:17:02 -0400
 Subject: [PATCH] kk: Add pipeline statistics queries

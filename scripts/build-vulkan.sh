@@ -31,9 +31,10 @@ build_mesa() {
     PATH="$venv/bin:$PATH" ninja -C "$BUILD/mesa" install >/dev/null
 }
 
-# Zink, Mesa's OpenGL on Vulkan, with EGL (no window system: the "surfaceless" platform), for
-# KosmicKrisp. Not used by the runtime yet: tools/zink-test runs against it. Zink's macOS build
-# wants MoltenVK's headers (it has code for MoltenVK, unused here) and loads the Vulkan loader.
+# Zink, Mesa's OpenGL on Vulkan, with EGL, for KosmicKrisp: dist/mesa-zink/lib/libEGL.1.dylib,
+# which Wine's Mac driver uses for OpenGL when HADRON_OPENGL=zink (scripts/play). Build it before
+# Wine, whose configure looks for EGL there. Zink's macOS build wants MoltenVK's headers (it has
+# code for MoltenVK, unused here) and loads the Vulkan loader.
 build_zink() {
     local venv="$BUILD/venv-mesa"
     [[ -x "$venv/bin/python" ]] || die "missing $venv, run scripts/build-vulkan.sh mesa first"
@@ -46,7 +47,7 @@ build_zink() {
         log "configuring Mesa (Zink)"
         PATH="$path" PKG_CONFIG_PATH="$BREW/opt/llvm/lib/pkgconfig:$BREW/lib/pkgconfig" \
             meson setup "$BUILD/mesa-zink" "$SRC/mesa" --buildtype=debugoptimized \
-            --prefix="$BUILD/mesa-zink-install" -Dplatforms=macos -Dvulkan-drivers=kosmickrisp \
+            --prefix="$DIST/mesa-zink" -Dplatforms=macos -Dvulkan-drivers=kosmickrisp \
             -Dgallium-drivers=zink -Dopengl=true -Degl=enabled -Dgles2=enabled -Dglx=disabled \
             -Dzstd=disabled -Dmoltenvk-dir="$BREW/opt/molten-vk" -Dvulkan-loader-rpath="$BREW/lib" >/dev/null
     fi

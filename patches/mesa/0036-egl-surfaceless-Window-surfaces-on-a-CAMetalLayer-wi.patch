@@ -1,8 +1,8 @@
-From d3919704dde17c2dbcee4f14f4dd850f93a15c18 Mon Sep 17 00:00:00 2001
+From 2d0362199d2c9d9b83a476a7ddc0ed315caefd0e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 13:51:14 -0400
-Subject: [PATCH] egl/surfaceless: Window surfaces on a CAMetalLayer with
- Zink on macOS
+Subject: [PATCH] egl/surfaceless: Window surfaces on a CAMetalLayer with Zink
+ on macOS
 
 Generated-by: LLM
 ---

@@ -1,4 +1,4 @@
-From 8125deac5bb10cfcf250c24d7f24b5fe1ee80a88 Mon Sep 17 00:00:00 2001
+From c9b8a7b6fea240d5337a649f1fc455d188c6110e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 12:00:25 -0400
 Subject: [PATCH] kk: Leave MSL temporaries uninitialised and skip the

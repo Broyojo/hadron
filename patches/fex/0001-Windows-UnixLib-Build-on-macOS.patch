@@ -1,5 +1,5 @@
-From 7c413eb587599d9cffb9772f26299d3b6c5623a8 Mon Sep 17 00:00:00 2001
-From: proton-apple <dev@proton-apple>
+From 496a1523655096d558935999ca38d3e6b5ae3960 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 10:08:41 -0400
 Subject: [PATCH] Windows/UnixLib: Build on macOS.
 

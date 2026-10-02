@@ -1,4 +1,4 @@
-From 7ff16ed55e78e427a2e0a6370a61e9c88dc65c1c Mon Sep 17 00:00:00 2001
+From 69ac947afaf750e18d8dc77a51a18ac1d29bdb82 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 15:18:12 -0400
 Subject: [PATCH] kk: Implement VK_EXT_shader_image_atomic_int64
@@ -202,7 +202,7 @@ index 90eb6f6304c..92d344629c4 100644
  
           /* Required so sampling from input attachments actually return (d, 0,
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_atomic64.c b/src/kosmickrisp/vulkan/kk_nir_lower_atomic64.c
-index 1f07bfe25e7..835bfb5b521 100644
+index 1a630c727a4..c463407475c 100644
 --- a/src/kosmickrisp/vulkan/kk_nir_lower_atomic64.c
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_atomic64.c
 @@ -11,12 +11,14 @@

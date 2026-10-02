@@ -1,4 +1,4 @@
-From de8716b46378522b0544a128522e6007db08ca81 Mon Sep 17 00:00:00 2001
+From fc4c4007d1ce600096ae43ef66fa0af9f32b6110 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 10:33:07 -0400
 Subject: [PATCH] kk: Discard writes to unbound sparse buffers and report texel
@@ -86,10 +86,10 @@ index 7762f5e3441..75cd389959d 100644
                                MTLStageDispatch | MTLStageBlit
              visibilityOptions:MTL4VisibilityOptionDevice];
 diff --git a/src/kosmickrisp/libkk/kk_dgc.cl b/src/kosmickrisp/libkk/kk_dgc.cl
-index a60d7dd2d35..576402d668c 100644
+index fbec1ec088d..f91127cbb09 100644
 --- a/src/kosmickrisp/libkk/kk_dgc.cl
 +++ b/src/kosmickrisp/libkk/kk_dgc.cl
-@@ -62,7 +62,7 @@ libkk_dgc_process(constant struct libkk_dgc_params *p)
+@@ -61,7 +61,7 @@ libkk_dgc_process(constant struct libkk_dgc_params *p)
        }
  
        info[0] = active ? seq[p->ib_src_dw + 0] : 0;
@@ -98,7 +98,7 @@ index a60d7dd2d35..576402d668c 100644
        info[2] = size_B / el_B;
        info[3] = el_B;
     }
-@@ -83,7 +83,7 @@ libkk_dgc_process(constant struct libkk_dgc_params *p)
+@@ -82,7 +82,7 @@ libkk_dgc_process(constant struct libkk_dgc_params *p)
     for (uint v = 0; v < p->vb_count; v++) {
        uint32_t binding = p->vb_binding[v];
        global uint32_t *vb = seq + p->vb_src_dw[v];
@@ -310,10 +310,10 @@ index af6155ab349..9cac5bb538d 100644
  
  struct kk_descriptor_state {
 diff --git a/src/kosmickrisp/vulkan/kk_cmd_dgc.c b/src/kosmickrisp/vulkan/kk_cmd_dgc.c
-index c983d4546cd..9f6674b645a 100644
+index 23ed6866de4..d1486084d6d 100644
 --- a/src/kosmickrisp/vulkan/kk_cmd_dgc.c
 +++ b/src/kosmickrisp/vulkan/kk_cmd_dgc.c
-@@ -147,7 +147,7 @@ kk_dgc_prepare(struct kk_cmd_buffer *cmd,
+@@ -146,7 +146,7 @@ kk_dgc_prepare(struct kk_cmd_buffer *cmd,
                 struct libkk_dgc_params *params, struct kk_dgc_buffers *bufs)
  {
     const struct vk_indirect_command_layout *vk = &layout->vk;
@@ -322,7 +322,7 @@ index c983d4546cd..9f6674b645a 100644
     uint64_t size = kk_dgc_layout_buffers(vk, info->maxSequenceCount, bufs);
  
     if (!base || info->preprocessSize < size)
-@@ -166,8 +166,8 @@ kk_dgc_prepare(struct kk_cmd_buffer *cmd,
+@@ -165,8 +165,8 @@ kk_dgc_prepare(struct kk_cmd_buffer *cmd,
     bool dispatch = vk->dgc_info & BITFIELD_BIT(MESA_VK_DGC_DISPATCH);
  
     *params = (struct libkk_dgc_params){
@@ -810,12 +810,12 @@ index 3a9cfd1fcf5..4f3b4f34b59 100644
  
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c b/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
 new file mode 100644
-index 00000000000..54404dc65e8
+index 00000000000..7dc0e8067e7
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_ssbo_residency.c
 @@ -0,0 +1,344 @@
 +/*
-+ * Copyright 2026 Broyojo
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +

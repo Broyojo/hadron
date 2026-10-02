@@ -1,4 +1,4 @@
-From e3e8fd177e11054cf800012f2bc6d6b012214f4b Mon Sep 17 00:00:00 2001
+From 8ad57bf056757443b7db9538a18c99b26ab01b2e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 15:33:09 -0400
 Subject: [PATCH] kk: Allow storage usage on sparse residency images
