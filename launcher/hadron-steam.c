@@ -43,6 +43,19 @@ static void register_steam_process( const WCHAR *steam_dir )
     swprintf( path, MAX_PATH, L"%ls\\steam.exe", steam_dir );
     set_string( key, L"SteamExe", path );
     RegCloseKey( key );
+
+    /* The steam:// protocol, as Steam's installer registers it: games open their store and
+     * workshop pages with ShellExecute("steam://url/..."). */
+    if (RegCreateKeyExW( HKEY_CURRENT_USER, L"Software\\Classes\\steam", 0, NULL, 0,
+                         KEY_ALL_ACCESS, NULL, &key, NULL )) return;
+    set_string( key, NULL, L"URL:steam protocol" );
+    set_string( key, L"URL Protocol", L"" );
+    RegCloseKey( key );
+    if (RegCreateKeyExW( HKEY_CURRENT_USER, L"Software\\Classes\\steam\\shell\\open\\command", 0, NULL, 0,
+                         KEY_ALL_ACCESS, NULL, &key, NULL )) return;
+    swprintf( path, MAX_PATH, L"\"%ls\\steam.exe\" -- \"%%1\"", steam_dir );
+    set_string( key, NULL, path );
+    RegCloseKey( key );
 }
 
 static void clear_steam_process(void)
@@ -70,13 +83,15 @@ static int open_steam_url( const WCHAR *url )
 }
 
 /* Games run the SteamExe registered below (this program, staged as steam.exe) to talk to the
- * Steam client: steam:// links, "-applaunch <appid>", or nothing to bring Steam up. Forward
+ * Steam client: steam:// links (also as "-- <link>", the registered protocol command),
+ * "-applaunch <appid>", or nothing to bring Steam up. Forward
  * those to Mac Steam. Returns -1 when argv is a game to launch instead. */
 static int forward_steam_request( int argc, WCHAR **argv )
 {
     WCHAR url[64];
 
     if (argc < 2) return open_steam_url( L"steam://open/main" );
+    if (!wcscmp( argv[1], L"--" ) && argc > 2) return open_steam_url( argv[2] );
     if (!wcsnicmp( argv[1], L"steam:", 6 )) return open_steam_url( argv[1] );
     if (!wcsicmp( argv[1], L"-applaunch" ) && argc > 2)
     {
