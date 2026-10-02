@@ -18,6 +18,8 @@
     X(void, EnableVertexAttribArray, (GLuint)) X(void, Viewport, (GLint, GLint, GLsizei, GLsizei)) \
     X(void, ClearColor, (GLfloat, GLfloat, GLfloat, GLfloat)) X(void, Clear, (GLbitfield)) \
     X(void, DrawArrays, (GLenum, GLint, GLsizei)) X(void, GetIntegerv, (GLenum, GLint *)) \
+    X(void, DrawElements, (GLenum, GLsizei, GLenum, const void *)) X(void, BufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *)) \
+    X(void, Finish, (void)) X(void, Flush, (void)) X(void, PixelStorei, (GLenum, GLint)) \
     X(const GLubyte *, GetStringi, (GLenum, GLuint)) \
     X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *))
 #define X(ret, name, args) static ret (*p_gl##name) args;
@@ -55,6 +57,11 @@ GL_FUNCS(X)
 #define glDrawArrays p_glDrawArrays
 #define glReadPixels p_glReadPixels
 #define glGetIntegerv p_glGetIntegerv
+#define glDrawElements p_glDrawElements
+#define glBufferSubData p_glBufferSubData
+#define glFinish p_glFinish
+#define glFlush p_glFlush
+#define glPixelStorei p_glPixelStorei
 #define glGetStringi p_glGetStringi
 
 static void load_gl_funcs(void)

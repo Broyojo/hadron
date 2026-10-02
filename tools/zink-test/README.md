@@ -27,3 +27,17 @@ driver's OpenGL on EGL, chosen with `HADRON_OPENGL=zink` in `scripts/play`). Sam
 under FEX: Apple's OpenGL gives this legacy context "2.1 Metal"; Zink gives "3.3 (Compatibility
 Profile)" on "zink Vulkan 1.4(Apple M2 Pro (MESA_KOSMICKRISP))", 396 frames in 4 s, the right
 pixel in each. What the window showed was not checked by a person.
+
+`zink-stream.c` changes its vertex data every frame and checks every frame it reads back:
+
+    cc -O1 -o /tmp/zink-stream tools/zink-test/zink-stream.c -Idist/mesa-zink/include \
+        -Ldist/mesa-zink/lib -lEGL -Wl,-rpath,$PWD/dist/mesa-zink/lib
+    VK_DRIVER_FILES=$PWD/dist/mesa/share/vulkan/icd.d/kosmickrisp_mesa_icd.aarch64.json \
+        MESA_LOADER_DRIVER_OVERRIDE=zink /tmp/zink-stream 400 64 finish streak
+
+Its "streak" mode is what Geometry Dash's ship trail does: between two batches of sprites from an
+interleaved buffer, a triangle strip from three separate arrays. That draw came out wrong in every
+frame. Zink skipped looking its pipeline up again when only the vertex layout had changed since
+the last draw, which goes unnoticed on drivers with `VK_EXT_vertex_input_dynamic_state` (there the
+layout is not part of the pipeline) and KosmicKrisp has none. Mesa 0037 looks the pipeline up
+again in that case; all modes pass.
