@@ -4,7 +4,7 @@
 #   dist/vkd3d-proton/x64/{d3d12,d3d12core}.dll  vkd3d-proton, D3D12 on Vulkan (src/vkd3d-proton)
 #   dist/dxvk/x64/dxgi.dll                       DXVK's DXGI, which vkd3d-proton presents through (src/dxvk)
 #
-# Usage: scripts/build-vulkan.sh [mesa|vkd3d-proton|dxvk...]   (default: all)
+# Usage: scripts/build-vulkan.sh [mesa|vkd3d-proton|dxvk|zink...]   (default: all but zink)
 
 source "$(dirname "$0")/env.sh"
 
@@ -29,6 +29,29 @@ build_mesa() {
     fi
     log "building KosmicKrisp"
     PATH="$venv/bin:$PATH" ninja -C "$BUILD/mesa" install >/dev/null
+}
+
+# Zink, Mesa's OpenGL on Vulkan, with EGL (no window system: the "surfaceless" platform), for
+# KosmicKrisp. Not used by the runtime yet: tools/zink-test runs against it. Zink's macOS build
+# wants MoltenVK's headers (it has code for MoltenVK, unused here) and loads the Vulkan loader.
+build_zink() {
+    local venv="$BUILD/venv-mesa"
+    [[ -x "$venv/bin/python" ]] || die "missing $venv, run scripts/build-vulkan.sh mesa first"
+    for formula in bison molten-vk vulkan-loader; do
+        [[ -d "$BREW/opt/$formula" ]] || die "missing Homebrew $formula (brew install $formula)"
+    done
+    # macOS's own bison is too old for Mesa's GLSL compiler.
+    local path="$BREW/opt/bison/bin:$venv/bin:$PATH"
+    if [[ ! -f "$BUILD/mesa-zink/build.ninja" ]]; then
+        log "configuring Mesa (Zink)"
+        PATH="$path" PKG_CONFIG_PATH="$BREW/opt/llvm/lib/pkgconfig:$BREW/lib/pkgconfig" \
+            meson setup "$BUILD/mesa-zink" "$SRC/mesa" --buildtype=debugoptimized \
+            --prefix="$BUILD/mesa-zink-install" -Dplatforms=macos -Dvulkan-drivers=kosmickrisp \
+            -Dgallium-drivers=zink -Dopengl=true -Degl=enabled -Dgles2=enabled -Dglx=disabled \
+            -Dzstd=disabled -Dmoltenvk-dir="$BREW/opt/molten-vk" -Dvulkan-loader-rpath="$BREW/lib" >/dev/null
+    fi
+    log "building Zink"
+    PATH="$path" ninja -C "$BUILD/mesa-zink" install >/dev/null
 }
 
 # A meson cross file for x86_64 PE with llvm-mingw, rewritten only when its contents change.
@@ -96,7 +119,7 @@ for target in "${want[@]}"; do
         mesa) build_mesa ;;
         vkd3d-proton) build_vkd3d_proton ;;
         dxvk) build_dxvk ;;
-        dxvk) build_dxvk ;;
+        zink) build_zink ;;
         *) die "unknown target $target" ;;
     esac
 done
