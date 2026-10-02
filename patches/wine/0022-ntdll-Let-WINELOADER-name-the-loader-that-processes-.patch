@@ -1,0 +1,44 @@
+From d7565da826f76879ff4da474eb3cf340d7442494 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 2 Oct 2026 12:54:00 -0400
+Subject: [PATCH] ntdll: Let WINELOADER name the loader that processes are
+ started with.
+
+On macOS the Dock, the menu bar and the application switcher name an
+application after the bundle or executable it was started from, and every
+Wine process is started from the same loader, so they all show as "wine".
+A launcher can now point WINELOADER at a link to the loader inside a
+bundle named after the Windows program; child processes are started
+through that path and carry the program's name.
+---
+ dlls/ntdll/unix/loader.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index d50f8370f9..e43b944d37 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -383,6 +383,7 @@ static void set_config_dir(void)
+ static void init_paths(void)
+ {
+     Dl_info info;
++    const char *env;
+ 
+     if (!dladdr( init_paths, &info ) || !(ntdll_dir = realpath_dirname( info.dli_fname )))
+         fatal_error( "cannot get path to ntdll.so\n" );
+@@ -400,6 +401,12 @@ static void init_paths(void)
+         wineloader = build_path( ntdll_dir, "wine" );
+     }
+ 
++    /* WINELOADER names the loader to start processes with: on macOS the Dock and the
++     * menu bar name an application after the path it was started from, so a launcher
++     * can point this at a link to the loader inside a bundle named after the program. */
++    if ((env = getenv( "WINELOADER" )) && env[0] == '/' && !access( env, X_OK ))
++        wineloader = strdup( env );
++
+     set_dll_path();
+     set_system_dll_path();
+     set_home_dir();
+-- 
+2.54.0 (Apple Git-157)
+
