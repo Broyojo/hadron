@@ -110,12 +110,48 @@ if [ -n "$HADRON_LOG" ]; then
     exec > "$log" 2>&1
 fi
 
+# The Dock and the menu bar name an application after the bundle it was started from, and every
+# Wine process is the same loader: "wine". So each game gets a bundle of its own, holding nothing
+# but a link to the loader under the game's name (HADRON_APP_NAME: scripts/steam-run passes
+# Steam's name for it), and Wine starts the game's processes through that link (WINELOADER).
+name=$(printf '%s' "${HADRON_APP_NAME:-$(basename "$exe" .exe)}" | tr -d '/:<>&\n' | cut -c1-80)
+name="${name:-game}"
+loader=$(/bin/realpath "$ROOT/dist/bin/wine")
+app="$HOME/Library/Application Support/Hadron/apps/$appid/$name.app"
+wine="$app/Contents/MacOS/$name"
+if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ]; then
+    rm -rf "$HOME/Library/Application Support/Hadron/apps/$appid"
+    mkdir -p "$app/Contents/MacOS" && ln -s "$loader" "$wine" && cat > "$app/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>$name</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.broyojo.hadron.game.$appid</string>
+    <key>CFBundleName</key>
+    <string>$name</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>NSPrincipalClass</key>
+    <string>WineApplication</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+EOF
+fi
+[ -x "$wine" ] || wine="$ROOT/dist/bin/wine"
+
 # Renderer and translator settings (a game's Steam launch options, or the caller's environment) pass
 # through by name; the variables set explicitly below keep their computed values.
-set -- "$ROOT/dist/bin/wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
+set -- "$wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
 for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|MESA)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
     case "$var" in
-        WINEPREFIX|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
+        WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
         VKD3D_SHADER_CACHE_PATH) [ -n "${vkd3d_cache:-}" ] && continue ;;
     esac
     eval "value=\${$var}"
@@ -132,6 +168,7 @@ set -- "MESA_KK_FAILED_MSL_DIR=$ROOT/build/logs/failed-msl" "$@"
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     TMPDIR="${TMPDIR:-/tmp}" \
     WINEPREFIX="$PREFIX" \
+    WINELOADER="$wine" \
     WINEDEBUG="$debug" \
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$overrides}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \

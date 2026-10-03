@@ -1,0 +1,65 @@
+From 693a2217cd20736a45c8e3afd1a1dee0d5cff444 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 2 Oct 2026 12:40:04 -0400
+Subject: [PATCH] winemac.drv: Copy the application icon entries off the
+ callback stack.
+
+create_app_icon_images() reads the entries the user-mode callback returned
+straight from that callback's stack while it destroys each icon, and
+destroying an icon calls back to user mode on the same stack. Entries
+after the first came back overwritten, with stale handles and sizes, so
+some sizes of the application icon were dropped and the Dock scaled up
+whichever were left.
+---
+ dlls/winemac.drv/image.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winemac.drv/image.c b/dlls/winemac.drv/image.c
+index 7fb45f357a..e9b07b2b76 100644
+--- a/dlls/winemac.drv/image.c
++++ b/dlls/winemac.drv/image.c
+@@ -249,7 +249,7 @@ CFArrayRef create_app_icon_images(void)
+ {
+     struct dispatch_callback_params params = {.callback = app_icon_callback};
+     CFMutableArrayRef images = NULL;
+-    struct app_icon_entry *entries;
++    struct app_icon_entry *entries, *copy;
+     ULONG ret_len;
+     unsigned count;
+     int i;
+@@ -265,16 +265,22 @@ CFArrayRef create_app_icon_images(void)
+     count = ret_len / sizeof(*entries);
+     if (!count || !entries) return NULL;
+ 
++    /* The entries are on the user stack of the callback that returned them, and
++     * destroying an icon below calls back to user mode again, on that same stack. */
++    if (!(copy = malloc(ret_len))) return NULL;
++    memcpy(copy, entries, ret_len);
++
+     images = CFArrayCreateMutable(NULL, count, &kCFTypeArrayCallBacks);
+     if (!images)
+     {
+         WARN("failed to create images array\n");
++        free(copy);
+         return NULL;
+     }
+ 
+     for (i = 0; i < count; i++)
+     {
+-        struct app_icon_entry *icon = &entries[i];
++        struct app_icon_entry *icon = &copy[i];
+         CGImageRef cgimage = NULL;
+         HICON handle = UlongToHandle(icon->icon);
+         cgimage = create_cgimage_from_icon(handle, icon->width, icon->height);
+@@ -287,6 +293,8 @@ CFArrayRef create_app_icon_images(void)
+         }
+     }
+ 
++    free(copy);
++
+     if (images && !CFArrayGetCount(images))
+     {
+         CFRelease(images);
+-- 
+2.54.0 (Apple Git-157)
+

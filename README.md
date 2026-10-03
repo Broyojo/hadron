@@ -39,7 +39,7 @@ was measured and fixed along the way.
 | Five Nights at Freddy's, Ultimate Custom Night | Direct3D 9 | Run well |
 | Among Us | Direct3D 11 | Runs, online sign-in works |
 | Teardown | Direct3D 12 | Runs; frame rate is held back by CPU translation |
-| Geometry Dash | OpenGL | Runs; signing in to a Geometry Dash account crashes |
+| Geometry Dash | OpenGL | Runs |
 | Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Being tested: the driver now provides the shader model 6.6 features Unreal requires |
 
 [docs/test-games.md](docs/test-games.md) has the details and [docs/roadmap.md](docs/roadmap.md)
