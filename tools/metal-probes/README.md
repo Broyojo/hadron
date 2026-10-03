@@ -38,6 +38,9 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   tail). Mapped in one operation from consecutive heap pages it reads back right; mapped one page
   per operation it does not: tail position n covers several pages (here 4, 4 and 2), so the
   page-sized operations overlap. Why sparse binding stays off for 3D images
+- `filter-precision.m`: texture filtering weights take 6 bits between mip levels (65 distinct
+  weights from LOD 2 to 3) and 8 bits between texel centres, so the driver reports
+  `mipmapPrecisionBits` 6 and `subTexelPrecisionBits` 8
 - `varyings.m`: a render pipeline takes 124 user varying components, as scalar members of mixed
   types and interpolation or as `float4` members; built-in fragment inputs do not count. At 125
   scalar components Metal reports the limit; 32 `float4` members crash the compiler service. A

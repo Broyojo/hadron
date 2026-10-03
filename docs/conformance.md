@@ -182,7 +182,8 @@ Ordered by how much they matter.
    shaders, on a 3x3 grid of coordinates per face that includes face edges and corners.
 11. Small ones: `shader_ballot` (3, not narrowed to a stage yet), `shader_atomic_counters.basic-usage-gs`,
    `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a few
-   units off: probably Metal's LOD fraction precision), `gpu_shader5` gather with offsets (2),
+   units off: Apple GPUs blend mip levels with 6-bit weights, `tools/metal-probes/filter-precision.m`;
+   meeting the test would mean filtering between levels in the shader), `gpu_shader5` gather with offsets (2),
    `clear_tex_image` on a 16-bit depth texture level 4, `framebuffers_texture_layer_attachment`,
    ES 3.1 `fbo.color.texcubearray.rg8ui` and `shaders.linkage...tessellation_geometry.varying.types.mat4`,
    the ES 3.1 depth-compare border colours (custom border colours are not applied to shadow
