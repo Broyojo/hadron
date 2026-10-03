@@ -42,6 +42,12 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   types and interpolation or as `float4` members; built-in fragment inputs do not count. At 125
   scalar components Metal reports the limit; 32 `float4` members crash the compiler service. A
   value interpolates to the same bits in a scalar member and in a vector component
+- `sparse-3d-units.m`: which heap pages each mip tail position of a placement-sparse 3D texture
+  covers, found by reading the heap back through a buffer placed over the same pages
+  (`WHOLE=1` maps the whole tail in one operation, `PAGES=1` prints the page map, `BPP1=1` and
+  `BPP16=1` change the format). Positions cover different numbers of pages (4, 4 and 2 for a
+  1024x128x8 RGBA8 texture; one position covers all 64 pages of 256x256x256), and the tail can
+  use more heap pages than `tailSizeInBytes` (R8 1024x128x8: 20 reported, pages up to 22 written)
 - `sparse-bc-tail.m`: block-compressed placement-sparse textures with full mip chains, every level
   written and read back for every size in a grid (`FMT=BC1|BC7|ETC2|EAC|ASTC`): for some sizes two
   levels of the mip tail share memory (39 of 1,225 sizes for BC1, BC7, ETC2 and EAC; a 51x65 BC1

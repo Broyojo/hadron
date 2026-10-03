@@ -75,7 +75,7 @@ the fixes below): 3,247,552 tests, 647,905 pass, 2,599,079 skipped, 348 fail, 10
 
 | Group | Count | What it is |
 |---|---|---|
-| `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 4): 57 remain. |
+| `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 1): 57 remain. |
 | `texture.swizzle`, `texture.compressed` | 134 fail | A Metal bug: in a sparse texture of a block-compressed format, Metal's mip tail places two levels on the same memory for some sizes (39 of 1,225 sizes from 4x4 to 140x140 for BC1, BC7, ETC2 and EAC, mostly where a level is 17 or 33 blocks across; power-of-two sizes from 8x8 up are fine, 4x4 is not). Uncompressed formats are clean (0 of 2,209 sizes). Reproduced without the driver by `tools/metal-probes/sparse-bc-tail.m`. 0051 keeps compressed formats out of sparse images: these tests are now unsupported, 54 `image_format_properties` tests for compressed formats fail instead, and 1,486 sparse tests on compressed formats that passed are skipped. |
 | `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 5. |
 | `glsl.440.linkage.varying.component.frag_out` | 22 crash | `nir_lower_blend` expects one store per colour output; outputs written per component broke it. Fixed by 0050. |
@@ -122,65 +122,72 @@ All are Mesa patches in `patches/mesa`.
 | 0059 | The driver reported 128 fragment input components. Metal's limit is 124 user components (built-ins do not count); with 32 `float4` varyings Metal's shader compiler service crashes. It reports 124 now. Vertex, evaluation and geometry outputs stay at 128: Vulkan counts `gl_Position` in those. | `pipeline.*.max_varyings`: 3 tests that were skipped now run and pass |
 | 0060 | A 2D view of a 3D image (for rendering into one slice) was served by a 2D array texture aliasing the 3D texture's memory. Rendering now goes to the 3D texture itself, with the slice as Metal's depth plane, so it does not depend on Metal laying out both alike. | OpenGL 4.6 `copy_image` into 3D textures (45, all packed 32-bit formats, which Zink converts by drawing) |
 | 0061 | Image copies that change format go through a buffer. Between a 3D image and a layered one they passed the 3D texture an array slice index and sized the buffer without the depth. Found by reading the code: no test in the suites reaches this path with more than one slice. | none (the 16,868 cross-format 3D copy tests pass before and after) |
+| 0062 | Zink exposed `ARB_sparse_texture` when the driver had sparse 2D images only, but the extension includes 3D textures. It now requires sparse 3D images too, and `ARB_sparse_texture2` and `_clamp` require the base extension. | 120 `sparse_texture_tests` per OpenGL 4.3+ suite: unsupported instead of failing |
+| 0063 | Custom border colours mixed all five components of a sparse sample, the residency code included, which the Metal emitter cannot express. | 144 Vulkan `texture_functions...clamp_to_border.sparse_*` crashes once 0064 was on |
+| 0064 | `VK_EXT_custom_border_color` is on by default (it was behind `MESA_KK_EXPERIMENTAL=custom_border`). The emulation costs one branch per sample, and a second sample only for samplers that have a custom colour. | 100 of 102 ES 3.1 `texture.border_clamp`, OpenGL 4.6 `texture_border_clamp` (11), ES 3.1 Khronos (11) |
+| 0065 | Dead code left after leaving SSA reached the Metal emitter, whose type inference had no type for it (`UNTYPED!` in the source). | ES 3.1 `shaders.builtin_constants.core.max_compute_work_group_{count,size}` (2 crashes) |
+| 0066 | OpenGL's last-vertex provoking convention rotated the vertices of every primitive when the fragment shader had flat inputs, so a program with flat inputs rasterized to slightly different depth than one without (`shaders.invariance.*.loop_2`, speckles in a depth pre-pass with `GL_EQUAL`). Such draws are now unrolled without reordering, and the vertex shader runs a second time for the provoking vertex of its primitive, keeping only the flat outputs. Only draws with flat inputs under the last-vertex convention pay for it, as before. | `shaders.invariance` (2 per ES suite) |
 
-0041, 0052, 0053 and 0055 are in Zink and 0058 in the geometry shader emulation shared with other Mesa drivers. The rest are in the Vulkan driver, so they are not specific
+0041, 0052, 0053, 0055 and 0062 are in Zink and 0058 in the geometry shader emulation shared with other Mesa drivers. The rest are in the Vulkan driver, so they are not specific
 to OpenGL: they can equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
 
 ## Open failures, by cause
 
 Ordered by how much they matter.
 
-1. **Provoking vertex by reordering.** Metal always takes flat inputs from the first vertex.
-   KosmicKrisp emulates OpenGL's last-vertex convention by unrolling the draw with rotated
-   vertices, and only when the fragment shader has flat inputs. Rotated triangles rasterize to
-   depths that differ in the last bit, so a program with a flat input and one without do not
-   produce identical depth for the same geometry: a depth pre-pass followed by `GL_EQUAL` shows
-   speckles. Mesa's linker turns every varying that is constant across a primitive into a flat
-   one, so this is more common than it sounds. Only OpenGL is affected, Direct3D 12 uses the first
-   vertex. `shaders.invariance.*.loop_2` (2 per ES suite) is this. Options: reorder every draw
-   under the last-vertex convention (consistent, costs a compute pass or the vertex cache on every
-   OpenGL draw), or fetch the flat inputs of the provoking vertex in the vertex stage without
-   reordering. Needs a decision.
-2. **Custom border colours.** KosmicKrisp has `VK_EXT_custom_border_color` behind
-   `MESA_KK_EXPERIMENTAL=custom_border`. With it 100 of the 102 ES 3.1 `texture.border_clamp`
-   failures pass (the two left are depth-compare gathers). It adds a border check to every texture
-   sample in every shader, which is the shader size problem of findings 23 again. Without it
-   a layer on Vulkan only has the three fixed border colours; Zink warns about that at start, and
-   what vkd3d-proton does for a Direct3D 12 game with another border colour has not been checked.
-3. **Mediump matrix inverse in a vertex shader** (`shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex`):
+1. **Sparse 3D images.** Vulkan lets an application bind the mip tail of a sparse image page by
+   page, from different memory. Metal maps the tail of a 3D texture in units of several pages
+   that its API does not describe (4, 4 and 2 pages for a 1024x128x8 RGBA8 texture, one unit of
+   64 pages for 256x256x256), and the tail can take more heap pages than `tailSizeInBytes` says:
+   an R8 1024x128x8 texture reports 20 pages and writes to 23 (`tools/metal-probes/sparse-3d-units.m`).
+   Mapping the whole tail in one operation from consecutive pages reads back right for every shape
+   and format tried, but a tail bound in pieces from scattered memory cannot be mapped exactly,
+   and the real tail size would have to be measured. Sparse binding stays off for 3D images; the
+   57 `image_format_properties.3d` failures stay with it. Zink no longer exposes
+   `ARB_sparse_texture` (or `_texture2`, `_clamp`) without sparse 3D images (0062), so OpenGL loses
+   sparse textures until this is solved.
+2. **Doubles in geometry and tessellation evaluation shaders.** `gpu_shader_fp64.fp64.varyings`
+   fails for every set of double varyings passed through a geometry shader (through vertex and
+   tessellation stages they pass), and `fp64.max_uniform_components` gets wrong transform feedback
+   from a tessellation evaluation shader with large double uniform arrays and then never finishes:
+   the last command buffer runs for minutes with no error from Metal.
+3. **Tessellation evaluation outputs before a geometry shader, stored one component at a time.**
+   Splitting those stores (same addresses, same bytes as the packed stores) changes the rendered
+   result deterministically: ES 3.1 `tessellation_geometry_interaction.render.passthrough` (2) and
+   `.limits` (2) fail through Zink, which already splits them, and the Vulkan passthrough tests
+   failed the same way until 0057 left memory outputs packed. Not understood.
+4. **Mediump matrix inverse in a vertex shader** (`shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex`):
    wrong by far more than 16-bit precision explains, the same shader as a fragment shader passes.
-   Not found yet.
-4. **Sparse binding on 3D images.** Vulkan lets an application bind the mip tail of a sparse image
-   page by page, from different memory. Metal maps the tail of a 3D texture in units of several
-   pages (4, 4 and 2 for a 1024x128x8 RGBA8 texture), so page-sized mappings overlap and corrupt
-   it (`tools/metal-probes/sparse-3d-tail.m`). Sparse binding stays off for 3D images until the
-   unit sizes can be derived; the 57 `image_format_properties.3d` failures stay with it, and so do
-   120 OpenGL 4.6 `sparse_texture_tests` (every 3D case of `ARB_sparse_texture`: Zink exposes the
-   extension because 2D works).
-5. **Failures that pass on a second try, and lost devices under load.** 13 per ES 3.1 run, 2 in
-   the last OpenGL 3.3 run (`pixelstoragemodes.compressedteximage3d`), and the Vulkan memory model
-   tests, whose command buffers Metal ends with a timeout when six test processes share the GPU.
-   With one test process the Vulkan memory model tests have 2 crashes and 8 retries instead of
-   133 to 163 crashes with six: load, not the driver, apart from those two. The stencil failures
-   of the full run (`depth_stencil_write_conditions...d32sf_s8ui` and others) pass when run alone. Six test processes share the GPU during a run, so this may be a race
-   or memory pressure in the driver. Not looked into.
+5. **Failures that pass on a second try, and lost devices under load.** About a dozen per ES 3.1
+   run, and the Vulkan memory model tests, whose command buffers Metal ends with a timeout when
+   six test processes share the GPU. With one test process the memory model tests have 2 crashes
+   and 8 retries instead of 133 to 163 crashes with six. Several ES 3.1 crashes
+   (`layout_binding.sampler`, a `copy_image` cube map case) and tessellation tests pass when run
+   alone.
 6. **Clip and cull distances through tessellation and geometry together** (10 Vulkan tests,
    mostly dynamically indexed arrays): the same counts pass through vertex, vertex+tessellation
    and vertex+geometry.
-7. Small ones: `texture_lod_bias` (one combination of sampler and shader bias out of many), ES 3.1
-   `shaders.builtin_constants` and `layout_binding.sampler` crashes, `fbo.no_attachments` timeout,
-   geometry shader primitive counters, `gpu_shader5` gather with offsets.
-8. **Fragment inputs: 124 components, OpenGL 4.6 asks for 128.** Metal takes 124 user varying
+7. **Fragment inputs: 124 components, OpenGL 4.6 asks for 128.** Metal takes 124 user varying
    components into a fragment shader (`tools/metal-probes/varyings.m`), so the driver reports 124
    (0059) and Zink passes that on as `GL_MAX_FRAGMENT_INPUT_COMPONENTS`, under OpenGL 4.6's
-   minimum of 128. Meeting it would mean passing the last components some other way than Metal's
-   stage-in, for instance through memory indexed by primitive, as the geometry shader emulation
-   does.
+   minimum of 128.
+8. **Geometry shader output points with primitive restart** (`geometry_shader.primitive_counter.*_to_points_rp`,
+   2-3): with restart and a custom restart index, transform feedback of a geometry shader that
+   emits points misses values; strips pass, and points without restart pass.
 9. **Per-patch output block arrays** between tessellation control and evaluation (ES 3.1
    `tessellation.user_defined_io.per_patch_block_array`, 9): the evaluation shader reads the wrong
    value for the first element.
-10. Warnings from Zink at start: no `VK_EXT_custom_border_color` (2 above) and no `rectangularLines`
-   (wide lines are drawn as parallelograms).
+10. **Cube map arrays sampled outside fragment shaders** (`texture_cube_map_array.sampling`):
+   `textureLod`, `textureGrad` and `textureGather` in vertex, tessellation, geometry and compute
+   shaders, on a 3x3 grid of coordinates per face that includes face edges and corners.
+11. Small ones: `shader_ballot` (3, not narrowed to a stage yet), `shader_atomic_counters.basic-usage-gs`,
+   `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a few
+   units off: probably Metal's LOD fraction precision), `gpu_shader5` gather with offsets (2),
+   `clear_tex_image` on a 16-bit depth texture level 4, `framebuffers_texture_layer_attachment`,
+   ES 3.1 `fbo.color.texcubearray.rg8ui` and `shaders.linkage...tessellation_geometry.varying.types.mat4`,
+   the ES 3.1 depth-compare border colours (custom border colours are not applied to shadow
+   samplers), `fbo.no_attachments` timeout.
+12. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
 
 ## What the first day showed
 
