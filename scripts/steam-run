@@ -109,7 +109,11 @@ touch "$ready"
 stamp=$(tr -d '\r\n' 2>/dev/null < "$WINEPREFIX/.update-timestamp")
 if [ "$stamp" != disable ] && [ "$stamp" != "$(stat -f %m "$ROOT/dist/share/wine/wine.inf" 2>/dev/null)" ]; then
     echo "updating prefix $WINEPREFIX for a new Wine build" >> "$log"
-    WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$wine" wineboot --update >> "$log" 2>&1
+    if ! WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$wine" wineboot --update >> "$log" 2>&1; then
+        echo "steam-run: updating the prefix failed; see $log" | tee -a "$log" >&2
+        "$wineserver" -k 2>/dev/null
+        exit 1
+    fi
 fi
 
 # The profile Steam Cloud expects, as Proton lays it out: users/steamuser, its Documents, Desktop and

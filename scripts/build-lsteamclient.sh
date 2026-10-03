@@ -61,8 +61,12 @@ extern void hadron_overlay_open_url( const char *url ); extern void hadron_overl
         -e 's/^\( *\)iface->ActivateGameOverlayToWebPage( u_pchURL/\1hadron_overlay_open_url( u_pchURL ); &/' \
         -e 's/^\( *\)iface->ActivateGameOverlayToStore( params->nAppID/\1hadron_overlay_open_store( params->nAppID ); &/' "$f"
 done
-hooks=$(cat "$OUT/src.new"/cppISteamFriends_SteamFriends*.cpp | grep -c 'hadron_overlay_open_[a-z]*( [a-z]')
-(( hooks >= 40 )) || die "only $hooks overlay calls were redirected, lsteamclient's generated code changed"
+# Every overlay call must have been redirected, not just most: count the calls and the redirected ones.
+friends=("$OUT/src.new"/cppISteamFriends_SteamFriends*.cpp)
+calls=$(cat "${friends[@]}" | grep -c 'iface->ActivateGameOverlayTo\(WebPage\|Store\)(')
+hooks=$(cat "${friends[@]}" | grep -c 'hadron_overlay_open_[a-z]*( [^)]* ); *iface->ActivateGameOverlayTo\(WebPage\|Store\)(')
+(( calls > 0 && hooks == calls )) ||
+    die "$hooks of $calls overlay calls were redirected, lsteamclient's generated code changed"
 # No -t: files whose content is unchanged keep their old mtime, so objects stay current.
 rsync -rlp --checksum --delete "$OUT/src.new/" "$TREE/"
 rm -rf "$OUT/src.new"
