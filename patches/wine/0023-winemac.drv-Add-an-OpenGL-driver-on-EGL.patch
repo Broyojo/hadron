@@ -1,4 +1,4 @@
-From 7b26edb37c6dd113935eb6a13a4768aee4b2fe36 Mon Sep 17 00:00:00 2001
+From 30f30373350b75e2c814c4bdfa5fe1261c9c0644 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 14:07:06 -0400
 Subject: [PATCH] winemac.drv: Add an OpenGL driver on EGL.
@@ -10,10 +10,10 @@ the window's Metal view, the one Vulkan surfaces use. That is what an EGL
 on top of a Vulkan driver for Metal presents to, such as Mesa's Zink.
 ---
  dlls/winemac.drv/Makefile.in |   1 +
- dlls/winemac.drv/egl.c       | 131 +++++++++++++++++++++++++++++++++++
+ dlls/winemac.drv/egl.c       | 130 +++++++++++++++++++++++++++++++++++
  dlls/winemac.drv/macdrv.h    |   2 +
  dlls/winemac.drv/opengl.c    |   1 +
- 4 files changed, 135 insertions(+)
+ 4 files changed, 134 insertions(+)
  create mode 100644 dlls/winemac.drv/egl.c
 
 diff --git a/dlls/winemac.drv/Makefile.in b/dlls/winemac.drv/Makefile.in
@@ -30,10 +30,10 @@ index 943a9b5f7b..065de38c1d 100644
  	image.c \
 diff --git a/dlls/winemac.drv/egl.c b/dlls/winemac.drv/egl.c
 new file mode 100644
-index 0000000000..7a13cf7994
+index 0000000000..d9d63121a2
 --- /dev/null
 +++ b/dlls/winemac.drv/egl.c
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,130 @@
 +/*
 + * Mac driver OpenGL support through EGL
 + *
@@ -130,8 +130,7 @@ index 0000000000..7a13cf7994
 +static BOOL macdrv_egl_surface_swap(struct opengl_drawable *base)
 +{
 +    client_surface_present(base->client);
-+    funcs->p_eglSwapBuffers(egl->display, base->surface);
-+    return TRUE;
++    return funcs->p_eglSwapBuffers(egl->display, base->surface);
 +}
 +
 +static const struct opengl_drawable_funcs macdrv_egl_surface_funcs =

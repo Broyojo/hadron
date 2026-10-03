@@ -65,19 +65,19 @@
 <rect x="567.0" y="560" width="165.0" height="64" rx="8" fill="#e6effd" stroke="#2f6fdb" stroke-width="1.5"/>
 <text x="649.5" y="589.0" font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">winevulkan</text>
 <text x="649.5" y="606.0" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">Wine's Vulkan loader</text>
-<rect x="746.0" y="560" width="165.0" height="64" rx="8" fill="none" stroke="#8c959f" stroke-width="1.5" stroke-dasharray="6 4"/>
+<rect x="746.0" y="560" width="165.0" height="64" rx="8" fill="#e6effd" stroke="#2f6fdb" stroke-width="1.5"/>
 <text x="828.5" y="580.5" font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">Zink</text>
-<text x="828.5" y="597.5" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">OpenGL 4.6 on Vulkan</text>
-<text x="828.5" y="614.5" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">planned</text>
+<text x="828.5" y="597.5" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">OpenGL on Vulkan</text>
+<text x="828.5" y="614.5" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">opt-in, 3.3 so far</text>
 <rect x="925.0" y="560" width="165.0" height="64" rx="8" fill="#f8e7f0" stroke="#a23b72" stroke-width="1.5"/>
 <text x="1007.5" y="580.5" font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">Wine OpenGL</text>
 <text x="1007.5" y="597.5" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">passes OpenGL through</text>
-<text x="1007.5" y="614.5" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">used today</text>
+<text x="1007.5" y="614.5" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">the default</text>
 <line x1="112.5" y1="546" x2="112.5" y2="558" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <line x1="291.5" y1="546" x2="291.5" y2="558" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <line x1="470.5" y1="546" x2="470.5" y2="558" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <line x1="649.5" y1="546" x2="649.5" y2="558" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
-<path d="M898.0,546 L828.5,558" fill="none" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)" stroke-dasharray="5 4"/>
+<path d="M898.0,546 L828.5,558" fill="none" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <path d="M938.0,546 L1007.5,558" fill="none" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <rect x="388.0" y="664" width="523.0" height="64" rx="8" fill="#def4f1" stroke="#14857b" stroke-width="1.5"/>
 <text x="649.5" y="693.0" font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">KosmicKrisp</text>
@@ -87,7 +87,7 @@
 <text x="1007.5" y="710.0" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">version 4.1, deprecated</text>
 <line x1="470.5" y1="624" x2="470.5" y2="662" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <line x1="649.5" y1="624" x2="649.5" y2="662" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="828.5" y1="624" x2="828.5" y2="662" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)" stroke-dasharray="5 4"/>
+<line x1="828.5" y1="624" x2="828.5" y2="662" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <line x1="1007.5" y1="624" x2="1007.5" y2="662" stroke="#59636e" stroke-width="1.5" marker-end="url(#a)"/>
 <rect x="30.0" y="768" width="1060.0" height="50" rx="8" fill="#f0f2f5" stroke="#8c959f" stroke-width="1.5"/>
 <text x="560.0" y="790.0" font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">Metal</text>
@@ -113,6 +113,4 @@
 <text x="567.2" y="904.0" font-size="12" font-weight="400" fill="#59636e" text-anchor="start">Hadron's own code</text>
 <rect x="700.9000000000001" y="893" width="14" height="14" rx="3" fill="#f0f2f5" stroke="#8c959f" stroke-width="1.5"/>
 <text x="720.9" y="904.0" font-size="12" font-weight="400" fill="#59636e" text-anchor="start">macOS and Steam</text>
-<rect x="842.4000000000001" y="893" width="14" height="14" rx="3" fill="none" stroke="#8c959f" stroke-width="1.5" stroke-dasharray="4 3"/>
-<text x="862.4" y="904.0" font-size="12" font-weight="400" fill="#59636e" text-anchor="start">planned</text>
 </svg>

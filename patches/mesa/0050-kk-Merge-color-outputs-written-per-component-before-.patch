@@ -1,4 +1,4 @@
-From 70214b14ee5d30688050861c3678ecd7fc076e28 Mon Sep 17 00:00:00 2001
+From a656439ff9901455f2fe10c3d1fadbaf451414c9 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 21:33:00 -0400
 Subject: [PATCH] kk: Merge color outputs written per component before blend
@@ -6,14 +6,14 @@ Subject: [PATCH] kk: Merge color outputs written per component before blend
 
 Generated-by: LLM
 ---
- src/kosmickrisp/vulkan/kk_shader.c | 118 +++++++++++++++++++++++++++++
- 1 file changed, 118 insertions(+)
+ src/kosmickrisp/vulkan/kk_shader.c | 124 +++++++++++++++++++++++++++++
+ 1 file changed, 124 insertions(+)
 
 diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
-index 7d7c9f7d6a1..1163608c732 100644
+index 7d7c9f7d6a1..dd4d143502e 100644
 --- a/src/kosmickrisp/vulkan/kk_shader.c
 +++ b/src/kosmickrisp/vulkan/kk_shader.c
-@@ -447,6 +447,123 @@ kk_get_logical_color_att_index(const struct vk_graphics_pipeline_state *state,
+@@ -447,6 +447,129 @@ kk_get_logical_color_att_index(const struct vk_graphics_pipeline_state *state,
     return (state->cal) ? state->cal->color_map[i] : i;
  }
  
@@ -21,6 +21,7 @@ index 7d7c9f7d6a1..1163608c732 100644
 +   nir_variable *var[FRAG_RESULT_MAX][2];
 +   nir_intrinsic_instr *store[FRAG_RESULT_MAX][2];
 +   uint8_t mask[FRAG_RESULT_MAX][2];
++   bool split[FRAG_RESULT_MAX][2];
 +};
 +
 +static bool
@@ -38,10 +39,15 @@ index 7d7c9f7d6a1..1163608c732 100644
 +kk_gather_split_color(nir_builder *b, nir_intrinsic_instr *intr, void *data)
 +{
 +   struct kk_split_color *split = data;
-+   if (!kk_is_split_color_store(intr))
++   if (intr->intrinsic != nir_intrinsic_store_output)
 +      return false;
 +
 +   nir_io_semantics sem = nir_intrinsic_io_semantics(intr);
++   if (sem.location < FRAG_RESULT_DATA0)
++      return false;
++   if (kk_is_split_color_store(intr))
++      split->split[sem.location][sem.dual_source_blend_index] = true;
++
 +   unsigned index = sem.dual_source_blend_index;
 +   unsigned mask = nir_intrinsic_write_mask(intr)
 +                   << nir_intrinsic_component(intr);
@@ -93,7 +99,7 @@ index 7d7c9f7d6a1..1163608c732 100644
 +   for (unsigned loc = FRAG_RESULT_DATA0; loc < FRAG_RESULT_MAX; loc++) {
 +      for (unsigned i = 0; i < 2; i++) {
 +         nir_intrinsic_instr *store = split.store[loc][i];
-+         if (!store)
++         if (!store || !split.split[loc][i])
 +            continue;
 +         unsigned bit_size = store->src[0].ssa->bit_size;
 +         split.var[loc][i] = nir_local_variable_create(
@@ -114,7 +120,7 @@ index 7d7c9f7d6a1..1163608c732 100644
 +   for (unsigned loc = FRAG_RESULT_DATA0; loc < FRAG_RESULT_MAX; loc++) {
 +      for (unsigned i = 0; i < 2; i++) {
 +         nir_intrinsic_instr *store = split.store[loc][i];
-+         if (!store)
++         if (!store || !split.split[loc][i])
 +            continue;
 +         unsigned count = util_last_bit(split.mask[loc][i]);
 +         nir_io_semantics sem = nir_intrinsic_io_semantics(store);
@@ -137,7 +143,7 @@ index 7d7c9f7d6a1..1163608c732 100644
  static void
  kk_lower_fs_blend(nir_shader *nir,
                    const struct vk_graphics_pipeline_state *state)
-@@ -505,6 +622,7 @@ kk_lower_fs_blend(nir_shader *nir,
+@@ -505,6 +628,7 @@ kk_lower_fs_blend(nir_shader *nir,
     }
     /* Fold constant offset srcs for IO. */
     NIR_PASS(_, nir, nir_opt_constant_folding);

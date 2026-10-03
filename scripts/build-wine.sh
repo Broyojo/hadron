@@ -37,6 +37,11 @@ fi
 mkdir -p "$WINE_BUILD"
 cd "$WINE_BUILD"
 
+# Configure again when Zink's EGL appears or goes away, so the EGL OpenGL driver follows it.
+egl_state="no Zink"
+[[ -f "$ROOT/dist/mesa-zink/lib/pkgconfig/egl.pc" ]] && egl_state="Zink EGL"
+[[ "$(cat .hadron-egl 2>/dev/null)" == "$egl_state" ]] || reconfigure=1
+
 if [[ ! -f Makefile || -n $reconfigure ]]; then
     log "configuring wine ($variant)"
     # Unix side: Apple clang (Objective-C/AppKit for winemac.drv, SDK defaults).
@@ -54,6 +59,7 @@ if [[ ! -f Makefile || -n $reconfigure ]]; then
         --without-x \
         --disable-tests \
         BISON="$BREW/opt/bison/bin/bison"
+    echo "$egl_state" > .hadron-egl
 fi
 
 log "building wine ($variant) with $JOBS jobs"

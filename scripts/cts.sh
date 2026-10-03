@@ -55,8 +55,11 @@ case "$suite" in
             [[ -n "$f" ]] || continue
             list="${f%.txt}"; list="${list//\//-}"
             [[ -f "$BUILD/cts-results/$name/$list/results.csv" ]] && continue
+            forward=()
+            [[ -n "$baseline" ]] && forward+=(--baseline "$baseline")
+            for e in ${extra_env[@]+"${extra_env[@]}"}; do forward+=(--env "$e"); done
             "$0" vk --name "$name/$list" --jobs "$jobs" --fraction "$fraction" \
-                --caselist "$cts/external/vulkancts/mustpass/main/$f" || true
+                --caselist "$cts/external/vulkancts/mustpass/main/$f" ${forward[@]+"${forward[@]}"} || true
         done < "$cts/external/vulkancts/mustpass/main/vk-default.txt"
         cat "$BUILD/cts-results/$name"/*/results.csv > "$BUILD/cts-results/$name/results.csv"
         cat "$BUILD/cts-results/$name"/*/failures.csv > "$BUILD/cts-results/$name/failures.csv"

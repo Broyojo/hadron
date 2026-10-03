@@ -22,6 +22,11 @@ fetch_cts() {
     fi
     [[ -z "$(git -C "$cts" status --porcelain --untracked-files=no)" ]] ||
         die "$cts has local changes: conformance results need the unmodified suite"
+    if [[ "$(git -C "$cts" rev-parse HEAD)" != "$(git -C "$cts" rev-parse -q --verify "$ref^{commit}")" ]]; then
+        log "checking out VK-GL-CTS $ref"
+        git -C "$cts" fetch -q origin tag "$ref" 2>/dev/null || true
+        git -C "$cts" checkout -q --detach "$ref" || die "cannot check out $ref in $cts"
+    fi
     # glslang, SPIRV-Tools and the other sources the suite builds itself
     [[ -d "$cts/external/glslang/src" ]] || python3 "$cts/external/fetch_sources.py"
 }
