@@ -17,6 +17,7 @@
 #   --caselist FILE    run these tests instead of the suite's must-pass list
 #   --jobs N           parallel test processes (default: half the cores, the GPU is shared)
 #   --baseline FILE    a failures.csv from an earlier run: only changes against it are reported
+#   --env NAME=VALUE   one more environment variable for the test processes (repeatable)
 #
 # Results: results.csv (one line per test), failures.csv (everything that did not pass or skip).
 # A full Vulkan run is about 3.2 million tests: run it when the Mac is not in use.
@@ -25,7 +26,7 @@
 source "$(dirname "$0")/env.sh"
 
 suite="${1:-}"; shift || true
-name= fraction=1 caselists=() jobs=$(( $(sysctl -n hw.ncpu) / 2 )) baseline=
+name= fraction=1 caselists=() jobs=$(( $(sysctl -n hw.ncpu) / 2 )) baseline= extra_env=()
 while (( $# )); do
     case "$1" in
         --name) name="$2"; shift 2 ;;
@@ -33,6 +34,7 @@ while (( $# )); do
         --caselist) caselists+=("$2"); shift 2 ;;
         --jobs) jobs="$2"; shift 2 ;;
         --baseline) baseline="$2"; shift 2 ;;
+        --env) extra_env+=("$2"); shift 2 ;;
         *) die "unknown option $1" ;;
     esac
 done
@@ -101,7 +103,7 @@ mkdir -p "$out"
 awk '!seen[$0]++' "${caselists[@]}" > "$out/caselist.txt"
 cmd=("$runner" run --deqp "$deqp" --output "$out" --jobs "$jobs" --timeout 120 --fraction "$fraction"
      --caselist "$out/caselist.txt")
-for e in "${env[@]}"; do cmd+=(--env "$e"); done
+for e in "${env[@]}" ${extra_env[@]+"${extra_env[@]}"}; do cmd+=(--env "$e"); done
 [[ -n "$baseline" ]] && cmd+=(--baseline "$baseline")
 log "$suite: ${#caselists[@]} case list(s), 1 test in $fraction, $jobs jobs, results in $out"
 status=0

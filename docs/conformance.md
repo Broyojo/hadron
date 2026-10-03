@@ -47,7 +47,7 @@ Rules that keep the results worth something:
 ## Results
 
 OpenGL and OpenGL ES on Zink on KosmicKrisp, 2026-10-02. "First" is the first full run, "now" is
-with the eight fixes below. Skips are tests for features the implementation does not claim.
+with the first eight fixes below (0038-0045). Skips are tests for features the implementation does not claim.
 
 | Suite | Tests | First: fail / crash | Now: pass | Now: fail / crash | Skipped |
 |---|---|---|---|---|---|
@@ -75,11 +75,11 @@ the fixes below): 3,247,552 tests, 647,905 pass, 2,599,079 skipped, 348 fail, 10
 
 | Group | Count | What it is |
 |---|---|---|
-| `api.info.image_format_properties` | 173 fail | `vkGetPhysicalDeviceImageFormatProperties` returns `VK_ERROR_FORMAT_NOT_SUPPORTED` for combinations the specification requires, given the format features the driver reports. |
+| `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 7): 57 remain. |
 | `texture.swizzle`, `texture.compressed` | 134 fail | All are sparse textures with sizes that are not powers of two, compressed formats. |
-| `memory_model.message_passing`, `write_after_read` | 79 crash (SIGSEGV), most of the 104 retries | Unstable; not looked into. |
-| `glsl.440.linkage.varying.component.frag_out` | 22 crash | `nir_lower_blend` writes a four-component store at component 1 when two outputs share a location; NIR validation stops. Related to open item 1 below. |
-| `spirv_assembly...opfma.fp32...denorm_preserve` | 16 fail | `fma` with a denormal product and denormals preserved is off by one bit. |
+| `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 8. |
+| `glsl.440.linkage.varying.component.frag_out` | 22 crash | `nir_lower_blend` expects one store per colour output; outputs written per component broke it. Fixed by 0050. |
+| `spirv_assembly...opfma.fp32...denorm_preserve` | 16 fail | The emulated `fma` for denormal operands rounded twice. Fixed by 0046. |
 | `clipping.user_defined` through tessellation and geometry | 10 fail | Clip and cull distances read in the fragment shader after tessellation and geometry stages. |
 | `dgc.ext` | 6 crash (SIGSEGV) | Device-generated commands, an experimental feature. |
 | Stencil: `multisample.std_sample_locations...stencil`, `depth_stencil_write_conditions...d32sf_s8ui`, `transient_attachment_bit.stencil_load_store_op_test_local_bit` | 10 fail | Stencil kept across render passes or written with discards, on the combined depth/stencil format. |
@@ -106,10 +106,14 @@ All are Mesa patches in `patches/mesa`.
 | 0043 | The shader cache key had "is a point list" but not "lines or triangles", while the transform feedback stage is compiled for one of the two. A program that captured lines and then triangles got the lines variant back from the cache, in the same process or from disk on the next launch. | half of `transform_feedback` (about 250), unstable from run to run |
 | 0044 | Render targets whose channels are stored in another order in Metal (RGBA4 and the other 16-bit formats) swizzle the fragment output. A shader writing fewer than four components was swizzled from components it does not have. | `fragment_out` (20) |
 | 0045 | `vkCmdDrawIndirectByteCountEXT` was not implemented (`transformFeedbackDraw` was false), so `glDrawTransformFeedback` drew nothing. A small kernel now turns the captured byte count into an indirect draw. | `transform_feedback.draw_xfb_*` (3 per desktop run); 30 Vulkan suite tests that were skipped now run and pass |
+| 0046 | The emulated `fma` used when an operand is denormal multiplied and added with two roundings; an FMA rounds once. Found by the review of #13 and by the Vulkan suite. | 16 `opfma` tests |
+| 0047 | Switching a shader class to locked 64-bit atomics waited only for re-recorded command buffers, not ordinary ones, and let new submissions in meanwhile, so native and locked atomics could run at once. Device teardown also freed its buffers before waiting for the GPU. Both now wait for all queue work. | Found by review; the teardown order by the Vulkan suite once completion callbacks read device memory |
+| 0048 | 64-bit atomic loads and stores on shared memory and images were not serialised with the locked read-modify-write operations; image locks hashed an undefined coordinate for 1D images; a lock timeout entered the critical section without the lock. A timeout now loses the device instead of corrupting memory. | Found by the review of #13 |
+| 0049 | Sparse binding on 1D, multisampled and depth/stencil images (see the table above). | 173 `image_format_properties` tests minus the 57 3D ones |
+| 0050 | Colour outputs written per component are gathered into one store before blend lowering. | 22 crashes |
 
-Seven of the eight are in the Vulkan driver, not in Zink, so they are not specific to OpenGL:
-0038, 0040, 0043 and 0044 can equally be hit by a Direct3D 12 game through vkd3d-proton or by a
-Vulkan game.
+All but 0041 are in the Vulkan driver, not in Zink, so they are not specific to OpenGL: they can
+equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
 
 ## Open failures, by cause
 
@@ -157,14 +161,21 @@ Ordered by how much they matter.
 6. **Mediump matrix inverse in a vertex shader** (`shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex`):
    wrong by far more than 16-bit precision explains, the same shader as a fragment shader passes.
    Not found yet.
-7. **Failures that pass on a second try.** 13 per ES 3.1 run and 2 in the last OpenGL 3.3 run
-   (`pixelstoragemodes.compressedteximage3d`); the two `copy_image` crashes may be related. Six test processes share the GPU during a run, so this may be a race
+7. **Sparse binding on 3D images.** Vulkan lets an application bind the mip tail of a sparse image
+   page by page, from different memory. Metal maps the tail of a 3D texture in units of several
+   pages (4, 4 and 2 for a 1024x128x8 RGBA8 texture), so page-sized mappings overlap and corrupt
+   it (`tools/metal-probes/sparse-3d-tail.m`). Sparse binding stays off for 3D images until the
+   unit sizes can be derived; the 57 `image_format_properties.3d` failures stay with it.
+8. **Failures that pass on a second try, and lost devices under load.** 13 per ES 3.1 run, 2 in
+   the last OpenGL 3.3 run (`pixelstoragemodes.compressedteximage3d`), and the Vulkan memory model
+   tests, whose command buffers Metal ends with a timeout when six test processes share the GPU.
+   Next step: run those groups with one test process to separate load from driver bugs. Six test processes share the GPU during a run, so this may be a race
    or memory pressure in the driver. Not looked into.
-8. Small ones: `texture_lod_bias` (one combination of sampler and shader bias out of many),
+9. Small ones: `texture_lod_bias` (one combination of sampler and shader bias out of many),
    `pipeline_statistics_query` vertices submitted (a restart index is counted as a vertex), ES 3.1
    `shaders.builtin_constants` and `layout_binding.sampler` crashes, `fbo.no_attachments` timeout,
    geometry shader primitive counters, `gpu_shader5` gather with offsets.
-9. Warnings from Zink at start: no `VK_EXT_custom_border_color` (3 above) and no `rectangularLines`
+10. Warnings from Zink at start: no `VK_EXT_custom_border_color` (3 above) and no `rectangularLines`
    (wide lines are drawn as parallelograms).
 
 ## What the first day showed

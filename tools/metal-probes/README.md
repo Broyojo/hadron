@@ -34,3 +34,7 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   read-only texture mapped to the same heap pages as a writable one reporting residency for it
 - `sparse-mapping-order.m`: mapping a read-only sparse texture, a writable one and the read-only one
   again in one batch crashes in `updateTextureMappings`; a signal or a commit in between avoids it
+- `sparse-3d-tail.m`: the mip tail of a placement-sparse 3D texture (1024x128x8 RGBA8: a 10-page
+  tail). Mapped in one operation from consecutive heap pages it reads back right; mapped one page
+  per operation it does not: tail position n covers several pages (here 4, 4 and 2), so the
+  page-sized operations overlap. Why sparse binding stays off for 3D images
