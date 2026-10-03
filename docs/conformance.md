@@ -177,21 +177,27 @@ Ordered by how much they matter.
 8. **Geometry shader output points with primitive restart** (`geometry_shader.primitive_counter.*_to_points_rp`,
    2-3): with restart and a custom restart index, transform feedback of a geometry shader that
    emits points misses values; strips pass, and points without restart pass.
-9. **Per-patch output block arrays** between tessellation control and evaluation (ES 3.1
+9. **Side effects in geometry shaders that also need a count pass.** The geometry shader
+   emulation runs the shader twice when its output counts are not known statically: a count pass
+   with all side effects, then the main pass with stores and unused atomics stripped. An atomic
+   whose result the shader uses stays in both and happens twice
+   (`shader_atomic_counters.basic-usage-gs`, `geometry_shader.api.max_shader_storage_blocks` in
+   OpenGL 4.6 and ES 3.1). The main pass needs the count pass's atomic results instead, through a
+   buffer.
+10. **Per-patch output block arrays** between tessellation control and evaluation (ES 3.1
    `tessellation.user_defined_io.per_patch_block_array`, 9): the evaluation shader reads the wrong
    value for the first element.
-10. **Cube map arrays sampled outside fragment shaders** (`texture_cube_map_array.sampling`):
+11. **Cube map arrays sampled outside fragment shaders** (`texture_cube_map_array.sampling`):
    `textureLod`, `textureGrad` and `textureGather` in vertex, tessellation, geometry and compute
    shaders, on a 3x3 grid of coordinates per face that includes face edges and corners.
-11. Small ones: `shader_ballot` (3, not narrowed to a stage yet), `shader_atomic_counters.basic-usage-gs`,
-   `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a few
+12. Small ones: `shader_ballot` (3, not narrowed to a stage yet), `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a few
    units off: Apple GPUs blend mip levels with 6-bit weights, `tools/metal-probes/filter-precision.m`;
    meeting the test would mean filtering between levels in the shader), `gpu_shader5` gather with offsets (2),
    `clear_tex_image` on a 16-bit depth texture level 4, `framebuffers_texture_layer_attachment`,
    ES 3.1 `fbo.color.texcubearray.rg8ui` and `shaders.linkage...tessellation_geometry.varying.types.mat4`,
    the ES 3.1 depth-compare border colours (custom border colours are not applied to shadow
    samplers), `fbo.no_attachments` timeout.
-12. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
+13. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
 
 ## What the first day showed
 
