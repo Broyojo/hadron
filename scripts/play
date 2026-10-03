@@ -14,8 +14,8 @@
 # fractions for smooth scrolling, for applications that scale by the wheel delta.
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
 # limits those not marked large address aware to 2GB, as on Windows.
-# HADRON_D3D12=vkd3d runs D3D12 through vkd3d-proton on KosmicKrisp (experimental; see
-# docs/findings.md #22 for what the driver still lacks).
+# D3D12 runs through vkd3d-proton on KosmicKrisp (docs/findings.md #22); HADRON_D3D12=wine uses
+# Wine's own d3d12 instead, for comparisons.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
@@ -62,14 +62,25 @@ sys32="$PREFIX/drive_c/windows/system32"
 if [ -f "$ROOT/dist/dxvk/x64/dxgi.dll" ] && [ -d "$sys32" ]; then
     cmp -s "$ROOT/dist/dxvk/x64/dxgi.dll" "$sys32/dxgi_dxvk.dll" || cp "$ROOT/dist/dxvk/x64/dxgi.dll" "$sys32/dxgi_dxvk.dll"
 fi
-# HADRON_D3D12=vkd3d: D3D12 through vkd3d-proton on KosmicKrisp. Per game while the driver still lacks
-# features vkd3d-proton requires (docs/findings.md #22); Wine's own d3d12 otherwise.
-if [ "${HADRON_D3D12:-}" = vkd3d ]; then
-    [ -n "$icd" ] || { echo "HADRON_D3D12=vkd3d needs KosmicKrisp: run scripts/build-vulkan.sh" >&2; exit 1; }
-    [ -f "$sys32/dxgi_dxvk.dll" ] || { echo "HADRON_D3D12=vkd3d needs DXVK's DXGI: run scripts/build-vulkan.sh dxvk" >&2; exit 1; }
+# D3D12 goes through vkd3d-proton on KosmicKrisp. Wine's own d3d12 can't make a device here: it needs
+# Wine's DXGI adapters, and DXGI is DXMT's. HADRON_D3D12=wine selects it anyway, for comparisons;
+# HADRON_D3D12=vkd3d fails when a part of the vkd3d-proton path is missing instead of falling back.
+d3d12="${HADRON_D3D12:-auto}"
+if [ "$d3d12" != wine ]; then
+    missing=
+    for f in d3d12.dll d3d12core.dll; do
+        [ -f "$ROOT/dist/vkd3d-proton/x64/$f" ] || missing="vkd3d-proton: run scripts/build-vulkan.sh"
+    done
+    [ -f "$sys32/dxgi_dxvk.dll" ] || missing="the DXGI of DXVK: run scripts/build-vulkan.sh dxvk"
+    [ -n "$icd" ] || missing="KosmicKrisp: run scripts/build-vulkan.sh"
+    if [ -n "$missing" ]; then
+        [ "$d3d12" = vkd3d ] && { echo "HADRON_D3D12=vkd3d needs $missing" >&2; exit 1; }
+        d3d12=wine
+    fi
+fi
+if [ "$d3d12" != wine ]; then
     for f in d3d12.dll d3d12core.dll; do
         src="$ROOT/dist/vkd3d-proton/x64/$f"
-        [ -f "$src" ] || { echo "missing $src: run scripts/build-vulkan.sh" >&2; exit 1; }
         cmp -s "$src" "$sys32/$f" || cp "$src" "$sys32/$f"
     done
     overrides="$overrides;d3d12,d3d12core=n"

@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 930" width="1120" height="930" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Hadron architecture">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9198a1"/></marker></defs>
+<rect x="0.5" y="0.5" width="1119" height="929" rx="12" fill="#0d1117" stroke="#30363d"/>
+<rect x="30.0" y="28" width="1060.0" height="56" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
+<text x="560.0" y="53.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Steam for Mac</text>
+<text x="560.0" y="70.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">the native client: library, downloads, friends, cloud saves</text>
+<rect x="30.0" y="118" width="702.0" height="56" rx="8" fill="#33260a" stroke="#d29922" stroke-width="1.5"/>
+<text x="381.0" y="143.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Hadron Steam Play tool</text>
+<text x="381.0" y="160.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">steam-run → play: one prefix per game, per-game settings, memory watchdog</text>
+<line x1="381.0" y1="84" x2="381.0" y2="116" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="391.0" y="105.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">launches</text>
+<rect x="30.0" y="208" width="702.0" height="138" rx="8" fill="#0d1117" stroke="#e6edf3" stroke-width="1.5"/>
+<text x="46.0" y="232.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="start">Windows game</text>
+<line x1="381.0" y1="174" x2="381.0" y2="206" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="153.0" y="260.0" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="middle">x86-64 code</text>
+<line x1="153.0" y1="266" x2="153.0" y2="284" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="46.0" y="286" width="214.0" height="46" rx="8" fill="#102a17" stroke="#3fb950" stroke-width="1.5"/>
+<text x="153.0" y="305.5" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">FEX (ARM64EC)</text>
+<text x="153.0" y="322.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">translated to ARM64</text>
+<text x="381.0" y="260.0" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="middle">32-bit x86 code</text>
+<line x1="381.0" y1="266" x2="381.0" y2="284" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="274.0" y="286" width="214.0" height="46" rx="8" fill="#102a17" stroke="#3fb950" stroke-width="1.5"/>
+<text x="381.0" y="305.5" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">FEX (WoW64)</text>
+<text x="381.0" y="322.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">translated to ARM64</text>
+<text x="609.0" y="260.0" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="middle">ARM64 code</text>
+<line x1="609.0" y1="266" x2="609.0" y2="284" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="502.0" y="286" width="214.0" height="46" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
+<text x="609.0" y="305.5" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">runs directly</text>
+<text x="609.0" y="322.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">no translation</text>
+<rect x="30.0" y="380" width="1060.0" height="100" rx="8" fill="#351426" stroke="#db61a2" stroke-width="1.5"/>
+<text x="46.0" y="404.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="start">Wine</text>
+<text x="92.0" y="404.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">built natively for arm64 macOS: the Windows API, with no Rosetta underneath</text>
+<line x1="381.0" y1="346" x2="381.0" y2="378" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="46.0" y="418" width="333.3" height="48" rx="8" fill="#0d1117" stroke="#e6edf3" stroke-width="1.5"/>
+<text x="212.7" y="438.5" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Windows kernel services</text>
+<text x="212.7" y="455.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">ntdll, kernelbase: memory, threads, files, registry</text>
+<rect x="393.3" y="418" width="333.3" height="48" rx="8" fill="#0d1117" stroke="#e6edf3" stroke-width="1.5"/>
+<text x="560.0" y="438.5" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">winemac.drv</text>
+<text x="560.0" y="455.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">windows, input and displays on AppKit</text>
+<rect x="740.7" y="418" width="333.3" height="48" rx="8" fill="#33260a" stroke="#d29922" stroke-width="1.5"/>
+<text x="907.3" y="438.5" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">lsteamclient</text>
+<text x="907.3" y="455.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Steam bridge: forwards Steamworks calls</text>
+<line x1="907.3" y1="418" x2="907.3" y2="86" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="917.3" y="240.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">Steamworks</text>
+<text x="917.3" y="256.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">calls</text>
+<line x1="112.5" y1="480" x2="112.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="112.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 9</text>
+<line x1="291.5" y1="480" x2="291.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="291.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 10 / 11</text>
+<line x1="470.5" y1="480" x2="470.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="470.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 12</text>
+<line x1="649.5" y1="480" x2="649.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="649.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Vulkan</text>
+<line x1="918.0" y1="480" x2="918.0" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="918.0" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">OpenGL</text>
+<rect x="30.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="112.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">mtld3d</text>
+<text x="112.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 9 on Metal</text>
+<rect x="209.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="291.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">DXMT</text>
+<text x="291.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 10/11 on Metal</text>
+<rect x="388.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="470.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">vkd3d-proton</text>
+<text x="470.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 12 on Vulkan</text>
+<rect x="567.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="649.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">winevulkan</text>
+<text x="649.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Wine's Vulkan loader</text>
+<rect x="746.0" y="560" width="165.0" height="64" rx="8" fill="none" stroke="#6e7681" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="828.5" y="580.5" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Zink</text>
+<text x="828.5" y="597.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">OpenGL 4.6 on Vulkan</text>
+<text x="828.5" y="614.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">planned</text>
+<rect x="925.0" y="560" width="165.0" height="64" rx="8" fill="#351426" stroke="#db61a2" stroke-width="1.5"/>
+<text x="1007.5" y="580.5" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Wine OpenGL</text>
+<text x="1007.5" y="597.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">passes OpenGL through</text>
+<text x="1007.5" y="614.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">used today</text>
+<line x1="112.5" y1="546" x2="112.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="291.5" y1="546" x2="291.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="470.5" y1="546" x2="470.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="649.5" y1="546" x2="649.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M898.0,546 L828.5,558" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)" stroke-dasharray="5 4"/>
+<path d="M938.0,546 L1007.5,558" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="388.0" y="664" width="523.0" height="64" rx="8" fill="#0a2c29" stroke="#2ec4b6" stroke-width="1.5"/>
+<text x="649.5" y="693.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">KosmicKrisp</text>
+<text x="649.5" y="710.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Mesa's Vulkan driver on Metal 4, with Hadron's patches</text>
+<rect x="925.0" y="664" width="165.0" height="64" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
+<text x="1007.5" y="693.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Apple OpenGL</text>
+<text x="1007.5" y="710.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">version 4.1, deprecated</text>
+<line x1="470.5" y1="624" x2="470.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="649.5" y1="624" x2="649.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="828.5" y1="624" x2="828.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)" stroke-dasharray="5 4"/>
+<line x1="1007.5" y1="624" x2="1007.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="30.0" y="768" width="1060.0" height="50" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
+<text x="560.0" y="790.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Metal</text>
+<text x="560.0" y="807.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Apple's graphics API</text>
+<line x1="112.5" y1="624" x2="112.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="291.5" y1="624" x2="291.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="649.5" y1="728" x2="649.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="1007.5" y1="728" x2="1007.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="122.5" y="700.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">direct</text>
+<text x="301.5" y="700.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">direct</text>
+<line x1="560.0" y1="818" x2="560.0" y2="844" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="360.0" y="846" width="400.0" height="34" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
+<text x="560.0" y="868.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Apple silicon GPU</text>
+<rect x="30" y="893" width="14" height="14" rx="3" fill="#102a17" stroke="#3fb950" stroke-width="1.5"/>
+<text x="50.0" y="904.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">x86 translation</text>
+<rect x="171.5" y="893" width="14" height="14" rx="3" fill="#351426" stroke="#db61a2" stroke-width="1.5"/>
+<text x="191.5" y="904.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">Wine</text>
+<rect x="245.9" y="893" width="14" height="14" rx="3" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="265.9" y="904.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">graphics translation</text>
+<rect x="417.9" y="893" width="14" height="14" rx="3" fill="#0a2c29" stroke="#2ec4b6" stroke-width="1.5"/>
+<text x="437.9" y="904.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">Vulkan driver</text>
+<rect x="547.2" y="893" width="14" height="14" rx="3" fill="#33260a" stroke="#d29922" stroke-width="1.5"/>
+<text x="567.2" y="904.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">Hadron's own code</text>
+<rect x="700.9000000000001" y="893" width="14" height="14" rx="3" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
+<text x="720.9" y="904.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">macOS and Steam</text>
+<rect x="842.4000000000001" y="893" width="14" height="14" rx="3" fill="none" stroke="#6e7681" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="862.4" y="904.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">planned</text>
+</svg>

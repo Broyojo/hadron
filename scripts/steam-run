@@ -102,6 +102,15 @@ if [ ! -f "$ready" ] && { [ ! -f "$WINEPREFIX/system.reg" ] || [ -f "$WINEPREFIX
 fi
 touch "$ready"
 
+# Wine updates a prefix whose stamp differs from its wine.inf's modification time, in the first
+# process to start there. Do it here instead, with mscoree/mshtml off as above: left to the game's
+# launch, the update stops at the Wine Mono and Gecko install dialogs.
+stamp=$(cat "$WINEPREFIX/.update-timestamp" 2>/dev/null)
+if [ "$stamp" != disable ] && [ "$stamp" != "$(stat -f %m "$ROOT/dist/share/wine/wine.inf" 2>/dev/null)" ]; then
+    echo "updating prefix $WINEPREFIX for a new Wine build" >> "$log"
+    WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$wine" wineboot --update >> "$log" 2>&1
+fi
+
 # The profile Steam Cloud expects, as Proton lays it out: users/steamuser, its Documents, Desktop and
 # so on real folders inside the prefix (Wine links a shell folder to the Mac user's only when it
 # doesn't exist yet), and the XP-era paths Steam's Cloud rules still name ("Local Settings/Application

@@ -13,7 +13,11 @@ for one game is checked against the others. All are the **Windows** versions.
 | SpaceEngine | 314650 | x86_64 | OpenGL | custom | OpenGL path |
 | Half-Life | 70 | i386 | OpenGL | GoldSrc | old 32-bit OpenGL |
 
-Later: D3D12 (vkd3d-proton / DXMT D3D12) and Vulkan titles.
+| Teardown | 1167630 | x86_64 | D3D12 | custom | D3D12 through vkd3d-proton on KosmicKrisp |
+| Geometry Dash | 322170 | x86_64 | OpenGL | Cocos2d-x | OpenGL on Apple's OpenGL |
+| Subnautica 2 | 1962700 | x86_64 | D3D12 | Unreal Engine 5 | shader model 6.6, Nanite: what most Unreal Engine 5 games need |
+
+Later: Vulkan titles.
 
 Out of scope for now: games with kernel or EAC/BattlEye anti-cheat, and games that require
 third-party launchers (EA app, Rockstar launcher).
@@ -42,4 +46,6 @@ Manual launches (`scripts/play`) have no Steam client serving them, so run them 
 | Ultimate Custom Night | **Runs well**: 60 fps (the game's fixed rate) on the menu, nights mostly 60 | 32-bit D3D9 (Clickteam), mtld3d. Fixed: quarter-size frame (Wine 0014), crash on GO (4GB address space, Wine 0015), 12 -> 60 fps (mtld3d 0001 system-memory draws, 0002 `DebugSetMute`). Some 20-33 ms stretches in nights still to look at. See docs/findings.md #16-#19. |
 | Among Us | **Runs**, menu and local lobby render and play smoothly | 64-bit Unity (IL2CPP), D3D11 through DXMT on the first try; ~1.5 GB. Its vsync setting works (DXMT 0001). Installed and launched from Mac Steam through Hadron's Steam Play integration, online sign-in works (docs/findings.md #21). |
 | Portal 2 | **Plays fully** from Mac Steam through Hadron | D3D9 (Source), mtld3d. With an external display, games open on the main (menu-bar) display, and moving a running game between displays is unreliable. |
-| Teardown | **Doesn't start** | Tries D3D12 (no adapter: no Vulkan driver on Metal yet), falls back to OpenGL and rejects Apple's OpenGL 4.1 (needs 4.3+ features). Needs the Vulkan-on-Metal foundation: vkd3d-proton for D3D12 or Zink for OpenGL 4.6. |
+| Teardown | **Runs** | D3D12 through vkd3d-proton on KosmicKrisp, at feature level 12_0 with no overrides (docs/findings.md #22). The first launch after a driver change is slow while pipelines compile. Frame rate is held back by CPU translation; open. |
+| Geometry Dash | **Runs** | OpenGL through Wine on Apple's OpenGL. Signing in to a Geometry Dash account crashes; open. |
+| Subnautica 2 | **Doesn't start** | Unreal Engine 5 requires its SM6 tier: shader model 6.6 and 64-bit atomics on typed resources. vkd3d-proton reports shader model 6.0 on KosmicKrisp, which lacks denormal float controls, compute shader derivatives and 64-bit atomics. Fixed on the way: the Visual C++ runtime check (Wine 0019), SSE4.2 reported to x86 code (Wine 0020), D3D12 through vkd3d-proton for every game. |
