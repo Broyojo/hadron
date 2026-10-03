@@ -68,6 +68,12 @@ numbers are from the second run, which already had four of the fixes. In ES 3.1,
 once and pass when run again, different ones each run and mostly `copy_image`; that is counted
 as open, not as passing (see below).
 
+Again on 2026-10-03, with the fixes through 0071: OpenGL ES 3.1 (dEQP), 37,653 tests: 35,076
+pass, 2 fail (the depth-compare border colours), no crash, no test that needed a second try, 2,575
+skipped. OpenGL 4.6 (Khronos), 19,714 tests: 15,296 pass, 6 fail (open items 4 to 7), 3 that
+passed on a second try, 1 warning, 4,408 skipped. Results in `build/cts-results/gles31-r9` and
+`gl46-r9` (the 16-bit depth clear, 0072, was checked on its own after them).
+
 Vulkan on KosmicKrisp, full must-pass list, 2026-10-02 (2 hours 40 minutes at 6 jobs, with all
 the fixes below): 3,247,552 tests, 647,905 pass, 2,599,079 skipped, 348 fail, 109 crash, 1 timeout,
 6 warnings, and 104 that failed once and passed on a second try. Results in
@@ -132,6 +138,7 @@ All are Mesa patches in `patches/mesa`.
 | 0069 | NIR's `atan2` builds `y/x` as a scaled reciprocal so huge operands do not overflow. Fast math reassociated the scaling away and the quotient underflowed to 0 for `x` far larger than `y`. The two operations are now marked exact. | `glsl.builtin.precision.atan2.highp` (4); all 544 builtin precision tests pass |
 | 0070 | A Metal bug (`tools/metal-probes/indirect-threads.m`): a compute pipeline built with `maxTotalThreadsPerThreadgroup` and dispatched with `dispatchThreadsWithIndirectBuffer` computes wrong values in most threads once the kernel holds enough values live, while the same dispatch made directly is right. The emulation passes whose thread counts come from the GPU (vertex or evaluation shader before a geometry shader, the geometry shader's count and main passes, the stages before tessellation in indirect draws) are dispatched that way with a limit of 64. They are now built with Metal's default limit, which was right in every case tried. Found as zero positions from the evaluation shader before a geometry shader in `clipping.user_defined.*.vert_tess_geom`; dumps from inside the driver showed right inputs and wrong results, and the standalone reproduction needed the pipeline built exactly as the driver builds it. | `clipping.user_defined.*.vert_tess_geom` (10), ES 3.1 `per_patch_block_array` (9) and `tessellation_geometry_interaction` passthrough and limits (4), OpenGL 4.6 `gpu_shader_fp64.fp64.varyings` and `.max_uniform_components` (which also never finished) and `geometry_shader.primitive_counter.*_to_points_rp` (3), Vulkan `tessellation.geometry_interaction.limits.output_required_max_geometry` (timeout). The Vulkan tessellation, geometry, clipping and transform feedback lists pass in full (6,955 tests). |
 | 0071 | Zink gives stages where the Vulkan driver has no subgroup operations (on KosmicKrisp: vertex, tessellation and geometry) subgroups of one invocation, but lowered only the size, votes and masks; `ballotARB`, `readInvocationARB`, `readFirstInvocationARB`, shuffles, reductions and `gl_SubGroupInvocationARB` stayed real SIMD operations in a stage Vulkan does not allow them in, disagreeing with the size of 1 the shader saw. All of them are now lowered for one invocation. | `shader_ballot_tests` (3 per OpenGL 4.3+ suite) |
+| 0072 | Metal truncates a 16-bit depth clear value instead of rounding it (`tools/metal-probes/depth16-clear.m`: 1/65535 stores 0, and half of all values store one less). Vulkan asks for rounding to nearest; the driver now clears to the rounded value plus a quarter step, which Metal stores exactly. | OpenGL 4.6 `clear_tex_image` on a 16-bit depth texture |
 
 0041, 0052, 0053, 0055, 0062 and 0071 are in Zink, 0058 in the geometry shader emulation shared with other Mesa drivers and 0069 in NIR. The rest are in the Vulkan driver, so they are not specific
 to OpenGL: they can equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
@@ -166,13 +173,16 @@ Ordered by how much they matter.
    components into a fragment shader (`tools/metal-probes/varyings.m`), so the driver reports 124
    (0059) and Zink passes that on as `GL_MAX_FRAGMENT_INPUT_COMPONENTS`, under OpenGL 4.6's
    minimum of 128.
-5. **Side effects in geometry shaders that also need a count pass.** The geometry shader
-   emulation runs the shader twice when its output counts are not known statically: a count pass
-   with all side effects, then the main pass with stores and unused atomics stripped. An atomic
-   whose result the shader uses stays in both and happens twice
-   (`shader_atomic_counters.basic-usage-gs`, `geometry_shader.api.max_shader_storage_blocks` in
-   OpenGL 4.6 and ES 3.1). The main pass needs the count pass's atomic results instead, through a
-   buffer.
+5. **Side effects in geometry shaders run more than once.** The geometry shader emulation runs
+   the shader in up to three places: a count pass when output counts are not known statically,
+   the main pass that builds the index buffer, and the rasterization vertex shader, which runs the
+   whole shader again for each output vertex to pick that vertex's outputs. The main pass drops
+   stores and atomics whose results are unused; the count pass and the rasterization shader keep
+   every side effect. Stores repeat with the same values, but an atomic happens once per pass and
+   once per output vertex (`shader_atomic_counters.basic-usage-gs`,
+   `geometry_shader.api.max_shader_storage_blocks` in OpenGL 4.6 and ES 3.1). Correct behaviour
+   needs one pass that runs the shader once per invocation with its side effects and writes every
+   emitted vertex to memory, with the rasterization shader reading those vertices back.
 6. **Cube map arrays sampled in compute kernels** (`texture_cube_map_array.sampling`, 416 of 720
    cases): every stage that runs as a Metal compute kernel (compute, geometry and tessellation
    control shaders, and a vertex shader before an added geometry stage) reads level 0's texels at
@@ -183,14 +193,15 @@ Ordered by how much they matter.
    array view of a 2D array texture with all levels; a standalone Metal program with the same view
    (`texturecube_array`, 2D array base, swizzle, usage read/write/render target) samples every level
    right from a compute kernel. Device visibility on every barrier and device instead of constant
-   descriptor loads do not change it. Not understood yet.
-7. Small ones: `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a few
-   units off: Apple GPUs blend mip levels with 6-bit weights, `tools/metal-probes/filter-precision.m`;
-   meeting the test would mean filtering between levels in the shader), `gpu_shader5` gather with offsets (2),
-   `clear_tex_image` on a 16-bit depth texture level 4, `framebuffers_texture_layer_attachment`,
-   ES 3.1 `fbo.color.texcubearray.rg8ui` and `shaders.linkage...tessellation_geometry.varying.types.mat4`,
-   the ES 3.1 depth-compare border colours (custom border colours are not applied to shadow
-   samplers), `fbo.no_attachments` timeout.
+   descriptor loads do not change it. A small OpenGL program on Zink that samples every level of
+   2D, 2D array, cube and cube array textures from a compute shader (`textureLod` and `texelFetch`,
+   mutable and immutable storage, per-face uploads, after a fragment draw with the texture) reads
+   every level right, so compute sampling is not broken in general; what the test does
+   differently is not found yet.
+7. Small ones: `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a
+   few units off: Apple GPUs blend mip levels with 6-bit weights, `tools/metal-probes/filter-precision.m`;
+   meeting the test would mean filtering between levels in the shader), and the ES 3.1
+   depth-compare border colours (custom border colours are not applied to shadow samplers).
 8. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
 
 ## What the first day showed

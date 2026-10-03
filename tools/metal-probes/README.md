@@ -58,6 +58,10 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   64 floats live are right too). The same pipeline dispatched directly, or with
   `dispatchThreadgroupsWithIndirectBuffer`, is right, and so is one left at the default limit. Why
   the driver leaves the limit unset for its emulation passes
+- `depth16-clear.m`: a render pass that clears a `Depth16Unorm` texture to n/65535 stores n - 1 for
+  half of all n: Metal truncates the clear value where Vulkan asks for rounding to nearest (32,895
+  of 65,536 values wrong). A depth written by rasterization rounds. `BIAS=0.25` shows the fix the
+  driver uses: clear to (round(d * 65535) + 0.25) / 65535
 - `sparse-bc-tail.m`: block-compressed placement-sparse textures with full mip chains, every level
   written and read back for every size in a grid (`FMT=BC1|BC7|ETC2|EAC|ASTC`): for some sizes two
   levels of the mip tail share memory (39 of 1,225 sizes for BC1, BC7, ETC2 and EAC; a 51x65 BC1
