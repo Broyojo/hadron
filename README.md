@@ -28,8 +28,9 @@ are no binary releases: you build it from source.
 
 Fixes go into these shared layers, never into per-game hacks, and the graphics drivers only
 report features they really implement. [docs/architecture.md](docs/architecture.md) covers the
-macOS constraints behind the design, and [docs/findings.md](docs/findings.md) is the log of what
-was measured and fixed along the way.
+macOS constraints behind the design, [docs/findings.md](docs/findings.md) is the log of what
+was measured and fixed along the way, and [docs/conformance.md](docs/conformance.md) has the
+results of the Khronos conformance suites on the graphics drivers.
 
 ## Status
 
@@ -106,7 +107,7 @@ scripts/              build, install and launch scripts
 launcher/             hadron-steam.exe, the stand-in for Steam's Windows process
 config/games.conf     per-game settings
 tools/                test programs, Metal probes and benchmarks behind docs/findings.md
-docs/                 architecture, findings, roadmap, test games, Apple developer setup
+docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup
 src/ build/ dist/     checkouts, build trees and the installed runtime (git-ignored)
 ```
 
