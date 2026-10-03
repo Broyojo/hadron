@@ -76,7 +76,7 @@ the fixes below): 3,247,552 tests, 647,905 pass, 2,599,079 skipped, 348 fail, 10
 | Group | Count | What it is |
 |---|---|---|
 | `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 7): 57 remain. |
-| `texture.swizzle`, `texture.compressed` | 134 fail | All are sparse textures with sizes that are not powers of two, compressed formats. |
+| `texture.swizzle`, `texture.compressed` | 134 fail | A Metal bug: in a sparse texture of a block-compressed format, Metal's mip tail places two levels on the same memory for some sizes (39 of 1,225 sizes from 4x4 to 140x140 for BC1, BC7, ETC2 and EAC, mostly where a level is 17 or 33 blocks across; power-of-two sizes from 8x8 up are fine, 4x4 is not). Uncompressed formats are clean (0 of 2,209 sizes). Reproduced without the driver by `tools/metal-probes/sparse-bc-tail.m`. 0051 keeps compressed formats out of sparse images: these tests are now unsupported, 54 `image_format_properties` tests for compressed formats fail instead, and 1,486 sparse tests on compressed formats that passed are skipped. |
 | `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 8. |
 | `glsl.440.linkage.varying.component.frag_out` | 22 crash | `nir_lower_blend` expects one store per colour output; outputs written per component broke it. Fixed by 0050. |
 | `spirv_assembly...opfma.fp32...denorm_preserve` | 16 fail | The emulated `fma` for denormal operands rounded twice. Fixed by 0046. |
@@ -111,6 +111,7 @@ All are Mesa patches in `patches/mesa`.
 | 0048 | 64-bit atomic loads and stores on shared memory and images were not serialised with the locked read-modify-write operations; image locks hashed an undefined coordinate for 1D images; a lock timeout entered the critical section without the lock. A timeout now loses the device instead of corrupting memory. | Found by the review of #13 |
 | 0049 | Sparse binding on 1D, multisampled and depth/stencil images (see the table above). | 173 `image_format_properties` tests minus the 57 3D ones |
 | 0050 | Colour outputs written per component are gathered into one store before blend lowering. | 22 crashes |
+| 0051 | Block-compressed formats no longer take part in sparse images, because of the Metal mip tail bug above. Direct3D 12 games that use tiled BC textures see them reported as unsupported; a workaround would have to avoid Metal's tail layout for those formats. | 134 texture tests: unsupported instead of wrong |
 
 All but 0041 are in the Vulkan driver, not in Zink, so they are not specific to OpenGL: they can
 equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
@@ -169,13 +170,18 @@ Ordered by how much they matter.
 8. **Failures that pass on a second try, and lost devices under load.** 13 per ES 3.1 run, 2 in
    the last OpenGL 3.3 run (`pixelstoragemodes.compressedteximage3d`), and the Vulkan memory model
    tests, whose command buffers Metal ends with a timeout when six test processes share the GPU.
-   Next step: run those groups with one test process to separate load from driver bugs. Six test processes share the GPU during a run, so this may be a race
+   With one test process the Vulkan memory model tests have 2 crashes and 8 retries instead of
+   133 to 163 crashes with six: load, not the driver, apart from those two. The stencil failures
+   of the full run (`depth_stencil_write_conditions...d32sf_s8ui` and others) pass when run alone. Six test processes share the GPU during a run, so this may be a race
    or memory pressure in the driver. Not looked into.
-9. Small ones: `texture_lod_bias` (one combination of sampler and shader bias out of many),
+9. **Clip and cull distances through tessellation and geometry together** (10 Vulkan tests,
+   mostly dynamically indexed arrays): the same counts pass through vertex, vertex+tessellation
+   and vertex+geometry.
+10. Small ones: `texture_lod_bias` (one combination of sampler and shader bias out of many),
    `pipeline_statistics_query` vertices submitted (a restart index is counted as a vertex), ES 3.1
    `shaders.builtin_constants` and `layout_binding.sampler` crashes, `fbo.no_attachments` timeout,
    geometry shader primitive counters, `gpu_shader5` gather with offsets.
-10. Warnings from Zink at start: no `VK_EXT_custom_border_color` (3 above) and no `rectangularLines`
+11. Warnings from Zink at start: no `VK_EXT_custom_border_color` (3 above) and no `rectangularLines`
    (wide lines are drawn as parallelograms).
 
 ## What the first day showed

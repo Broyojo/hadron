@@ -38,3 +38,7 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   tail). Mapped in one operation from consecutive heap pages it reads back right; mapped one page
   per operation it does not: tail position n covers several pages (here 4, 4 and 2), so the
   page-sized operations overlap. Why sparse binding stays off for 3D images
+- `sparse-bc-tail.m`: block-compressed placement-sparse textures with full mip chains, every level
+  written and read back for every size in a grid (`FMT=BC1|BC7|ETC2|EAC|ASTC`): for some sizes two
+  levels of the mip tail share memory (39 of 1,225 sizes for BC1, BC7, ETC2 and EAC; a 51x65 BC1
+  texture loses its last level-0 block to level 3). Uncompressed formats do not show it
