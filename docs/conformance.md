@@ -138,11 +138,14 @@ Ordered by how much they matter.
 1. **Sparse 3D images.** Vulkan lets an application bind the mip tail of a sparse image page by
    page, from different memory. Metal maps the tail of a 3D texture in units of several pages
    that its API does not describe (4, 4 and 2 pages for a 1024x128x8 RGBA8 texture, one unit of
-   64 pages for 256x256x256), and the tail can take more heap pages than `tailSizeInBytes` says:
-   an R8 1024x128x8 texture reports 20 pages and writes to 23 (`tools/metal-probes/sparse-3d-units.m`).
-   Mapping the whole tail in one operation from consecutive pages reads back right for every shape
-   and format tried, but a tail bound in pieces from scattered memory cannot be mapped exactly,
-   and the real tail size would have to be measured. Sparse binding stays off for 3D images; the
+   64 pages for 256x256x256). Mapping the whole tail in one operation from consecutive pages reads
+   back right, but for 6 of 30 shapes and formats tried it writes past the size `tailSizeInBytes`
+   reports, into whatever memory follows: RGBA8 1024x128x8 (10 pages reported, page 10 written),
+   2048x64x4 (37, page 40), 1000x10x3 (4, page 4); R8 1024x128x8 (20, page 22), 2048x64x4 (10,
+   page 10); RGBA32 1000x10x3 (14, page 15). All are textures with few slices
+   (`tools/metal-probes/sparse-3d-units.m`). A Metal bug like the block-compressed tail overlap;
+   with it no tail size from the API is safe, and a tail bound in pieces from scattered memory
+   could not be mapped exactly anyway. Sparse binding stays off for 3D images; the
    57 `image_format_properties.3d` failures stay with it. Zink no longer exposes
    `ARB_sparse_texture` (or `_texture2`, `_clamp`) without sparse 3D images (0062), so OpenGL loses
    sparse textures until this is solved.
