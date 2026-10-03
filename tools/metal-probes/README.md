@@ -51,6 +51,13 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   `BPP16=1` change the format). Positions cover different numbers of pages (4, 4 and 2 for a
   1024x128x8 RGBA8 texture; one position covers all 64 pages of 256x256x256), and the tail can
   use more heap pages than `tailSizeInBytes` (R8 1024x128x8: 20 reported, pages up to 22 written)
+- `indirect-threads.m`: a compute pipeline from `MTL4Compiler` with `maxTotalThreadsPerThreadgroup`
+  set, dispatched with `dispatchThreadsWithIndirectBuffer`, computes wrong values in most threads
+  (36 to 43 of 48 for a kernel holding 32 floats live, against a CPU reference, with limits from
+  16 to 128; with a limit and groups of 8 threads or fewer it is right, and kernels holding 8 or
+  64 floats live are right too). The same pipeline dispatched directly, or with
+  `dispatchThreadgroupsWithIndirectBuffer`, is right, and so is one left at the default limit. Why
+  the driver leaves the limit unset for its emulation passes
 - `sparse-bc-tail.m`: block-compressed placement-sparse textures with full mip chains, every level
   written and read back for every size in a grid (`FMT=BC1|BC7|ETC2|EAC|ASTC`): for some sizes two
   levels of the mip tail share memory (39 of 1,225 sizes for BC1, BC7, ETC2 and EAC; a 51x65 BC1

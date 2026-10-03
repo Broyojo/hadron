@@ -77,15 +77,15 @@ the fixes below): 3,247,552 tests, 647,905 pass, 2,599,079 skipped, 348 fail, 10
 |---|---|---|
 | `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 1): 57 remain. |
 | `texture.swizzle`, `texture.compressed` | 134 fail | A Metal bug: in a sparse texture of a block-compressed format, Metal's mip tail places two levels on the same memory for some sizes (39 of 1,225 sizes from 4x4 to 140x140 for BC1, BC7, ETC2 and EAC, mostly where a level is 17 or 33 blocks across; power-of-two sizes from 8x8 up are fine, 4x4 is not). Uncompressed formats are clean (0 of 2,209 sizes). Reproduced without the driver by `tools/metal-probes/sparse-bc-tail.m`. 0051 keeps compressed formats out of sparse images: these tests are now unsupported, 54 `image_format_properties` tests for compressed formats fail instead, and 1,486 sparse tests on compressed formats that passed are skipped. |
-| `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 5. |
+| `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 4. |
 | `glsl.440.linkage.varying.component.frag_out` | 22 crash | `nir_lower_blend` expects one store per colour output; outputs written per component broke it. Fixed by 0050. |
 | `spirv_assembly...opfma.fp32...denorm_preserve` | 16 fail | The emulated `fma` for denormal operands rounded twice. Fixed by 0046. |
-| `clipping.user_defined` through tessellation and geometry | 10 fail | The evaluation shader's compute pass computes wrong positions and colours for some vertices when a geometry shader follows; open item 3. |
+| `clipping.user_defined` through tessellation and geometry | 10 fail | The evaluation shader's compute pass computed wrong positions and colours for some vertices when a geometry shader followed: a Metal bug in indirect thread dispatch. Fixed by 0070. |
 | `dgc.ext` | 6 crash (SIGSEGV) | Device-generated commands, an experimental feature. |
 | Stencil: `multisample.std_sample_locations...stencil`, `depth_stencil_write_conditions...d32sf_s8ui`, `transient_attachment_bit.stencil_load_store_op_test_local_bit` | 10 fail | Stencil kept across render passes or written with discards, on the combined depth/stencil format. Fixed by 0068. |
 | `glsl.builtin.precision.atan2.highp` | 4 fail | `atan(y, x)` with `x` far larger than `y` returns 0 where a tiny value is expected. Fixed by 0069. |
 | `spirv_assembly...float16...tessc` | 2 crash | 16-bit floats in a tessellation control shader. |
-| `tessellation.geometry_interaction.limits.output_required_max_geometry` | 1 timeout | |
+| `tessellation.geometry_interaction.limits.output_required_max_geometry` | 1 timeout | Passes with 0070. |
 
 The skipped tests are features the driver does not report: shader objects and graphics pipeline
 libraries, ray tracing, variable rate shading, mesh shaders, the primitives generated query,
@@ -130,8 +130,9 @@ All are Mesa patches in `patches/mesa`.
 | 0067 | `mipmapPrecisionBits` was 8; Apple GPUs blend mip levels with 6-bit weights (`tools/metal-probes/filter-precision.m`). | none: reporting what the hardware does |
 | 0068 | A depth/stencil image whose depth view needs a format change (the stencil plane of `D32_SFLOAT_S8_UINT` is viewed as `X32_S8`) was rendered through a separate view texture. Attachments now always render into the image's own texture, so stencil written in one render pass is there in the next. | `transient_attachment_bit.stencil_load_store_op_test_local_bit` and the other stencil tests in the table above |
 | 0069 | NIR's `atan2` builds `y/x` as a scaled reciprocal so huge operands do not overflow. Fast math reassociated the scaling away and the quotient underflowed to 0 for `x` far larger than `y`. The two operations are now marked exact. | `glsl.builtin.precision.atan2.highp` (4); all 544 builtin precision tests pass |
+| 0070 | A Metal bug (`tools/metal-probes/indirect-threads.m`): a compute pipeline built with `maxTotalThreadsPerThreadgroup` and dispatched with `dispatchThreadsWithIndirectBuffer` computes wrong values in most threads once the kernel holds enough values live, while the same dispatch made directly is right. The emulation passes whose thread counts come from the GPU (vertex or evaluation shader before a geometry shader, the geometry shader's count and main passes, the stages before tessellation in indirect draws) are dispatched that way with a limit of 64. They are now built with Metal's default limit, which was right in every case tried. Found as zero positions from the evaluation shader before a geometry shader in `clipping.user_defined.*.vert_tess_geom`; dumps from inside the driver showed right inputs and wrong results, and the standalone reproduction needed the pipeline built exactly as the driver builds it. | `clipping.user_defined.*.vert_tess_geom` (10), ES 3.1 `per_patch_block_array` (9) and `tessellation_geometry_interaction` passthrough and limits (4), OpenGL 4.6 `gpu_shader_fp64.fp64.varyings` and `geometry_shader.primitive_counter.*_to_points_rp` (3), Vulkan `tessellation.geometry_interaction.limits.output_required_max_geometry` (timeout). The Vulkan tessellation, geometry, clipping and transform feedback lists pass in full (6,955 tests). |
 
-0041, 0052, 0053, 0055 and 0062 are in Zink and 0058 in the geometry shader emulation shared with other Mesa drivers. The rest are in the Vulkan driver, so they are not specific
+0041, 0052, 0053, 0055 and 0062 are in Zink, 0058 in the geometry shader emulation shared with other Mesa drivers and 0069 in NIR. The rest are in the Vulkan driver, so they are not specific
 to OpenGL: they can equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
 
 ## Open failures, by cause
@@ -152,68 +153,39 @@ Ordered by how much they matter.
    57 `image_format_properties.3d` failures stay with it. Zink no longer exposes
    `ARB_sparse_texture` (or `_texture2`, `_clamp`) without sparse 3D images (0062), so OpenGL loses
    sparse textures until this is solved.
-2. **Doubles in geometry and tessellation evaluation shaders.** `gpu_shader_fp64.fp64.varyings`
-   fails for every set of double varyings passed through a geometry shader (through vertex and
-   tessellation stages they pass), and `fp64.max_uniform_components` gets wrong transform feedback
-   from a tessellation evaluation shader with large double uniform arrays and then never finishes:
-   the last command buffer runs for minutes with no error from Metal.
-3. **The tessellation evaluation shader before a geometry shader computes wrong values in some
-   lanes.** With a geometry shader the evaluation shader runs as a compute kernel that writes its
-   outputs to memory. In `clipping.user_defined.*.vert_tess_geom` (10 Vulkan tests, 6 to 8 clip
-   and cull distances) that kernel writes a zero position and zero colours for some vertices:
-   from the 12th vertex on, every third one (those at tessellation coordinate (0,0)). Dumps from
-   inside the driver show its inputs are right when it starts (control shader outputs,
-   tessellator coordinates and indices, parameters) and its stores land; the values it computes
-   are wrong. It depends on how many threads share a threadgroup: with 1, 2 or 4 all 10 tests
-   pass, with 8 one fails, with 32 or 64 (the driver's) all fail. Any change to the code moves
-   the wrong lanes: an extra debug store, safe instead of fast math, `volatile` loads, device
-   instead of constant loads, or branch-free vertex selection. The same Metal source, compiled
-   the same way (`MTL4Compiler`, MSL 4.1, fast math) and run on the same input data in a
-   standalone program, was right in every run but one, through direct and indirect dispatch,
-   Metal 4 and classic queues, and with other kernels before it or alongside. A different
-   compiler instance, Device visibility on every barrier, and a separate encoder before the
-   kernel do not help. The kernel has no threadgroup memory, SIMD operations or atomics, and the
-   Metal compiler reports no use of uninitialized values. Not understood: what the driver's run has
-   that the standalone run lacks is still unknown. Probably the same bug: splitting this kernel's
-   output stores per component (same addresses, same bytes) changes ES 3.1
-   `tessellation_geometry_interaction.render.passthrough` (2) and `.limits` (2) from passing to
-   failing, through Zink, which splits them.
-4. **Mediump matrix inverse in a vertex shader** (`shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex`):
+2. **Large double uniform arrays in a tessellation evaluation shader** (`gpu_shader_fp64.fp64.max_uniform_components`):
+   wrong transform feedback, then the last command buffer runs for minutes with no error from
+   Metal. (`fp64.varyings`, which failed for doubles through a geometry shader, was 0070.)
+3. **Mediump matrix inverse in a vertex shader** (`shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex`):
    wrong by far more than 16-bit precision explains, the same shader as a fragment shader passes.
-5. **Failures that pass on a second try, and lost devices under load.** About a dozen per ES 3.1
+4. **Failures that pass on a second try, and lost devices under load.** About a dozen per ES 3.1
    run, and the Vulkan memory model tests, whose command buffers Metal ends with a timeout when
    six test processes share the GPU. With one test process the memory model tests have 2 crashes
    and 8 retries instead of 133 to 163 crashes with six. Several ES 3.1 crashes
    (`layout_binding.sampler`, a `copy_image` cube map case) and tessellation tests pass when run
    alone.
-6. **Fragment inputs: 124 components, OpenGL 4.6 asks for 128.** Metal takes 124 user varying
+5. **Fragment inputs: 124 components, OpenGL 4.6 asks for 128.** Metal takes 124 user varying
    components into a fragment shader (`tools/metal-probes/varyings.m`), so the driver reports 124
    (0059) and Zink passes that on as `GL_MAX_FRAGMENT_INPUT_COMPONENTS`, under OpenGL 4.6's
    minimum of 128.
-7. **Geometry shader output points with primitive restart** (`geometry_shader.primitive_counter.*_to_points_rp`,
-   2-3): with restart and a custom restart index, transform feedback of a geometry shader that
-   emits points misses values; strips pass, and points without restart pass.
-8. **Side effects in geometry shaders that also need a count pass.** The geometry shader
+6. **Side effects in geometry shaders that also need a count pass.** The geometry shader
    emulation runs the shader twice when its output counts are not known statically: a count pass
    with all side effects, then the main pass with stores and unused atomics stripped. An atomic
    whose result the shader uses stays in both and happens twice
    (`shader_atomic_counters.basic-usage-gs`, `geometry_shader.api.max_shader_storage_blocks` in
    OpenGL 4.6 and ES 3.1). The main pass needs the count pass's atomic results instead, through a
    buffer.
-9. **Per-patch output block arrays** between tessellation control and evaluation (ES 3.1
-   `tessellation.user_defined_io.per_patch_block_array`, 9): the evaluation shader reads the wrong
-   value for the first element.
-10. **Cube map arrays sampled outside fragment shaders** (`texture_cube_map_array.sampling`):
+7. **Cube map arrays sampled outside fragment shaders** (`texture_cube_map_array.sampling`):
    `textureLod`, `textureGrad` and `textureGather` in vertex, tessellation, geometry and compute
    shaders, on a 3x3 grid of coordinates per face that includes face edges and corners.
-11. Small ones: `shader_ballot` (3, not narrowed to a stage yet), `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a few
+8. Small ones: `shader_ballot` (3, not narrowed to a stage yet), `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a few
    units off: Apple GPUs blend mip levels with 6-bit weights, `tools/metal-probes/filter-precision.m`;
    meeting the test would mean filtering between levels in the shader), `gpu_shader5` gather with offsets (2),
    `clear_tex_image` on a 16-bit depth texture level 4, `framebuffers_texture_layer_attachment`,
    ES 3.1 `fbo.color.texcubearray.rg8ui` and `shaders.linkage...tessellation_geometry.varying.types.mat4`,
    the ES 3.1 depth-compare border colours (custom border colours are not applied to shadow
    samplers), `fbo.no_attachments` timeout.
-12. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
+9. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
 
 ## What the first day showed
 
