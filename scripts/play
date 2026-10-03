@@ -124,6 +124,9 @@ done
 # Paths may contain spaces (Steam runs this through ~/Library/Application Support), so these go
 # through the argument list too rather than as unquoted expansions below.
 [ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "MESA_KK_EXPERIMENTAL=${MESA_KK_EXPERIMENTAL:-dgc,xfb,sparse}" "$@"
+# A shader Metal refuses to compile is a driver bug: KosmicKrisp saves its source here.
+mkdir -p "$ROOT/build/logs/failed-msl"
+set -- "MESA_KK_FAILED_MSL_DIR=$ROOT/build/logs/failed-msl" "$@"
 [ -n "$vkd3d_cache" ] && set -- "VKD3D_SHADER_CACHE_PATH=$vkd3d_cache" "$@"
 
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
