@@ -35,7 +35,9 @@ build_mesa() {
 # Zink, Mesa's OpenGL on Vulkan, with EGL, for KosmicKrisp: dist/mesa-zink/lib/libEGL.1.dylib,
 # which Wine's Mac driver uses for OpenGL (scripts/play). Build it before
 # Wine, whose configure looks for EGL there. Zink's macOS build wants MoltenVK's headers (it has
-# code for MoltenVK, unused here) and loads the Vulkan loader.
+# code for MoltenVK, unused here) and loads the Vulkan loader. LLVM is on the build's path for
+# KosmicKrisp's build tools; Mesa's software vertex stage would otherwise take its JIT from it and
+# make the OpenGL library need a 144 MB LLVM at run time, for legacy paths that work without.
 build_zink() {
     local venv="$BUILD/venv-mesa"
     [[ -x "$venv/bin/python" ]] || die "missing $venv, run scripts/build-vulkan.sh mesa first"
@@ -50,7 +52,8 @@ build_zink() {
             meson setup "$BUILD/mesa-zink" "$SRC/mesa" --buildtype=debugoptimized \
             --prefix="$DIST/mesa-zink" -Dplatforms=macos -Dvulkan-drivers=kosmickrisp \
             -Dgallium-drivers=zink -Dopengl=true -Degl=enabled -Dgles2=enabled -Dglx=disabled \
-            -Dzstd=disabled -Dmoltenvk-dir="$BREW/opt/molten-vk" -Dvulkan-loader-rpath="$BREW/lib" >/dev/null
+            -Dzstd=disabled -Ddraw-use-llvm=false -Dmoltenvk-dir="$BREW/opt/molten-vk" \
+            -Dvulkan-loader-rpath="$BREW/lib" >/dev/null
     fi
     log "building Zink"
     PATH="$path" ninja -C "$BUILD/mesa-zink" install >/dev/null

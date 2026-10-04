@@ -1,12 +1,58 @@
-# Hadron
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/hadron-dark.svg">
+    <img alt="Hadron" src="docs/hadron-light.svg" width="420">
+  </picture>
+</h1>
 
-An open-source, Proton-style compatibility tool for Apple Silicon Macs: install and play
-Windows games from the Steam library of the native Mac Steam client. Nothing runs under
-Rosetta. Wine is built natively for arm64, FEX translates the game's x86 code, and Direct3D
-and Vulkan are translated to Metal.
+An open-source way to play Windows games on Apple Silicon Macs: install and play them from the
+Steam library of the native Mac Steam client. It is to the Mac what Proton is to Linux, and an
+open-source alternative to CrossOver for Steam games. Nothing runs under Rosetta: Wine is built
+natively for arm64, FEX translates the game's x86 code, and Direct3D, Vulkan and OpenGL are
+translated to Metal.
 
-Hadron is in early development. A handful of games play well, many don't start yet, and there
-are no binary releases: you build it from source.
+Hadron is in early development. A handful of games play well and many don't start yet;
+[docs/test-games.md](docs/test-games.md) says which.
+
+## Install
+
+> The first release is not out yet. Until it is, the Homebrew and download instructions below
+> do not work, and Hadron has to be [built from source](#building).
+
+You need an Apple Silicon Mac with macOS 27 and [Steam for Mac](https://store.steampowered.com/about/).
+
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask broyojo/hadron/hadron
+```
+
+Or download `Hadron.dmg` from the [latest release](https://github.com/Broyojo/hadron/releases/latest)
+and drag Hadron to Applications.
+
+Then open Hadron once and choose **Set up Steam**, or run `hadron setup`. That adds Hadron to
+Steam as a Steam Play tool (and `hadron uninstall` takes it out again). After that Hadron does
+not need to be open: install and play Windows games from your Steam library as usual. A game
+that also has a Mac version needs Properties -> Compatibility -> Hadron to get its Windows build.
+
+To build it yourself instead, see [Building](#building).
+
+## Before you try it
+
+- **It is unofficial.** Hadron is not affiliated with or endorsed by Valve, Apple, CodeWeavers or
+  any of the projects it builds on.
+- **It changes Steam.** Setting up adds a library to `/Applications/Steam.app` and signs that app
+  again, which replaces Valve's signature on it. That is how Steam for Mac learns to offer
+  Windows games. `hadron uninstall` takes it out, and reinstalling Steam from Valve restores
+  Valve's signature. A Steam update can undo the setup; open Hadron and choose Repair. Valve has
+  said nothing about tools like this on the Mac either way, so use it at your own risk.
+- **It is early.** A handful of games play well ([Status](#status)). Many do not start yet.
+  Games with kernel-level anti-cheat, which means most competitive multiplayer games, are not
+  expected to work, and neither are games that need a third-party launcher.
+- **First launches are slow.** A game's first start sets up its Windows environment, which
+  takes minutes, and compiles its shaders.
+- **Nothing is sent anywhere.** There is no telemetry. If something breaks, Hadron can save a
+  report file for you to attach to an issue yourself.
 
 ## How it works
 
@@ -40,14 +86,17 @@ results of the Khronos conformance suites on the graphics drivers.
 | Five Nights at Freddy's, Ultimate Custom Night | Direct3D 9 | Run well |
 | Among Us | Direct3D 11 | Runs, online sign-in works |
 | Teardown | Direct3D 12 | Runs; frame rate is held back by CPU translation |
-| Geometry Dash | OpenGL | Runs |
-| Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Being tested: the driver now provides the shader model 6.6 features Unreal requires |
+| Subnautica | Direct3D 11 | Runs well |
+| Geometry Dash | OpenGL | Runs well |
+| Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Does not load yet: Metal's shader compiler gives up on its largest compute shaders |
 
 [docs/test-games.md](docs/test-games.md) has the details and [docs/roadmap.md](docs/roadmap.md)
 the order of work. Not in scope for now: games with kernel-level anti-cheat, and games that need
 a third-party launcher.
 
-## Requirements
+## Building
+
+To build Hadron yourself you need:
 
 - An Apple Silicon Mac with macOS 27. Hadron has only been built and run there.
 - Xcode with its Metal toolchain, and Homebrew.
@@ -57,17 +106,18 @@ a third-party launcher.
   below runs 64-bit programs only.
 - The Mac Steam client, to play games from your library.
 
-## Building
+Then:
 
 ```sh
 scripts/setup-toolchain.sh     # Homebrew dependencies and llvm-mingw
 scripts/fetch.sh               # clone the upstream sources and apply patches/
+scripts/build-ffmpeg.sh        # FFmpeg, decoding only, for Wine's media playback
 scripts/build-wine.sh          # Wine -> dist/
 scripts/build-fex.sh           # FEX's emulator DLLs
 scripts/build-llvm15.sh        # static LLVM 15, for DXMT's shader compiler
 scripts/build-dxmt.sh          # Direct3D 10/11
 scripts/build-mtld3d.sh        # Direct3D 9 (Rust; see the script for the MSVC CRT licence step)
-scripts/build-vulkan.sh        # KosmicKrisp, vkd3d-proton and DXVK's DXGI
+scripts/build-vulkan.sh        # KosmicKrisp, Zink, vkd3d-proton and DXVK's DXGI
 scripts/build-lsteamclient.sh  # the Steam bridge
 scripts/build-launcher.sh      # hadron-steam.exe
 scripts/package-loader.sh <profile.provisionprofile>   # sign the loader with the entitlement
@@ -80,8 +130,9 @@ scripts/build-steam-play.sh    # the Steam Play integration
 scripts/steam-install          # install it into Steam.app (scripts/steam-uninstall undoes it)
 ```
 
-Install and play Windows games from the Steam library as usual. A game that also has a Mac
-version needs Properties -> Compatibility -> Hadron to get its Windows build.
+Steam then runs games straight from this checkout. `scripts/build-app.sh` builds `Hadron.app`
+around a self-contained copy of the runtime (`scripts/package-runtime.sh`), with no reference to
+the checkout or to Homebrew: what a release carries.
 
 ## Running and debugging
 
@@ -104,12 +155,22 @@ low addresses moved above 4GB. It runs 64-bit programs only, through `scripts/wi
 sources.conf          upstream repositories and the revisions Hadron builds
 patches/<component>/  Hadron's changes, as git format-patch queues applied by scripts/fetch.sh
 scripts/              build, install and launch scripts
-launcher/             hadron-steam.exe, the stand-in for Steam's Windows process
+launcher/             hadron-steam.exe, the stand-in for Steam's Windows process, and hadron-icon
+app/                  Hadron.app: the window and the hadron command (scripts/build-app.sh)
+assets/logo/          the logo and the app icon, as drawings
 config/games.conf     per-game settings
 tools/                test programs, Metal probes and benchmarks behind docs/findings.md
 docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup
 src/ build/ dist/     checkouts, build trees and the installed runtime (git-ignored)
 ```
+
+## How it was made
+
+Most of Hadron's code was written with an AI coding assistant, directed and tested by its author;
+the commits say so in their trailers. What it claims rests on tests rather than on who typed it:
+the games in [docs/test-games.md](docs/test-games.md), and the Khronos conformance suites for
+Vulkan and OpenGL, whose results and known gaps are in [docs/conformance.md](docs/conformance.md).
+Patches follow their upstreams' rules on AI-written code ([CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## License
 

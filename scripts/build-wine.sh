@@ -40,13 +40,16 @@ cd "$WINE_BUILD"
 # Configure again when Zink's EGL appears or goes away, so the EGL OpenGL driver follows it.
 egl_state="no Zink"
 [[ -f "$ROOT/dist/mesa-zink/lib/pkgconfig/egl.pc" ]] && egl_state="Zink EGL"
+# The same for Hadron's own FFmpeg (scripts/build-ffmpeg.sh): Wine's media playback links it in
+# place of whatever FFmpeg the system has.
+[[ -f "$ROOT/dist/ffmpeg/lib/pkgconfig/libavcodec.pc" ]] && egl_state+=", own FFmpeg"
 [[ "$(cat .hadron-egl 2>/dev/null)" == "$egl_state" ]] || reconfigure=1
 
 if [[ ! -f Makefile || -n $reconfigure ]]; then
     log "configuring wine ($variant)"
     # Unix side: Apple clang (Objective-C/AppKit for winemac.drv, SDK defaults).
     # PE side: Homebrew clang targeting *-windows, linked with lld-link.
-    PKG_CONFIG_PATH="$BREW/opt/freetype/lib/pkgconfig:$BREW/opt/gnutls/lib/pkgconfig:$ROOT/dist/mesa-zink/lib/pkgconfig" \
+    PKG_CONFIG_PATH="$ROOT/dist/ffmpeg/lib/pkgconfig:$BREW/opt/freetype/lib/pkgconfig:$BREW/opt/gnutls/lib/pkgconfig:$ROOT/dist/mesa-zink/lib/pkgconfig" \
     CPPFLAGS="-I$BREW/include $DEFS" \
     LDFLAGS="-L$BREW/lib" \
     CROSSCFLAGS="-g -O2 $DEFS" \
@@ -60,6 +63,9 @@ if [[ ! -f Makefile || -n $reconfigure ]]; then
         --disable-tests \
         BISON="$BREW/opt/bison/bin/bison"
     echo "$egl_state" > .hadron-egl
+    # make does not notice that a library is now found somewhere else: build the ones that follow
+    # the state above again.
+    rm -f dlls/winedmo/*.o dlls/winedmo/winedmo.so dlls/winemac.drv/*.o dlls/winemac.drv/winemac.so
 fi
 
 log "building wine ($variant) with $JOBS jobs"

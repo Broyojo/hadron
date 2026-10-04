@@ -5,6 +5,15 @@ set -eu
 APP=/Applications/Steam.app
 BACKUP="$HOME/Library/Application Support/Hadron/Steam-Info.plist.before-hadron"
 
+# As in scripts/steam-install: find out that macOS allows the change before touching anything.
+probe="$APP/Contents/MacOS/.hadron-probe.$$"
+if ! : > "$probe" 2>/dev/null; then
+    echo "cannot change $APP: Operation not permitted" >&2
+    echo "Allow it under System Settings, Privacy & Security, App Management, then try again." >&2
+    exit 77
+fi
+rm -f "$probe"
+
 echo "quitting Steam"
 osascript -e 'quit app "Steam"' 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x steam_osx >/dev/null || break; sleep 1; done

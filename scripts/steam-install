@@ -10,12 +10,28 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP=/Applications/Steam.app
-LIB="$ROOT/build/notproton/notproton.dylib"
+. "$ROOT/scripts/paths.sh"
+# A checkout builds the Steam client library and has NotProton's source beside it; an installed
+# runtime carries both in steam/ (scripts/package-runtime.sh).
+if [ -d "$ROOT/build" ]; then
+    LIB="$ROOT/build/notproton/notproton.dylib"
+    SIGNATURES="$ROOT/src/notproton/signatures"
+else
+    LIB="$ROOT/steam/notproton.dylib"
+    SIGNATURES="$ROOT/steam/signatures"
+fi
 SUPPORT="$HOME/Library/Application Support/Hadron"
 BACKUP="$SUPPORT/Steam-Info.plist.before-hadron"
 INSERT="$APP/Contents/MacOS/notproton.dylib"
 
 [ -f "$LIB" ] || { echo "missing $LIB; run scripts/build-steam-play.sh" >&2; exit 1; }
+# Valve's Windows client files are not ours to ship: an installed runtime fetches them from
+# Valve's servers, checked against pinned hashes (a checkout has them from build-steam-play.sh).
+if [ ! -d "$ROOT/build" ] && [ ! -f "$HADRON_VALVE/steamclient64.dll" ]; then
+    echo "fetching Valve's Windows client files"
+    BRIDGE_DIR="$HADRON_VALVE" WORK="$HOME/Library/Caches/Hadron/valve" MANIFEST="$ROOT/steam/valve-packages.manifest" \
+        sh "$ROOT/steam/fetch-valve.sh" --install >/dev/null
+fi
 [ -d "$APP" ] || { echo "Steam isn't installed at $APP" >&2; exit 1; }
 existing=$(/usr/libexec/PlistBuddy -c 'Print :LSEnvironment:DYLD_INSERT_LIBRARIES' "$APP/Contents/Info.plist" 2>/dev/null || true)
 if [ -n "$existing" ] && [ "$existing" != "$INSERT" ]; then
@@ -23,10 +39,21 @@ if [ -n "$existing" ] && [ "$existing" != "$INSERT" ]; then
     exit 1
 fi
 
+# macOS asks the user before one app may change another (App Management) and refuses until they
+# agree. Find that out before anything is touched and before Steam is closed: a refusal must
+# leave Steam exactly as it was.
+probe="$APP/Contents/MacOS/.hadron-probe.$$"
+if ! : > "$probe" 2>/dev/null; then
+    echo "cannot change $APP: Operation not permitted" >&2
+    echo "Allow it under System Settings, Privacy & Security, App Management, then try again." >&2
+    exit 77
+fi
+rm -f "$probe"
+
 mkdir -p "$SUPPORT"
 ln -sfn "$ROOT" "$SUPPORT/runtime"
 mkdir -p "$HOME/Library/Application Support/notproton/signatures/macos.arm64"
-cp -f "$ROOT/src/notproton/signatures/macos.arm64/"*.json "$HOME/Library/Application Support/notproton/signatures/macos.arm64/"
+cp -f "$SIGNATURES/macos.arm64/"*.json "$HOME/Library/Application Support/notproton/signatures/macos.arm64/"
 
 echo "quitting Steam"
 osascript -e 'quit app "Steam"' 2>/dev/null || true
@@ -37,7 +64,9 @@ if pgrep -x steam_osx >/dev/null; then  # didn't quit: force it, never patch a r
     if pgrep -x steam_osx >/dev/null; then echo "Steam is still running; quit it and try again" >&2; exit 1; fi
 fi
 
-cp -f "$LIB" "$INSERT"
+# Beside the old library and renamed over it, so there is never a moment without one.
+cp "$LIB" "$INSERT.new"
+mv -f "$INSERT.new" "$INSERT"
 # A safety copy of Steam's own plist, taken fresh while it doesn't carry our setting (so it follows
 # Steam updates); outside the bundle, as codesign refuses unknown files in Contents/.
 if [ -z "$existing" ]; then

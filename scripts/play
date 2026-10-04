@@ -5,7 +5,7 @@
 # Usage: scripts/play <appid> <path/to/game.exe> [game args...]
 #
 # Only an allowlist of environment variables reaches the game: host secrets never do.
-# HADRON_LOG=1 writes module load addresses and errors to build/logs/ for crash analysis.
+# HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis.
 # FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
 # A watchdog stops the game before memory use can make the Mac thrash; HADRON_MEM_LIMIT_GB
@@ -26,7 +26,8 @@ MAC_STEAM="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Content
 pgrep -q steam_osx || echo "warning: Mac Steam doesn't seem to be running" >&2
 
 winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
-PREFIX="${WINEPREFIX:-$ROOT/prefix/release}"
+. "$ROOT/scripts/paths.sh"
+PREFIX="${WINEPREFIX:-$HADRON_PREFIX}"
 
 # Hadron's own DLLs aren't Wine builtins, so the prefix has no placeholders for them and Wine
 # can't find them by name. Install copies into the system directories (Wine still loads the
@@ -95,17 +96,17 @@ mtld3d_config="${MTLD3D_CONFIG:-color.hdr.enable=false}"
 [ -n "$HADRON_VSYNC" ] && mtld3d_config="$mtld3d_config;present.vsync=$HADRON_VSYNC"
 dxmt_config="$DXMT_CONFIG"
 [ -n "$HADRON_VSYNC" ] && dxmt_config="${dxmt_config:+$dxmt_config;}dxgi.vsync=$HADRON_VSYNC"
-# The watchdog logs memory to build/logs/ and stops the game before it can make the Mac
+# The watchdog logs memory to the logs directory (scripts/paths.sh) and stops the game before it can make the Mac
 # thrash (see scripts/watchdog for the limits). HADRON_WATCHDOG=0 turns it off.
-mkdir -p "$ROOT/build/logs"
+mkdir -p "$HADRON_LOGS"
 if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
-    memlog="$ROOT/build/logs/$appid-$(date +%Y%m%d-%H%M%S).mem.log"
+    memlog="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).mem.log"
     echo "watchdog: memory log in $memlog" >&2
     # $$ is this script's PID, which the exec below hands to Wine.
     nohup "$ROOT/scripts/watchdog" "$memlog" $$ >/dev/null 2>&1 &
 fi
 if [ -n "$HADRON_LOG" ]; then
-    log="$ROOT/build/logs/$appid-$(date +%Y%m%d-%H%M%S).log"
+    log="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).log"
     echo "logging to $log" >&2
     debug="${WINEDEBUG:-err+all,+loaddll}"
     exec > "$log" 2>&1
@@ -170,7 +171,7 @@ done
 [ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "MESA_KK_EXPERIMENTAL=${MESA_KK_EXPERIMENTAL:-dgc,xfb,sparse}" "$@"
 # OpenGL: Wine's Mac driver uses Zink on KosmicKrisp, Mesa's OpenGL on Vulkan, through EGL. Apple's
 # OpenGL stops at 4.1 with no compatibility profile above 2.1, and is not used.
-libpath=/opt/homebrew/lib
+libpath="$HADRON_LIBPATH"
 if [ -f "$ROOT/dist/mesa-zink/lib/libEGL.1.dylib" ] && [ -n "$icd" ]; then
     libpath="$ROOT/dist/mesa-zink/lib:$libpath"
     set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" "$@"
@@ -179,8 +180,8 @@ else
     exit 1
 fi
 # A shader Metal refuses to compile is a driver bug: KosmicKrisp saves its source here.
-mkdir -p "$ROOT/build/logs/failed-msl"
-set -- "MESA_KK_FAILED_MSL_DIR=$ROOT/build/logs/failed-msl" "$@"
+mkdir -p "$HADRON_LOGS/failed-msl"
+set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"
 [ -n "$vkd3d_cache" ] && set -- "VKD3D_SHADER_CACHE_PATH=$vkd3d_cache" "$@"
 
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
