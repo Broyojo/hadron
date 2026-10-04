@@ -1,0 +1,45 @@
+# Quick checks for every pull request. They cannot build Hadron (that takes an hour and the
+# macOS 27 SDK) or run the conformance suites (those need a real Apple GPU); they catch what is
+# cheap to catch: a script that does not parse, a tool that does not compile, and a patch queue
+# that no longer applies to its pinned upstream.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scripts:
+    name: Scripts and tools
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell scripts parse
+        run: |
+          status=0
+          for f in scripts/*; do
+            case "$(head -1 "$f")" in
+              '#!/bin/sh') sh -n "$f" || status=1 ;;
+              '#!/usr/bin/env bash') bash -n "$f" || status=1 ;;
+            esac
+          done
+          bash -n scripts/env.sh || status=1
+          sh -n scripts/paths.sh || status=1
+          exit $status
+      - name: The icon tool compiles
+        run: |
+          xcrun clang -O2 -Wall -Wextra -Werror -o "$RUNNER_TEMP/hadron-icon" launcher/hadron-icon.c \
+            -framework ImageIO -framework CoreGraphics -framework CoreFoundation
+
+  patches:
+    name: Patch queues apply
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # scripts/fetch.sh clones each pinned upstream and applies its queue with git am, and fails
+      # if a patch does not apply. FFmpeg and the test suites carry no patches.
+      - name: Fetch the pinned sources and apply the patches
+        run: scripts/fetch.sh wine fex dxmt notproton mtld3d mesa vkd3d-proton dxvk
+      - name: The queues match what was fetched
+        run: scripts/check-patches.sh
