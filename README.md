@@ -16,6 +16,9 @@ Hadron is in early development. A handful of games play well and many don't star
 
 ## Install
 
+> The first release is not out yet. Until it is, the Homebrew and download instructions below
+> do not work, and Hadron has to be [built from source](#building).
+
 You need an Apple Silicon Mac with macOS 27 and [Steam for Mac](https://store.steampowered.com/about/).
 
 With [Homebrew](https://brew.sh):
