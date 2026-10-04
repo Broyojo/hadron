@@ -70,20 +70,29 @@ as open, not as passing (see below).
 
 Again on 2026-10-03, with the fixes through 0071: OpenGL ES 3.1 (dEQP), 37,653 tests: 35,076
 pass, 2 fail (the depth-compare border colours), no crash, no test that needed a second try, 2,575
-skipped. OpenGL 4.6 (Khronos), 19,714 tests: 15,296 pass, 6 fail (open items 4 to 7), 3 that
+skipped. OpenGL 4.6 (Khronos), 19,714 tests: 15,296 pass, 6 fail (open items 3 to 5, and three fixed since and checked on their own: the 16-bit depth clear by 0072, the two geometry shader side effect tests by 0074), 3 that
 passed on a second try, 1 warning, 4,408 skipped. Results in `build/cts-results/gles31-r9` and
-`gl46-r9` (the 16-bit depth clear, 0072, was checked on its own after them).
+`gl46-r9`.
 
 Vulkan on KosmicKrisp, full must-pass list, 2026-10-02 (2 hours 40 minutes at 6 jobs, with all
 the fixes below): 3,247,552 tests, 647,905 pass, 2,599,079 skipped, 348 fail, 109 crash, 1 timeout,
 6 warnings, and 104 that failed once and passed on a second try. Results in
 `build/cts-results/vk-full`; `scripts/cts.sh vk-full` reruns it list by list.
 
+Again on 2026-10-03, with the fixes through 0067 (`build/cts-results/vk-full-r3`): 668,336 pass,
+2,578,816 skipped, 136 fail, 109 crash, 1 timeout, 6 warnings, 148 that passed on a second try.
+Of those, 111 failures are the sparse format properties (open item 1), 101 crashes are the memory
+model tests under load (open item 2), and 6 crashes are `dgc.ext` tests that build graphics
+pipeline libraries without asking for `VK_EXT_graphics_pipeline_library`, which the driver does
+not offer (a test bug: their support check omits it, and the driver dereferences the state the
+library leaves out). Every other failure, crash and the timeout passes on the driver with 0068 to
+the latest fix, run again on their own.
+
 | Group | Count | What it is |
 |---|---|---|
 | `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 1): 57 remain. |
 | `texture.swizzle`, `texture.compressed` | 134 fail | A Metal bug: in a sparse texture of a block-compressed format, Metal's mip tail places two levels on the same memory for some sizes (39 of 1,225 sizes from 4x4 to 140x140 for BC1, BC7, ETC2 and EAC, mostly where a level is 17 or 33 blocks across; power-of-two sizes from 8x8 up are fine, 4x4 is not). Uncompressed formats are clean (0 of 2,209 sizes). Reproduced without the driver by `tools/metal-probes/sparse-bc-tail.m`. 0051 keeps compressed formats out of sparse images: these tests are now unsupported, 54 `image_format_properties` tests for compressed formats fail instead, and 1,486 sparse tests on compressed formats that passed are skipped. |
-| `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 3. |
+| `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 2. |
 | `glsl.440.linkage.varying.component.frag_out` | 22 crash | `nir_lower_blend` expects one store per colour output; outputs written per component broke it. Fixed by 0050. |
 | `spirv_assembly...opfma.fp32...denorm_preserve` | 16 fail | The emulated `fma` for denormal operands rounded twice. Fixed by 0046. |
 | `clipping.user_defined` through tessellation and geometry | 10 fail | The evaluation shader's compute pass computed wrong positions and colours for some vertices when a geometry shader followed: a Metal bug in indirect thread dispatch. Fixed by 0070. |
@@ -140,8 +149,10 @@ All are Mesa patches in `patches/mesa`.
 | 0071 | Zink gives stages where the Vulkan driver has no subgroup operations (on KosmicKrisp: vertex, tessellation and geometry) subgroups of one invocation, but lowered only the size, votes and masks; `ballotARB`, `readInvocationARB`, `readFirstInvocationARB`, shuffles, reductions and `gl_SubGroupInvocationARB` stayed real SIMD operations in a stage Vulkan does not allow them in, disagreeing with the size of 1 the shader saw. All of them are now lowered for one invocation. | `shader_ballot_tests` (3 per OpenGL 4.3+ suite) |
 | 0072 | Metal truncates a 16-bit depth clear value instead of rounding it (`tools/metal-probes/depth16-clear.m`: 1/65535 stores 0, and half of all values store one less). Vulkan asks for rounding to nearest; the driver now clears to the rounded value plus a quarter step, which Metal stores exactly. | OpenGL 4.6 `clear_tex_image` on a 16-bit depth texture |
 | 0073 | Custom border colours were not applied to depth comparison samplers: the texture was sampled with the clamp-to-1 border. A comparison against a border texel can only come out as it would against depth 0 or depth 1, so the shader samples with both borders and takes the one whose comparison with the reference agrees with the comparison against the custom border depth (clamped to [0, 1]); the sampler's compare op now reaches the shader in the descriptor. This is exact for every compare op except EQUAL and NOT_EQUAL with a reference exactly equal to a border depth other than 0 or 1. | ES 3.1 `texture.border_clamp.depth_compare_mode` gathers with borders outside [0, 1] |
+| 0074 | The geometry shader emulation ran a shader with side effects more than once: the count pass and the rasterization vertex shader, which runs the whole shader again for each output vertex to pick that vertex's outputs, kept every store and atomic. A geometry shader that writes memory now runs once, in the main compute pass, with all its side effects; that pass writes every emitted vertex (and its place in the strip, for transform feedback) to a buffer, and also writes the counts the count pass would have, and the rasterization shader reads its vertex back instead of running the shader. The prefix sum and transform feedback setup move after the main pass. Shaders without side effects keep the old path. | `shader_atomic_counters.basic-usage-gs`, `geometry_shader.api.max_shader_storage_blocks` (OpenGL 4.6); the Vulkan geometry, tessellation, clipping, transform feedback and query lists (25,103 tests) and the OpenGL 4.6 (579) and ES 3.1 (1,873) geometry and tessellation groups pass in full |
+| 0075 | Zink lowered mediump to 16-bit floats in every stage. A mediump `inverse(mat3)` in a vertex shader then overflowed half precision at the vertices where the matrix is close to singular, which fragment shaders never sample exactly. Mediump stays 32-bit outside fragment shaders now, which the specification allows and which keeps vertex results within range. | `shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex` (ES 3); all 18 matrix inverse tests pass |
 
-0041, 0052, 0053, 0055, 0062 and 0071 are in Zink, 0058 in the geometry shader emulation shared with other Mesa drivers and 0069 in NIR. The rest are in the Vulkan driver, so they are not specific
+0041, 0052, 0053, 0055, 0062, 0071 and 0075 are in Zink, 0058 and 0074 in the geometry shader emulation shared with other Mesa drivers and 0069 in NIR. The rest are in the Vulkan driver, so they are not specific
 to OpenGL: they can equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
 
 ## Open failures, by cause
@@ -162,29 +173,17 @@ Ordered by how much they matter.
    57 `image_format_properties.3d` failures stay with it. Zink no longer exposes
    `ARB_sparse_texture` (or `_texture2`, `_clamp`) without sparse 3D images (0062), so OpenGL loses
    sparse textures until this is solved.
-2. **Mediump matrix inverse in a vertex shader** (`shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex`):
-   wrong by far more than 16-bit precision explains, the same shader as a fragment shader passes.
-3. **Failures that pass on a second try, and lost devices under load.** About a dozen per ES 3.1
+2. **Failures that pass on a second try, and lost devices under load.** About a dozen per ES 3.1
    run, and the Vulkan memory model tests, whose command buffers Metal ends with a timeout when
    six test processes share the GPU. With one test process the memory model tests have 2 crashes
    and 8 retries instead of 133 to 163 crashes with six. Several ES 3.1 crashes
    (`layout_binding.sampler`, a `copy_image` cube map case) and tessellation tests pass when run
    alone.
-4. **Fragment inputs: 124 components, OpenGL 4.6 asks for 128.** Metal takes 124 user varying
+3. **Fragment inputs: 124 components, OpenGL 4.6 asks for 128.** Metal takes 124 user varying
    components into a fragment shader (`tools/metal-probes/varyings.m`), so the driver reports 124
    (0059) and Zink passes that on as `GL_MAX_FRAGMENT_INPUT_COMPONENTS`, under OpenGL 4.6's
    minimum of 128.
-5. **Side effects in geometry shaders run more than once.** The geometry shader emulation runs
-   the shader in up to three places: a count pass when output counts are not known statically,
-   the main pass that builds the index buffer, and the rasterization vertex shader, which runs the
-   whole shader again for each output vertex to pick that vertex's outputs. The main pass drops
-   stores and atomics whose results are unused; the count pass and the rasterization shader keep
-   every side effect. Stores repeat with the same values, but an atomic happens once per pass and
-   once per output vertex (`shader_atomic_counters.basic-usage-gs`,
-   `geometry_shader.api.max_shader_storage_blocks` in OpenGL 4.6 and ES 3.1). Correct behaviour
-   needs one pass that runs the shader once per invocation with its side effects and writes every
-   emitted vertex to memory, with the rasterization shader reading those vertices back.
-6. **Cube map arrays sampled in compute kernels** (`texture_cube_map_array.sampling`, 416 of 720
+4. **Cube map arrays sampled in compute kernels** (`texture_cube_map_array.sampling`, 416 of 720
    cases): every stage that runs as a Metal compute kernel (compute, geometry and tessellation
    control shaders, and a vertex shader before an added geometry stage) reads level 0's texels at
    every mip level of the cube map array, with `textureLod`, `textureGrad`, a fixed mipmapped sampler
@@ -199,14 +198,14 @@ Ordered by how much they matter.
    mutable and immutable storage, per-face uploads, after a fragment draw with the texture) reads
    every level right, so compute sampling is not broken in general; what the test does
    differently is not found yet.
-7. Small ones: `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a
+5. Small ones: `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a
    few units off: Apple GPUs blend mip levels with 6-bit weights, `tools/metal-probes/filter-precision.m`;
    meeting the test would mean filtering between levels in the shader), and two ES 3.1
    `texture.border_clamp.depth_compare_mode.depth32f_stencil8.gather_size_*` iterations that compare
    against depth texels above 1 in a 32-bit float depth texture: Metal clamps them to [0, 1], and
    Vulkan only allows such values with `VK_EXT_depth_range_unrestricted`, which the driver does not
    offer, so Zink's upload of them is outside what the driver promises.
-8. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
+6. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
 
 ## What the first day showed
 
