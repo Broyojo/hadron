@@ -1,0 +1,36 @@
+name: A game does not work
+description: A game does not start, crashes, looks wrong or runs badly
+body:
+  - type: input
+    id: game
+    attributes:
+      label: Game and Steam app ID
+      placeholder: "Geometry Dash, 322170"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS version
+      placeholder: "MacBook Pro M2 Pro, macOS 27.0"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Hadron version
+      description: "`hadron version`, or the version shown in Hadron's window."
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Report file
+      description: "Run `hadron report` (or choose Save a report in Hadron) right after the problem and attach the file it writes. It holds the logs with your home folder's path removed."

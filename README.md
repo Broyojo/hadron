@@ -5,10 +5,11 @@
   </picture>
 </h1>
 
-An open-source, Proton-style compatibility tool for Apple Silicon Macs: install and play
-Windows games from the Steam library of the native Mac Steam client. Nothing runs under
-Rosetta. Wine is built natively for arm64, FEX translates the game's x86 code, and Direct3D
-and Vulkan are translated to Metal.
+An open-source way to play Windows games on Apple Silicon Macs: install and play them from the
+Steam library of the native Mac Steam client. It is to the Mac what Proton is to Linux, and an
+open-source alternative to CrossOver for Steam games. Nothing runs under Rosetta: Wine is built
+natively for arm64, FEX translates the game's x86 code, and Direct3D, Vulkan and OpenGL are
+translated to Metal.
 
 Hadron is in early development. A handful of games play well and many don't start yet;
 [docs/test-games.md](docs/test-games.md) says which.

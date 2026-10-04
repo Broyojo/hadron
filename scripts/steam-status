@@ -1,0 +1,42 @@
+#!/bin/sh
+# Say how Hadron's Steam Play integration stands in Mac Steam, as one word on the first line and a
+# sentence for people on the second:
+#
+#   no-steam       Steam is not in /Applications
+#   not-installed  Steam does not load Hadron's library
+#   installed      it loads the library of this runtime
+#   outdated       it loads Hadron's library, but not this runtime's (another version, or Hadron
+#                  was moved): scripts/steam-install brings it up to date
+#   broken         half of it is there (a Steam update replaced one part): scripts/steam-install
+#                  repairs it
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/paths.sh"
+APP=/Applications/Steam.app
+INSERT="$APP/Contents/MacOS/notproton.dylib"
+if [ -d "$ROOT/build" ]; then LIB="$ROOT/build/notproton/notproton.dylib"; else LIB="$ROOT/steam/notproton.dylib"; fi
+# A library's identity survives being signed again, which changes its bytes.
+uuid() { otool -l "$1" 2>/dev/null | awk '/LC_UUID/ { getline; getline; print $2 }' | sort | tr '\n' ' '; }
+
+if [ ! -d "$APP" ]; then
+    printf 'no-steam\nSteam is not installed in /Applications.\n'; exit 0
+fi
+setting=$(/usr/libexec/PlistBuddy -c 'Print :LSEnvironment:DYLD_INSERT_LIBRARIES' "$APP/Contents/Info.plist" 2>/dev/null || true)
+if [ -z "$setting" ] && [ ! -f "$INSERT" ]; then
+    printf 'not-installed\nSteam Play is not set up.\n'; exit 0
+fi
+if [ "$setting" != "$INSERT" ] || [ ! -f "$INSERT" ]; then
+    if [ -n "$setting" ] && [ "$setting" != "$INSERT" ]; then
+        printf 'broken\nSteam loads another library (%s).\n' "$setting"
+    else
+        printf 'broken\nA Steam update removed part of the setup.\n'
+    fi
+    exit 0
+fi
+linked=$(readlink "$HOME/Library/Application Support/Hadron/runtime" 2>/dev/null || true)
+if [ "$(uuid "$INSERT")" != "$(uuid "$LIB")" ]; then
+    printf 'outdated\nSteam has the library of another Hadron version.\n'
+elif [ "$linked" != "$ROOT" ]; then
+    printf 'outdated\nSteam is set up for a Hadron in another place (%s).\n' "${linked:-nowhere}"
+else
+    printf 'installed\nSteam Play is set up (Hadron %s).\n' "$HADRON_VERSION"
+fi
