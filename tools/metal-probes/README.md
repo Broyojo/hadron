@@ -78,7 +78,12 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   page-sized operations overlap. Why sparse binding stays off for 3D images
 - `filter-precision.m`: texture filtering weights take 6 bits between mip levels (65 distinct
   weights from LOD 2 to 3) and 8 bits between texel centres, so the driver reports
-  `mipmapPrecisionBits` 6 and `subTexelPrecisionBits` 8
+  `mipmapPrecisionBits` 6 and `subTexelPrecisionBits` 8. The mip weight is the LOD's fraction
+  truncated to 64ths (k/64 from a fraction of (k - 1/16)/64 on)
+- `mip-weight-vertex.m`: the mip weight for an explicit LOD is the same in a vertex function as in a
+  fragment function (64 LODs, none differs)
+- `mip-weight-bias.m`: in a fragment function, an implicit LOD of 0 plus a bias gives the same mip
+  weight as an explicit `level()` of that value (256 biases, none differs)
 - `varyings.m`: a render pipeline takes 124 user varying components into a fragment shader, as scalar
   members of mixed types and interpolation or as `float4` members; built-in fragment inputs do not
   count. 124 is Apple's documented limit (Metal feature set tables). At 125 and 126 components Metal
