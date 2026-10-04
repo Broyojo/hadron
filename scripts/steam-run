@@ -61,8 +61,9 @@ export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
 # profile has to be that one; Wine names it after $USER.
 real_user="$USER"
 export USER=steamuser
-# As in scripts/play: Wine finds FreeType and friends in Homebrew's library directory.
-export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
+# As in scripts/play: where Wine finds FreeType and friends.
+. "$ROOT/scripts/paths.sh"
+export DYLD_FALLBACK_LIBRARY_PATH="$HADRON_LIBPATH"
 wine="$ROOT/dist/bin/wine"
 
 wineserver="$ROOT/dist/bin/wineserver"
@@ -155,7 +156,7 @@ fi
 # Valve's Windows client DLLs, fetched from Valve's CDN (never redistributed): the game's
 # steam_api loads them from the Steam directory hadron-steam.exe registers, and Wine redirects
 # them to lsteamclient.
-valve="$ROOT/build/valve/bridge"
+valve="$HADRON_VALVE"
 steam_dir="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$steam_dir"
 stage() {  # copy $1 to $2 unless it is already there, byte for byte
