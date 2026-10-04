@@ -1,27 +1,49 @@
 #!/bin/sh
-# Give Steam's shortcut for a game the game's own icon.
+# Give Steam's shortcuts for games the games' own icons.
 #
 # Steam makes ~/Applications/<name>.app for an installed game: a bundle that opens
 # steam://run/<appid>, and what Spotlight and Launchpad show. A game with no Mac icon, so every
 # Windows game, gets Steam's own icon there. Replace that with the icon of the game's executable
 # (launcher/hadron-icon.c); a shortcut that already has an icon of its own is left alone.
 #
-# Usage: scripts/shortcut-icon <appid> <game.exe>
+# Usage: scripts/shortcut-icon                     every installed game
+#        scripts/shortcut-icon <appid> <game.exe>  one game, with the executable Steam launched
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-[ $# -eq 2 ] || { echo "usage: $0 <appid> <game.exe>" >&2; exit 1; }
-appid="$1"; exe="$2"
+STEAM="$HOME/Library/Application Support/Steam"
 tool="$ROOT/dist/bin/hadron-icon"
-steam_icon="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/Resources/Steam.icns"
-[ -x "$tool" ] && [ -f "$steam_icon" ] && [ -f "$exe" ] || exit 0
+steam_icon="$STEAM/Steam.AppBundle/Steam/Contents/Resources/Steam.icns"
+[ -x "$tool" ] && [ -f "$steam_icon" ] || exit 0
+
+# The executable Steam launches for a game on Windows, from Steam's own data, if it is installed.
+game_exe() {
+    exe=$("$tool" --launch-exe "$STEAM/appcache/appinfo.vdf" "$1" 2>/dev/null) || return 1
+    # Steam's libraries: its own directory, and the "path" entries of libraryfolders.vdf.
+    { printf '%s\n' "$STEAM"
+      sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$STEAM/steamapps/libraryfolders.vdf" 2>/dev/null
+    } | while IFS= read -r library; do
+        manifest="$library/steamapps/appmanifest_$1.acf"
+        [ -f "$manifest" ] || continue
+        dir=$(sed -n 's/^[[:space:]]*"installdir"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$manifest" | head -1)
+        [ -f "$library/steamapps/common/$dir/$exe" ] && printf '%s\n' "$library/steamapps/common/$dir/$exe" && break
+    done | grep .
+}
 
 for run in "$HOME"/Applications/*.app/Contents/MacOS/run.sh; do
-    grep -qx "open steam://run/$appid" "$run" 2>/dev/null || continue
     app="${run%/Contents/MacOS/run.sh}"
     icon="$app/Contents/Resources/shortcut.icns"
     cmp -s "$icon" "$steam_icon" || continue
+    appid=$(sed -n 's/^open steam:\/\/run\/\([0-9][0-9]*\)$/\1/p' "$run" 2>/dev/null | head -1)
+    [ -n "$appid" ] || continue
+    if [ $# -eq 2 ]; then
+        [ "$appid" = "$1" ] || continue
+        exe="$2"
+    else
+        exe=$(game_exe "$appid") || continue
+    fi
+    [ -f "$exe" ] || continue
     # Written beside the icon and renamed over it; the bundle's new date makes Finder and Spotlight
     # read the icon again.
-    if "$tool" "$exe" "$icon.new"; then
+    if "$tool" "$exe" "$icon.new" 2>/dev/null; then
         mv -f "$icon.new" "$icon" && touch "$app" && echo "shortcut icon: $app"
     fi
     rm -f "$icon.new"

@@ -6,6 +6,11 @@
  * image of that group and writes it at the sizes an .icns holds.
  *
  * Usage: hadron-icon <game.exe> <out.icns>
+ *        hadron-icon --launch-exe <appinfo.vdf> <appid>
+ *
+ * The second form prints the executable Steam launches for a game on Windows, relative to the
+ * game's directory, from Steam's cache of application data (appcache/appinfo.vdf): which of a
+ * game's executables is the game is Steam's knowledge, not something to guess from file names.
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
@@ -13,6 +18,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -147,18 +153,111 @@ static CGImageRef scaled(CGImageRef image, size_t size)
     return out;
 }
 
+static const uint8_t *map_file(const char *path, size_t *size)
+{
+    struct stat st;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0 || fstat(fd, &st) < 0) { perror(path); return NULL; }
+    const uint8_t *data = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (data == MAP_FAILED) { perror(path); return NULL; }
+    *size = st.st_size;
+    return data;
+}
+
+/* A string of at most `end - p` bytes with its terminator, or NULL. */
+static const char *cstring(const uint8_t *p, const uint8_t *end)
+{
+    return p < end && memchr(p, 0, end - p) ? (const char *)p : NULL;
+}
+
+/* appinfo.vdf (version 29): a header, then one record per application, each holding a binary
+ * key-value tree whose keys are indices into a string table at the end of the file. The launch
+ * options are appinfo/config/launch/<n>, each with an "executable" and, when it is for some
+ * systems only, config/oslist. Prints the first one that is for Windows. */
+static int launch_exe(const char *path, uint32_t appid)
+{
+    size_t size;
+    const uint8_t *data = map_file(path, &size);
+    if (!data) return 1;
+    const uint8_t *end = data + size;
+    if (size < 16 || u32(data) != 0x07564429) { fprintf(stderr, "%s: not an appinfo.vdf of version 29\n", path); return 1; }
+    uint64_t table = u32(data + 8) | (uint64_t)u32(data + 12) << 32;
+    if (table > size - 4) return 1;
+    uint32_t key_count = u32(data + table);
+    const char **keys = calloc(key_count ? key_count : 1, sizeof(*keys));
+    const uint8_t *k = data + table + 4;
+    for (uint32_t i = 0; i < key_count; i++) {
+        if (!(keys[i] = cstring(k, end))) return 1;
+        k += strlen(keys[i]) + 1;
+    }
+
+    const uint8_t *p = data + 16, *tree = NULL, *tree_end = NULL;
+    while (p + 8 <= data + table && u32(p)) {
+        uint32_t id = u32(p), len = u32(p + 4);
+        if (len < 60 || len > (size_t)(data + table - p - 8)) return 1;
+        if (id == appid) { tree = p + 8 + 60; tree_end = p + 8 + len; break; }
+        p += 8 + len;
+    }
+    if (!tree) { fprintf(stderr, "%s: no application %u\n", path, appid); return 1; }
+
+    const char *stack[32], *exe = NULL, *oslist = NULL;
+    int depth = 0;
+    for (p = tree; p < tree_end; ) {
+        uint8_t type = *p++;
+        if (type == 0x08 || type == 0x0b) {
+            if (--depth < 0) break;
+            /* Leaving appinfo/config/launch/<n>: take it if it is for Windows. */
+            if (depth == 3 && !strcmp(stack[0], "appinfo") && !strcmp(stack[1], "config") && !strcmp(stack[2], "launch")) {
+                if (exe && (!oslist || strstr(oslist, "windows"))) {
+                    for (const char *c = exe; *c; c++) putchar(*c == '\\' ? '/' : *c);
+                    putchar('\n');
+                    return 0;
+                }
+                exe = oslist = NULL;
+            }
+            continue;
+        }
+        if (p + 4 > tree_end || u32(p) >= key_count) return 1;
+        const char *key = keys[u32(p)];
+        p += 4;
+        switch (type) {
+        case 0x00:
+            if (depth >= 32) return 1;
+            stack[depth++] = key;
+            break;
+        case 0x01: {
+            const char *value = cstring(p, tree_end);
+            if (!value) return 1;
+            p += strlen(value) + 1;
+            int in_launch = depth >= 4 && !strcmp(stack[0], "appinfo") && !strcmp(stack[1], "config") && !strcmp(stack[2], "launch");
+            if (in_launch && depth == 4 && !strcmp(key, "executable")) exe = value;
+            if (in_launch && depth == 5 && !strcmp(stack[4], "config") && !strcmp(key, "oslist")) oslist = value;
+            break;
+        }
+        case 0x02: case 0x03: case 0x04: case 0x06: p += 4; break;
+        case 0x07: case 0x0a: p += 8; break;
+        case 0x05:
+            while (p + 2 <= tree_end && (p[0] || p[1])) p += 2;
+            p += 2;
+            break;
+        default: return 1;
+        }
+    }
+    fprintf(stderr, "%s: application %u has no Windows executable\n", path, appid);
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc == 4 && !strcmp(argv[1], "--launch-exe"))
+        return launch_exe(argv[2], strtoul(argv[3], NULL, 10));
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <game.exe> <out.icns>\n", argv[0]);
+        fprintf(stderr, "usage: %s <game.exe> <out.icns>\n       %s --launch-exe <appinfo.vdf> <appid>\n", argv[0], argv[0]);
         return 2;
     }
-    struct stat st;
-    int fd = open(argv[1], O_RDONLY);
-    if (fd < 0 || fstat(fd, &st) < 0) { perror(argv[1]); return 1; }
-    struct pe pe = { .size = st.st_size };
-    pe.data = mmap(NULL, pe.size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (pe.data == MAP_FAILED) { perror(argv[1]); return 1; }
+    struct pe pe = { 0 };
+    pe.data = map_file(argv[1], &pe.size);
+    if (!pe.data) return 1;
 
     unsigned width = 0;
     CFDataRef ico = pe_open(&pe) ? best_icon(&pe, &width) : NULL;

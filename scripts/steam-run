@@ -194,8 +194,10 @@ if [ -z "${HADRON_APP_NAME:-}" ]; then
     name=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$manifest" 2>/dev/null | head -1)
     [ -n "$name" ] && export HADRON_APP_NAME="$name"
 fi
-# Steam's shortcut for the game, which Spotlight finds, gets the game's own icon.
+# Steam's shortcuts, which Spotlight finds, get the games' own icons: this game's from the
+# executable Steam launched, then any other installed game's that still has Steam's icon.
 "$ROOT/scripts/shortcut-icon" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" >> "$log" 2>&1
+"$ROOT/scripts/shortcut-icon" >> "$log" 2>&1
 # Keep a Wine log of every Steam launch while the integration is new (build/logs/<appid>-*.log).
 export HADRON_LOG="${HADRON_LOG:-1}"
 cd "$(dirname "$program")" || exit 1

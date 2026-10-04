@@ -49,4 +49,6 @@ codesign -f -s - "$APP/Contents/MacOS/steam_osx"
 codesign -f -s - "$APP"
 codesign -v "$APP"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+# Steam's shortcuts for the games already installed get the games' own icons.
+"$(dirname "$0")/shortcut-icon" || true
 echo "installed; start Steam as usual (Settings -> Compatibility shows Steam Play)"
