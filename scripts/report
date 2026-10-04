@@ -8,6 +8,8 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/paths.sh"
 out="${1:-$HOME/Desktop/Hadron-report-$(date +%Y%m%d-%H%M%S).zip}"
+# The zip is made from inside a temporary directory: a relative destination is relative to here.
+case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
 work=$(mktemp -d)
 dir="$work/Hadron-report"
 mkdir -p "$dir/logs" "$dir/shaders"

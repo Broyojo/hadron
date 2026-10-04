@@ -19,9 +19,14 @@ source "$(dirname "$0")/env.sh"
 OUT="${1:-$BUILD/package/runtime}"
 EXT="$OUT/dist/ext/lib"
 STRIP_PE="$BREW/opt/llvm/bin/llvm-strip"
-# Wine opens these by name (include/config.h's SONAME_*); the others it looks for are optional
-# (D-Bus, ODBC) or macOS's own (CUPS).
-BY_NAME=(libfreetype.6.dylib libgnutls.30.dylib libSDL2-2.0.0.dylib libvulkan.1.dylib)
+# Wine opens these libraries by name, when its configure found them: what this build of Wine
+# found is in its config.h (SONAME_*). The others it looks for there are optional (D-Bus, ODBC)
+# or macOS's own (CUPS, and EGL is Zink's, already in dist/).
+BY_NAME=()
+for lib in FREETYPE GNUTLS SDL2 VULKAN; do
+    name=$(sed -n "s/^#define SONAME_LIB$lib \"\(.*\)\"/\1/p" "$BUILD/wine/include/config.h" 2>/dev/null)
+    [[ -n "$name" ]] && BY_NAME+=("$name")
+done
 
 [[ -x "$DIST/bin/wine" ]] || die "no runtime in $DIST: build it first"
 [[ -f "$BUILD/notproton/notproton.dylib" ]] || die "missing the Steam client library, run scripts/build-steam-play.sh"
@@ -71,10 +76,14 @@ for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ win
 done
 
 mkdir -p "$OUT/scripts" "$OUT/steam" "$EXT"
-for script in hadron-procs.sh paths.sh play report shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
+for script in hadron-procs.sh mtld3d-prefix paths.sh play report shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"
+# Every script a packaged script runs has to be in the package too.
+for ref in $(grep -oh '\$ROOT/scripts/[A-Za-z0-9_.-]*' "$OUT"/scripts/* | sort -u); do
+    [[ -e "$OUT/${ref#\$ROOT/}" ]] || die "the packaged scripts use ${ref#\$ROOT/}, which is not in the package"
+done
 # The version it will report: VERSION, marked with the commit unless this commit is that release's tag.
 version=$(cat "$ROOT/VERSION")
 [[ "$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)" == "v$version" ]] || version+="-dev.$(git -C "$ROOT" rev-parse --short HEAD)"
