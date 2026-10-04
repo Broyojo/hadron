@@ -88,6 +88,14 @@ not offer (a test bug: their support check omits it, and the driver dereferences
 library leaves out). Every other failure, crash and the timeout passes on the driver with 0068 to
 the latest fix, run again on their own.
 
+Again on 2026-10-04 (`build/cts-results/vk-full-r4`; the lists up to `memory` on the driver with
+0075, the rest from `memory-model` on with 0079): 668,582 pass, 2,578,816 skipped, 111 fail,
+14 crash, 6 warnings, 23 that passed on a second try. The 111 failures are the sparse format
+properties (open item 1). The crashes are the 6 `dgc.ext` tests described above and 8 memory model
+tests that Metal's time limit ended with six test processes on the GPU (open item 2; the list
+passes in full with one). Of the second tries 16 are memory model tests under the same load; the
+other 7 (5 sampler tests, a blit, a descriptor test) pass three times out of three on their own.
+
 | Group | Count | What it is |
 |---|---|---|
 | `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 1): 57 remain. |
