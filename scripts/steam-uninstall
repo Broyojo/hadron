@@ -32,7 +32,7 @@ if [ "$current" = "$INSERT" ]; then
 elif [ -n "$current" ]; then
     echo "Steam loads another library ($current); leaving it" >&2
 fi
-rm -f "$INSERT" "$APP/Contents/Info.plist.before-hadron" "$BACKUP"
+rm -f "$INSERT" "$APP/Contents/Info.plist.before-hadron" "$BACKUP" "$HOME/Library/Application Support/Hadron/steam-library"
 codesign -f -s - "$APP/Contents/MacOS/steam_osx"
 codesign -f -s - "$APP"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
