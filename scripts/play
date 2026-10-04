@@ -174,7 +174,10 @@ done
 libpath="$HADRON_LIBPATH"
 if [ -f "$ROOT/dist/mesa-zink/lib/libEGL.1.dylib" ] && [ -n "$icd" ]; then
     libpath="$ROOT/dist/mesa-zink/lib:$libpath"
-    set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" "$@"
+    # Mesa looks for its driver settings (Zink's defaults, per-application workarounds) where it
+    # was installed at build time, a path that only exists on the Mac that built it.
+    set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" \
+           "DRIRC_CONFIGDIR=$ROOT/dist/mesa-zink/share/drirc.d" "$@"
 else
     echo "OpenGL needs Zink and KosmicKrisp: run scripts/build-vulkan.sh" >&2
     exit 1

@@ -14,8 +14,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP=/Applications/Steam.app
 INSERT="$APP/Contents/MacOS/notproton.dylib"
 if [ -d "$ROOT/build" ]; then LIB="$ROOT/build/notproton/notproton.dylib"; else LIB="$ROOT/steam/notproton.dylib"; fi
-# A library's identity survives being signed again, which changes its bytes.
-uuid() { otool -l "$1" 2>/dev/null | awk '/LC_UUID/ { getline; getline; print $2 }' | sort | tr '\n' ' '; }
+# scripts/steam-install records which library it put into Steam. Only tools every Mac has are
+# used here: this runs whenever Hadron's window opens.
+record="$HOME/Library/Application Support/Hadron/steam-library"
+from=$(sed -n 1p "$record" 2>/dev/null || true)
+copy=$(sed -n 2p "$record" 2>/dev/null || true)
 
 if [ ! -d "$APP" ]; then
     printf 'no-steam\nSteam is not installed in /Applications.\n'; exit 0
@@ -33,7 +36,9 @@ if [ "$setting" != "$INSERT" ] || [ ! -f "$INSERT" ]; then
     exit 0
 fi
 linked=$(readlink "$HOME/Library/Application Support/Hadron/runtime" 2>/dev/null || true)
-if [ "$(uuid "$INSERT")" != "$(uuid "$LIB")" ]; then
+# The copy in Steam has to be the one that was recorded (another Hadron, or anything else, may have
+# replaced it since), and it has to have come from this runtime's library.
+if [ "$copy" != "$(/sbin/md5 -q "$INSERT" 2>/dev/null)" ] || [ "$from" != "$(/sbin/md5 -q "$LIB" 2>/dev/null)" ]; then
     printf 'outdated\nSteam is set up for another version of Hadron. Repair brings it up to date.\n'
 elif [ "$linked" != "$ROOT" ]; then
     printf 'outdated\nSteam is set up for another copy of Hadron. Repair points it at this one.\n'

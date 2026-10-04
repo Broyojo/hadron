@@ -85,6 +85,13 @@ for script in hadron-procs.sh mtld3d-prefix paths.sh play report shortcut-icon s
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"
+# The packaged scripts run on Macs without Apple's developer tools, where otool, python3 and the
+# like are stubs that only offer to install them: none of those may be used.
+# By name or by path (/usr/bin/otool), and as an interpreter (#!/usr/bin/python3); comments apart.
+used=$(grep -nE '(^|[;|&(`[:space:]/])(otool|xcrun|python3?|strings|nm|lipo|install_name_tool|dwarfdump|swiftc?|clang|make|brew)([[:space:]]|$)' \
+           "$OUT"/scripts/* "$OUT"/steam/*.sh | grep -vE '^[^:]*:[0-9]+:[[:space:]]*#([^!]|$)' || true)
+[[ -z "$used" ]] || die "the packaged scripts use developer tools:
+$used"
 # Every script a packaged script runs has to be in the package too.
 for ref in $(grep -oh '\$ROOT/scripts/[A-Za-z0-9_.-]*' "$OUT"/scripts/* | sort -u); do
     [[ -e "$OUT/${ref#\$ROOT/}" ]] || die "the packaged scripts use ${ref#\$ROOT/}, which is not in the package"
@@ -108,6 +115,14 @@ done < <(find "$OUT/dist/bin" "$OUT/dist/lib" "$OUT/dist/mesa" "$OUT/dist/mesa-z
 
 log "bundling the libraries from Homebrew"
 for name in "${BY_NAME[@]}"; do bundle "$BREW/lib/$name"; done
+# Homebrew's SDL2 is sdl2-compat: SDL2's interface on SDL3, which it opens by name when it starts,
+# beside itself first, and aborts without. Nothing links SDL3, so it has to be named here. Without
+# it Wine's controller service (winebus) dies at startup and games see no game controllers.
+for sdl2 in "$EXT"/libSDL2*.dylib; do
+    if [[ -e "$sdl2" ]] && strings -a "$sdl2" | grep -q '@loader_path/libSDL3.dylib'; then
+        bundle "$BREW/lib/libSDL3.dylib"
+    fi
+done
 for f in "${machos[@]}"; do
     dir=$(dirname "$f")
     for dep in $(links "$f"); do
