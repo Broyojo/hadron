@@ -34,9 +34,9 @@ if [ "$setting" != "$INSERT" ] || [ ! -f "$INSERT" ]; then
 fi
 linked=$(readlink "$HOME/Library/Application Support/Hadron/runtime" 2>/dev/null || true)
 if [ "$(uuid "$INSERT")" != "$(uuid "$LIB")" ]; then
-    printf 'outdated\nSteam has the library of another Hadron version.\n'
+    printf 'outdated\nSteam is set up for another version of Hadron. Repair brings it up to date.\n'
 elif [ "$linked" != "$ROOT" ]; then
-    printf 'outdated\nSteam is set up for a Hadron in another place (%s).\n' "${linked:-nowhere}"
+    printf 'outdated\nSteam is set up for another copy of Hadron. Repair points it at this one.\n'
 else
     printf 'installed\nSteam Play is set up (Hadron %s).\n' "$HADRON_VERSION"
 fi
