@@ -170,6 +170,30 @@ All are Mesa patches in `patches/mesa`.
 0041, 0052, 0053, 0055, 0062, 0071, 0075 and 0077 are in Zink, 0058 and 0074 in the geometry shader emulation shared with other Mesa drivers, 0069 in NIR, part of 0081 in NIR's texture lowering and 0082 in Mesa's shared utilities. The rest are in the Vulkan driver, so they are not specific
 to OpenGL: they can equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
 
+## Where it stands (2026-10-04) and what is left on purpose
+
+With the patches through 0082, on an M2 Pro with macOS 27:
+
+| Suite | Pass | Fail | Other |
+|---|---|---|---|
+| Vulkan, full must-pass list (`vk-full-r4`) | 668,582 | 111 | 14 crash, 23 passed on a second try, 6 warnings |
+| OpenGL 4.6 (`gl46-r11`) | 15,303 | 1 | 1 intermittent (below), 1 warning |
+| OpenGL ES 3.1 (`gles31-r11`) | 35,078 | 0 | none retried |
+| OpenGL ES 3 (`gles3-r11`) | 42,494 | 0 | 5 warnings (line interpolation, sample counts) |
+| OpenGL ES 2 (`gles2-r11`) | 14,312 | 0 | 2 warnings (line interpolation) |
+
+What is left, and what was decided about it with the project owner on 2026-10-04. "Left" means
+left for the alpha with the reason written here, not forgotten.
+
+| Gap | Tests | Kind | Decision |
+|---|---|---|---|
+| `shader_atomic_counter_ops` fails in about one run in five, in every operation | 4 in OpenGL 4.6, intermittent | Ours: a bug somewhere in Zink or the driver, present before this round of fixes | Fix. Being looked into |
+| Fragment input components: Metal takes 124, OpenGL 4.6 asks for 128 | `limits.max_fragment_input_components` | Metal's documented limit | Left. No program uses 31 full varyings; reporting 128 honestly needs the extra inputs passed through a buffer and interpolated in the fragment shader, in every draw path. Build it only if the conformance mark itself is wanted |
+| Sparse 3D images | 57 `image_format_properties` | Metal bug (open item 1) | Left. Sparse is off for the alpha. Mapping the tail one position at a time may work around it; only worth it if a game needs sparse 3D textures |
+| Sparse block-compressed formats | 54 `image_format_properties` | Metal bug (0051) | Left. No workaround known; the formats stay out of sparse images |
+| `dgc.ext` tests that build pipeline libraries without the extension | 6 crashes | Bug in the test suite | Left. They pass only once graphics pipeline libraries exist, a feature for when a game needs it |
+| Lost devices when six test processes share the GPU | 8 crashes and 16 second tries in the memory model list | macOS ends GPU work that runs about 50 ms while others wait (open item 2) | Left; every such test passes with one process. To check once, with the performance work: whether a game in the foreground gets the same limit |
+
 ## Open failures, by cause
 
 Ordered by how much they matter.
@@ -191,8 +215,9 @@ Ordered by how much they matter.
    57 `image_format_properties.3d` failures stay with it. Zink no longer exposes
    `ARB_sparse_texture` (or `_texture2`, `_clamp`) without sparse 3D images (0062), so OpenGL loses
    sparse textures until this is solved.
-2. **Failures that pass on a second try, and lost devices under load.** About a dozen per ES 3.1
-   run, and the Vulkan memory model tests when six test processes share the GPU: Metal ends a
+2. **Lost devices under load.** (The OpenGL tests that used to pass on a second try, about a
+   dozen per ES 3.1 run, were processes hanging at exit; fixed by 0082.) The Vulkan memory model
+   tests when six test processes share the GPU: Metal ends a
    command buffer that has run for about 50 ms while other processes wait
    (`MTL4CommandQueueErrorTimeout`; "Impacting Interactivity" in the older API), and the device is
    lost. The tests dispatch 61,504 threads fifty times per command buffer. With 0079, all 89 lost
