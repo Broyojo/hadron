@@ -1,0 +1,28 @@
+#!/bin/sh
+# Give Steam's shortcut for a game the game's own icon.
+#
+# Steam makes ~/Applications/<name>.app for an installed game: a bundle that opens
+# steam://run/<appid>, and what Spotlight and Launchpad show. A game with no Mac icon, so every
+# Windows game, gets Steam's own icon there. Replace that with the icon of the game's executable
+# (launcher/hadron-icon.c); a shortcut that already has an icon of its own is left alone.
+#
+# Usage: scripts/shortcut-icon <appid> <game.exe>
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+[ $# -eq 2 ] || { echo "usage: $0 <appid> <game.exe>" >&2; exit 1; }
+appid="$1"; exe="$2"
+tool="$ROOT/dist/bin/hadron-icon"
+steam_icon="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/Resources/Steam.icns"
+[ -x "$tool" ] && [ -f "$steam_icon" ] && [ -f "$exe" ] || exit 0
+
+for run in "$HOME"/Applications/*.app/Contents/MacOS/run.sh; do
+    grep -qx "open steam://run/$appid" "$run" 2>/dev/null || continue
+    app="${run%/Contents/MacOS/run.sh}"
+    icon="$app/Contents/Resources/shortcut.icns"
+    cmp -s "$icon" "$steam_icon" || continue
+    # Written beside the icon and renamed over it; the bundle's new date makes Finder and Spotlight
+    # read the icon again.
+    if "$tool" "$exe" "$icon.new"; then
+        mv -f "$icon.new" "$icon" && touch "$app" && echo "shortcut icon: $app"
+    fi
+    rm -f "$icon.new"
+done

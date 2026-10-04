@@ -115,20 +115,24 @@ fi
 # Wine process is the same loader: "wine". So each game gets a bundle of its own, holding nothing
 # but a link to the loader under the game's name (HADRON_APP_NAME: scripts/steam-run passes
 # Steam's name for it), and Wine starts the game's processes through that link (WINELOADER).
+# The bundle's icon is the game's own, from its executable (launcher/hadron-icon.c): the Dock
+# marks the game's minimized windows with it.
 name=$(printf '%s' "${HADRON_APP_NAME:-$(basename "$exe" .exe)}" | tr -d '/:<>&\n' | cut -c1-80)
 name="${name:-game}"
 loader=$(/bin/realpath "$ROOT/dist/bin/wine")
 app="$HOME/Library/Application Support/Hadron/apps/$appid/$name.app"
 wine="$app/Contents/MacOS/$name"
-if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ]; then
+if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ] || ! grep -q CFBundleIconFile "$app/Contents/Info.plist" 2>/dev/null; then
     rm -rf "$HOME/Library/Application Support/Hadron/apps/$appid"
-    mkdir -p "$app/Contents/MacOS" && ln -s "$loader" "$wine" && cat > "$app/Contents/Info.plist" <<EOF
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" && ln -s "$loader" "$wine" && cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
     <string>$name</string>
+    <key>CFBundleIconFile</key>
+    <string>icon</string>
     <key>CFBundleIdentifier</key>
     <string>com.broyojo.hadron.game.$appid</string>
     <key>CFBundleName</key>
@@ -144,6 +148,9 @@ if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ]; then
 </dict>
 </plist>
 EOF
+fi
+if [ ! -f "$app/Contents/Resources/icon.icns" ] && [ -x "$ROOT/dist/bin/hadron-icon" ]; then
+    "$ROOT/dist/bin/hadron-icon" "$exe" "$app/Contents/Resources/icon.icns" 2>/dev/null || true
 fi
 [ -x "$wine" ] || wine="$ROOT/dist/bin/wine"
 
