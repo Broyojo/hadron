@@ -1,8 +1,8 @@
-From caac4f2a7f3bcd08dfa3437116f486f373dcaee5 Mon Sep 17 00:00:00 2001
+From e21c4734ba38580ed8b7e96d9754c17a59109e5a Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 14:03:53 -0400
-Subject: [PATCH 27/28] kk: Support denormal preserve and flush-to-zero modes
- for 32-bit floats
+Subject: [PATCH] kk: Support denormal preserve and flush-to-zero modes for
+ 32-bit floats
 
 Generated-by: LLM
 ---
@@ -16,12 +16,12 @@ Generated-by: LLM
 
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_denorm.c b/src/kosmickrisp/vulkan/kk_nir_lower_denorm.c
 new file mode 100644
-index 00000000000..fdb6b6a43a7
+index 00000000000..d413ca721cd
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_denorm.c
 @@ -0,0 +1,699 @@
 +/*
-+ * Copyright 2026 Broyojo
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +

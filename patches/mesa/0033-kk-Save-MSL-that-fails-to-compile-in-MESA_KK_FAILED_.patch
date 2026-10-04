@@ -1,8 +1,7 @@
-From c6150be01424fb3d365f12f2242bae1c60c3aa73 Mon Sep 17 00:00:00 2001
+From d0c19a780e008666f715bc7ae1ac0fa6571ba30e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 12:00:25 -0400
-Subject: [PATCH] kk: Save MSL that fails to compile in
- MESA_KK_FAILED_MSL_DIR
+Subject: [PATCH] kk: Save MSL that fails to compile in MESA_KK_FAILED_MSL_DIR
 
 Generated-by: LLM
 ---

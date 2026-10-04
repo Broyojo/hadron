@@ -1,7 +1,7 @@
-From 0733422f2aa28865189e821b8cdf10475275204c Mon Sep 17 00:00:00 2001
+From cc5dc7244510e419f2509af1c2f938161a5e8d98 Mon Sep 17 00:00:00 2001
 From: junminlee2004 <junminlee2004@gmail.com>
 Date: Thu, 24 Sep 2026 12:24:42 -0400
-Subject: [PATCH 6/9] kk: Draw adjacency topologies without a geometry shader
+Subject: [PATCH] kk: Draw adjacency topologies without a geometry shader
 
 ---
  src/kosmickrisp/bridge/vk_to_mtl_map.c |  5 ++

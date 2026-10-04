@@ -1,7 +1,7 @@
-From 8d8199d5de187db29a2ca08976a3a145cb072b67 Mon Sep 17 00:00:00 2001
+From ce37fb98a9d2eba1197a3567fc219b6256e58001 Mon Sep 17 00:00:00 2001
 From: junminlee2004 <junminlee2004@gmail.com>
 Date: Thu, 24 Sep 2026 12:24:42 -0400
-Subject: [PATCH 7/9] kk: Advertise geometryShader
+Subject: [PATCH] kk: Advertise geometryShader
 
 ---
  src/kosmickrisp/vulkan/kk_physical_device.c | 1 +

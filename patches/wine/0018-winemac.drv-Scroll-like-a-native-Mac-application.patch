@@ -1,4 +1,4 @@
-From 249e00e897ed82df284216277b34e078579d9904 Mon Sep 17 00:00:00 2001
+From d86e5d15fe8fef6b03889dbcac73d46b015d92cc Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 15:58:08 -0400
 Subject: [PATCH] winemac.drv: Scroll like a native Mac application.

@@ -1,8 +1,7 @@
-From 01598872550526f49ce9edd0a3e5b97af5f07ca2 Mon Sep 17 00:00:00 2001
+From ceb2425a741cef893df3b1e94cc06ac93982bc84 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 14:45:15 -0400
-Subject: [PATCH 28/28] kk: Implement 64-bit atomics on buffers and shared
- memory
+Subject: [PATCH] kk: Implement 64-bit atomics on buffers and shared memory
 
 Generated-by: LLM
 ---
@@ -163,12 +162,12 @@ index ea535c54224..33534de675b 100644
  static inline void
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_atomic64.c b/src/kosmickrisp/vulkan/kk_nir_lower_atomic64.c
 new file mode 100644
-index 00000000000..1f07bfe25e7
+index 00000000000..1a630c727a4
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_atomic64.c
 @@ -0,0 +1,353 @@
 +/*
-+ * Copyright 2026 Broyojo
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +

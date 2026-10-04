@@ -1,5 +1,5 @@
-From 2cfa02ea674009ac2b8d1f7051944055b94322e7 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From f2162b62724abea6b4e8185ab97d80d55bce2db1 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 10:45:15 -0400
 Subject: [PATCH] winemac.drv: Capture only the display whose mode changes.
 

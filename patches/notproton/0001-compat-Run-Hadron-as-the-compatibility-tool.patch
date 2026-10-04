@@ -1,5 +1,5 @@
-From 5be5cabd13a1e16a8e8a7f8045079302b3f60494 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From 4ab5d8b234c39f8844376243987cb551a2ab523c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 12:48:48 -0400
 Subject: [PATCH] compat: Run Hadron as the compatibility tool
 

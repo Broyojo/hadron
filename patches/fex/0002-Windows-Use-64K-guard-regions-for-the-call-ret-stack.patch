@@ -1,5 +1,5 @@
-From 4ee26666cf28fc3e2e96b4eb31a75c5d0ecc6e8f Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From fbaa5326a192a689d5ebaa1583f3288df5eaaf29 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 18:24:21 -0400
 Subject: [PATCH] Windows: Use 64K guard regions for the call-ret stack.
 

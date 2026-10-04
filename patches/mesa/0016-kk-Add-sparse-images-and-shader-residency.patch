@@ -1,4 +1,4 @@
-From 1262ce0e99532edac7c08ea75959594da39458c7 Mon Sep 17 00:00:00 2001
+From 7d97b86c034f2ed28511e29e83a5b14ff2448b6a Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 21:33:42 -0400
 Subject: [PATCH] kk: Add sparse images and shader residency

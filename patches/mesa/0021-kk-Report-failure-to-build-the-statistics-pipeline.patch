@@ -1,7 +1,7 @@
-From a6b5421723c0fd050e9da1f198a46933e41a6611 Mon Sep 17 00:00:00 2001
+From 62722f9791621081b4a7ba0d07203fe649c23702 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 10:33:07 -0400
-Subject: [PATCH 21/24] kk: Report failure to build the statistics pipeline
+Subject: [PATCH] kk: Report failure to build the statistics pipeline
 
 Generated-by: LLM
 ---

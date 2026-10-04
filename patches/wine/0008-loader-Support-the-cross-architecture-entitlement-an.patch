@@ -1,5 +1,5 @@
-From 8376edbe734591550c1e9aeacafe6e52acf9c177 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From f3ea3c42537db5da97e5d9be009f0bd6546d9273 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 17:38:14 -0400
 Subject: [PATCH] loader: Support the cross-architecture entitlement and app
  bundles on arm64 macOS.

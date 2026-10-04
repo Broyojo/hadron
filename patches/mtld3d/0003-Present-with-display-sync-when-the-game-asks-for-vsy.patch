@@ -1,8 +1,8 @@
-From aed7228e7c6c954311b6d98bc037b8a6f0d57d7b Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From b72a649ad2514f1f27783e34fc7c142de2b21e31 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 12:01:31 -0400
-Subject: [PATCH 3/3] Present with display sync when the game asks for vsync,
- as Windows does
+Subject: [PATCH] Present with display sync when the game asks for vsync, as
+ Windows does
 
 mtld3d always turned Metal-side vsync off (displaySyncEnabled = false) and
 mapped a vsync request to a present throttle only, so every game could

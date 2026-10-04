@@ -1,5 +1,5 @@
-From 927afc9718b214b0464035582c3442b38e813aab Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From 624af27cad74877a573c4955dc2b40bbd67f5fe3 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 21:27:33 -0400
 Subject: [PATCH] ntdll: Back x86 emulator JIT code buffers with MAP_JIT memory
  on arm64 macOS.

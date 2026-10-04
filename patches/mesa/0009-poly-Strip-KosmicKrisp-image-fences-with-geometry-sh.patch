@@ -1,7 +1,7 @@
-From 544cc29512c0ec26a93aaf8a7e8aaa9e4f9db49a Mon Sep 17 00:00:00 2001
+From 28e7b97cba64c9219d00172ec83e5424b9b9f1cf Mon Sep 17 00:00:00 2001
 From: junminlee2004 <junminlee2004@gmail.com>
 Date: Sun, 27 Sep 2026 13:26:17 -0400
-Subject: [PATCH 9/9] poly: Strip KosmicKrisp image fences with geometry shader
+Subject: [PATCH] poly: Strip KosmicKrisp image fences with geometry shader
  stores
 
 ---

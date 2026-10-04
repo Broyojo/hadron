@@ -1,4 +1,4 @@
-From 77ecff6af22f8bbed76872e4801bf036ff88b5c8 Mon Sep 17 00:00:00 2001
+From dc0c2bdd2a573111c2af5581f59744f4c1c158be Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 20:26:53 -0400
 Subject: [PATCH] kk: Add VK_EXT_transform_feedback
@@ -359,12 +359,12 @@ index 55309f300ea..242c90316c5 100644
                         kk_heap(cmd), bufs.cmds, bufs.unrolled, bufs.ib_info,
 diff --git a/src/kosmickrisp/vulkan/kk_cmd_xfb.c b/src/kosmickrisp/vulkan/kk_cmd_xfb.c
 new file mode 100644
-index 00000000000..c131c14cb7e
+index 00000000000..b90b1e2aa93
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_cmd_xfb.c
 @@ -0,0 +1,106 @@
 +/*
-+ * Copyright 2026 Broyojo
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +

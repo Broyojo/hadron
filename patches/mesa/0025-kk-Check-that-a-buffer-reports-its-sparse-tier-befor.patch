@@ -1,4 +1,4 @@
-From d74419301596352b361dd4c21bafdcecb44249bc Mon Sep 17 00:00:00 2001
+From 529bd84f7b1134e91f7e4c66ef777bc7d413d2aa Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 13:38:33 -0400
 Subject: [PATCH] kk: Check that a buffer reports its sparse tier before

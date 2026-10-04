@@ -1,22 +1,22 @@
-From 9452e68a14c8f953ff5a03ee596c8fa12ca2a678 Mon Sep 17 00:00:00 2001
+From 8ab2aa1b5f3ea61f2963fc2adf2636cbe33abb7e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 15:54:37 -0400
 Subject: [PATCH] kk: Add VK_EXT_device_generated_commands
 
 Generated-by: LLM
 ---
- src/kosmickrisp/libkk/kk_dgc.cl             | 132 ++++++++++
- src/kosmickrisp/libkk/kk_dgc.h              |  65 +++++
+ src/kosmickrisp/libkk/kk_dgc.cl             | 131 ++++++++++
+ src/kosmickrisp/libkk/kk_dgc.h              |  64 +++++
  src/kosmickrisp/libkk/meson.build           |   1 +
- src/kosmickrisp/vulkan/kk_cmd_dgc.c         | 262 ++++++++++++++++++++
- src/kosmickrisp/vulkan/kk_cmd_dgc.h         |  51 ++++
+ src/kosmickrisp/vulkan/kk_cmd_dgc.c         | 261 ++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_cmd_dgc.h         |  50 ++++
  src/kosmickrisp/vulkan/kk_cmd_dispatch.c    |  39 +++
  src/kosmickrisp/vulkan/kk_cmd_draw.c        | 139 ++++++++++-
  src/kosmickrisp/vulkan/kk_debug.c           |   1 +
  src/kosmickrisp/vulkan/kk_debug.h           |   1 +
  src/kosmickrisp/vulkan/kk_physical_device.c |  26 ++
  src/kosmickrisp/vulkan/meson.build          |   1 +
- 11 files changed, 705 insertions(+), 13 deletions(-)
+ 11 files changed, 701 insertions(+), 13 deletions(-)
  create mode 100644 src/kosmickrisp/libkk/kk_dgc.cl
  create mode 100644 src/kosmickrisp/libkk/kk_dgc.h
  create mode 100644 src/kosmickrisp/vulkan/kk_cmd_dgc.c
@@ -24,13 +24,12 @@ Generated-by: LLM
 
 diff --git a/src/kosmickrisp/libkk/kk_dgc.cl b/src/kosmickrisp/libkk/kk_dgc.cl
 new file mode 100644
-index 00000000000..fc25acc0ad4
+index 00000000000..f0bf0afe535
 --- /dev/null
 +++ b/src/kosmickrisp/libkk/kk_dgc.cl
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,131 @@
 +/*
-+ * Copyright 2026 LunarG, Inc.
-+ * Copyright 2026 Google LLC
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +#include "compiler/libcl/libcl_vk.h"
@@ -162,13 +161,12 @@ index 00000000000..fc25acc0ad4
 +}
 diff --git a/src/kosmickrisp/libkk/kk_dgc.h b/src/kosmickrisp/libkk/kk_dgc.h
 new file mode 100644
-index 00000000000..dddf95cec3e
+index 00000000000..faf72bfb230
 --- /dev/null
 +++ b/src/kosmickrisp/libkk/kk_dgc.h
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,64 @@
 +/*
-+ * Copyright 2026 LunarG, Inc.
-+ * Copyright 2026 Google LLC
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +#ifndef KK_DGC_H
@@ -245,13 +243,12 @@ index 04e17525255..6871905a0e2 100644
    'kk_query.cl',
 diff --git a/src/kosmickrisp/vulkan/kk_cmd_dgc.c b/src/kosmickrisp/vulkan/kk_cmd_dgc.c
 new file mode 100644
-index 00000000000..c983d4546cd
+index 00000000000..23ed6866de4
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_cmd_dgc.c
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,261 @@
 +/*
-+ * Copyright 2026 LunarG, Inc.
-+ * Copyright 2026 Google LLC
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +#include "kk_cmd_dgc.h"
@@ -513,13 +510,12 @@ index 00000000000..c983d4546cd
 +}
 diff --git a/src/kosmickrisp/vulkan/kk_cmd_dgc.h b/src/kosmickrisp/vulkan/kk_cmd_dgc.h
 new file mode 100644
-index 00000000000..f7d00464c98
+index 00000000000..36fd83fe441
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_cmd_dgc.h
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,50 @@
 +/*
-+ * Copyright 2026 LunarG, Inc.
-+ * Copyright 2026 Google LLC
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +#ifndef KK_CMD_DGC_H

@@ -1,4 +1,4 @@
-From 63bcd2897f4c29b7cb657e7ac8e7942c16df1096 Mon Sep 17 00:00:00 2001
+From f9c209315f5812948db392382427accbd0f42c61 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 21:00:45 -0400
 Subject: [PATCH] kk: Add sparse buffers

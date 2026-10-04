@@ -1,7 +1,7 @@
-From f8eb1683fe60b0c073dd4c07c4f571d7cde389b2 Mon Sep 17 00:00:00 2001
+From 8fc8464a81a32d8ae5ecd5c8445046b9dfed820e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 10:33:07 -0400
-Subject: [PATCH 22/24] kk: Fix gaps in the sampler min/max emulation
+Subject: [PATCH] kk: Fix gaps in the sampler min/max emulation
 
 Generated-by: LLM
 ---
@@ -98,7 +98,7 @@ index 9950b192cb8..122daeb8fed 100644
     dev->mtl_handle = pdev->mtl_dev_handle;
     dev->vk.command_buffer_ops = &kk_cmd_buffer_ops;
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_sampler_minmax.c b/src/kosmickrisp/vulkan/kk_nir_lower_sampler_minmax.c
-index aff033340db..90b196c0ad4 100644
+index 723bf7a934e..b33fcfcf366 100644
 --- a/src/kosmickrisp/vulkan/kk_nir_lower_sampler_minmax.c
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_sampler_minmax.c
 @@ -34,16 +34,54 @@ kk_new_tex(nir_builder *b, const nir_tex_instr *tex, nir_texop op,

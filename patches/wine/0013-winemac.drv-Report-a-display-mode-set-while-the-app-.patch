@@ -1,5 +1,5 @@
-From 4c66f33479420c8d930b043099b0846d9214cea1 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From a211070246150d10197ccb291d99665d3f6988b0 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 23:05:32 -0400
 Subject: [PATCH] winemac.drv: Report a display mode set while the app is
  inactive at once.

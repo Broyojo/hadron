@@ -1,4 +1,4 @@
-From 81dad5ae272db83f85fb02c035b00e7258627168 Mon Sep 17 00:00:00 2001
+From eefed492756499f00c8d5b499649c1bbd08a9725 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 19:19:02 -0400
 Subject: [PATCH] kk: Support geometry shaders in device-generated commands

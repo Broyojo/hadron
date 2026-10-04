@@ -1,7 +1,7 @@
-From b7f103e8c8d23f95bed9ca1948fa81c58ef48c5e Mon Sep 17 00:00:00 2001
+From 71674d1541723350df05983c834114b91d0758dd Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 13:46:07 -0400
-Subject: [PATCH 26/28] kk: Implement VK_KHR_compute_shader_derivatives
+Subject: [PATCH] kk: Implement VK_KHR_compute_shader_derivatives
 
 Generated-by: LLM
 ---
@@ -96,12 +96,12 @@ index 6c4b7cf43a4..f6900912cd8 100644
  /* tex(s, coord) = txd(s, coord, dfdx(coord), dfdy(coord)) */
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_compute_derivatives.c b/src/kosmickrisp/vulkan/kk_nir_lower_compute_derivatives.c
 new file mode 100644
-index 00000000000..354c1d93502
+index 00000000000..30b5c34909b
 --- /dev/null
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_compute_derivatives.c
 @@ -0,0 +1,164 @@
 +/*
-+ * Copyright 2026 Broyojo
++ * Copyright 2026 David Andrews
 + * SPDX-License-Identifier: MIT
 + */
 +

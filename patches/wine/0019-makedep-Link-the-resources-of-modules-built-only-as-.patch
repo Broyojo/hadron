@@ -1,8 +1,7 @@
-From d43dde02f7c47908a9aa6ff4a7fc090be118aec9 Mon Sep 17 00:00:00 2001
+From 098241233ef668466e1965eba6c443d63ec5aa29 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 13:09:10 -0400
-Subject: [PATCH 19/20] makedep: Link the resources of modules built only as
- ARM64EC.
+Subject: [PATCH] makedep: Link the resources of modules built only as ARM64EC.
 
 A module whose aarch64 build is disabled is still output for that
 architecture and linked as ARM64EC, but its resources are only registered

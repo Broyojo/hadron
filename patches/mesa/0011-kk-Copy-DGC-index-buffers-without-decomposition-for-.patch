@@ -1,4 +1,4 @@
-From a9c7d983a30f5cccd07dac1af51f2bfaae940b43 Mon Sep 17 00:00:00 2001
+From 79d116c1199f1e86297379361574ba6b180b3c38 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 19:37:17 -0400
 Subject: [PATCH] kk: Copy DGC index buffers without decomposition for tess and

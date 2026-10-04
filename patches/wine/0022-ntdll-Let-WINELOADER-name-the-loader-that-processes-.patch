@@ -1,4 +1,4 @@
-From d7565da826f76879ff4da474eb3cf340d7442494 Mon Sep 17 00:00:00 2001
+From 18c8ed498e50f49eac8912f14da16960b8e42bcd Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 12:54:00 -0400
 Subject: [PATCH] ntdll: Let WINELOADER name the loader that processes are

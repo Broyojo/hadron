@@ -1,8 +1,8 @@
-From 5df0f4966af62cd7b3d0494a451f88f3f1e01f04 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From c297496a46eb8e019dec8cc651ff7d5c8be9a4b6 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 10:23:41 -0400
-Subject: [PATCH 14/15] winemac.drv: Keep the client surface of external Metal
- views in use.
+Subject: [PATCH] winemac.drv: Keep the client surface of external Metal views
+ in use.
 
 DXMT and mtld3d attach their Metal view to the window's client view,
 which the DXMT interface created with an unregistered client surface.

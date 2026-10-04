@@ -1,4 +1,4 @@
-From 86d1d628d1be2b2ab0103211e7104b0065731467 Mon Sep 17 00:00:00 2001
+From f35f2767c192d063b58364db02551381588c6621 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 18:45:39 -0400
 Subject: [PATCH] kk: Support single-texel alignment for texel buffer views

@@ -1,5 +1,5 @@
-From f2a0992b9ad90f17233ba05a5d88096e8faa1d94 Mon Sep 17 00:00:00 2001
-From: hadron <dev@hadron.invalid>
+From b6ce903170b4dc0d58f772cded3248d106545a61 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 19:03:51 -0400
 Subject: [PATCH] Windows/UnixLib: Use thread_set_x86_64_compat for hardware
  TSO on macOS.

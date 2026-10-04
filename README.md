@@ -23,13 +23,14 @@ are no binary releases: you build it from source.
 | Direct3D 10 and 11 | [DXMT](https://github.com/3Shain/dxmt) | Direct to Metal |
 | Direct3D 12 | [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) | On Vulkan |
 | Vulkan | KosmicKrisp, the Metal driver in [Mesa](https://mesa3d.org), with Hadron's patches | On Metal 4 |
-| OpenGL | Wine's OpenGL on Apple's OpenGL 4.1 | Zink (OpenGL 4.6 on Vulkan) is planned |
+| OpenGL | Wine's OpenGL on Apple's OpenGL 4.1, or [Zink](https://docs.mesa3d.org/drivers/zink.html) on KosmicKrisp with `HADRON_OPENGL=zink` | Zink is opt-in and reaches OpenGL 3.3 so far; OpenGL 4.6 on it is the goal |
 | Steam | [NotProton](https://github.com/NotProtonNot/NotProton)'s Steam Play hook and an lsteamclient bridge | The Mac Steam client serves the game: sign-in, friends, cloud saves |
 
 Fixes go into these shared layers, never into per-game hacks, and the graphics drivers only
 report features they really implement. [docs/architecture.md](docs/architecture.md) covers the
-macOS constraints behind the design, and [docs/findings.md](docs/findings.md) is the log of what
-was measured and fixed along the way.
+macOS constraints behind the design, [docs/findings.md](docs/findings.md) is the log of what
+was measured and fixed along the way, and [docs/conformance.md](docs/conformance.md) has the
+results of the Khronos conformance suites on the graphics drivers.
 
 ## Status
 
@@ -106,7 +107,7 @@ scripts/              build, install and launch scripts
 launcher/             hadron-steam.exe, the stand-in for Steam's Windows process
 config/games.conf     per-game settings
 tools/                test programs, Metal probes and benchmarks behind docs/findings.md
-docs/                 architecture, findings, roadmap, test games, Apple developer setup
+docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup
 src/ build/ dist/     checkouts, build trees and the installed runtime (git-ignored)
 ```
 

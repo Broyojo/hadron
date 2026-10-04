@@ -1,7 +1,7 @@
-From c947d01f744acd7ccedf5941093b04adb66964ee Mon Sep 17 00:00:00 2001
+From 19549fbc5cd7484984597354f16aab8bbcfe99c5 Mon Sep 17 00:00:00 2001
 From: junminlee2004 <junminlee2004@gmail.com>
 Date: Thu, 24 Sep 2026 12:24:41 -0400
-Subject: [PATCH 4/9] kk: Add exact-thread indirect compute dispatch
+Subject: [PATCH] kk: Add exact-thread indirect compute dispatch
 
 ---
  src/kosmickrisp/bridge/mtl_encoder.h       |  3 +++
