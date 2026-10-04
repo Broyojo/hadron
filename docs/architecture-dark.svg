@@ -43,61 +43,50 @@
 <line x1="907.3" y1="418" x2="907.3" y2="86" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
 <text x="917.3" y="240.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">Steamworks</text>
 <text x="917.3" y="256.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">calls</text>
-<line x1="112.5" y1="480" x2="112.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="112.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 9</text>
-<line x1="291.5" y1="480" x2="291.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="291.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 10 / 11</text>
-<line x1="470.5" y1="480" x2="470.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="470.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 12</text>
-<line x1="649.5" y1="480" x2="649.5" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="649.5" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Vulkan</text>
-<line x1="918.0" y1="480" x2="918.0" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="918.0" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">OpenGL</text>
-<rect x="30.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
-<text x="112.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">mtld3d</text>
-<text x="112.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 9 on Metal</text>
-<rect x="209.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
-<text x="291.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">DXMT</text>
-<text x="291.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 10/11 on Metal</text>
-<rect x="388.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
-<text x="470.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">vkd3d-proton</text>
-<text x="470.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 12 on Vulkan</text>
-<rect x="567.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
-<text x="649.5" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">winevulkan</text>
-<text x="649.5" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Wine's Vulkan loader</text>
-<rect x="746.0" y="560" width="165.0" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
-<text x="828.5" y="580.5" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Zink</text>
-<text x="828.5" y="597.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">OpenGL on Vulkan</text>
-<text x="828.5" y="614.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">opt-in, OpenGL 4.6</text>
-<rect x="925.0" y="560" width="165.0" height="64" rx="8" fill="#351426" stroke="#db61a2" stroke-width="1.5"/>
-<text x="1007.5" y="580.5" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Wine OpenGL</text>
-<text x="1007.5" y="597.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">passes OpenGL through</text>
-<text x="1007.5" y="614.5" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">the default</text>
-<line x1="112.5" y1="546" x2="112.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="291.5" y1="546" x2="291.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="470.5" y1="546" x2="470.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="649.5" y1="546" x2="649.5" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<path d="M898.0,546 L828.5,558" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<path d="M938.0,546 L1007.5,558" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<rect x="388.0" y="664" width="523.0" height="64" rx="8" fill="#0a2c29" stroke="#2ec4b6" stroke-width="1.5"/>
-<text x="649.5" y="693.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">KosmicKrisp</text>
-<text x="649.5" y="710.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Mesa's Vulkan driver on Metal 4, with Hadron's patches</text>
-<rect x="925.0" y="664" width="165.0" height="64" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
-<text x="1007.5" y="693.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Apple OpenGL</text>
-<text x="1007.5" y="710.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">version 4.1, deprecated</text>
-<line x1="470.5" y1="624" x2="470.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="649.5" y1="624" x2="649.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="828.5" y1="624" x2="828.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="1007.5" y1="624" x2="1007.5" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="130.4" y1="480" x2="130.4" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="130.4" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 9</text>
+<line x1="345.2" y1="480" x2="345.2" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="345.2" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 10 / 11</text>
+<line x1="560.0" y1="480" x2="560.0" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="560.0" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Direct3D 12</text>
+<line x1="774.8" y1="480" x2="774.8" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="774.8" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Vulkan</text>
+<line x1="989.6" y1="480" x2="989.6" y2="518" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="989.6" y="538.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">OpenGL</text>
+<rect x="30.0" y="560" width="200.8" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="130.4" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">mtld3d</text>
+<text x="130.4" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 9 on Metal</text>
+<rect x="244.8" y="560" width="200.8" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="345.2" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">DXMT</text>
+<text x="345.2" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 10/11 on Metal</text>
+<rect x="459.6" y="560" width="200.8" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="560.0" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">vkd3d-proton</text>
+<text x="560.0" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Direct3D 12 on Vulkan</text>
+<rect x="674.4" y="560" width="200.8" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="774.8" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">winevulkan</text>
+<text x="774.8" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Wine's Vulkan loader</text>
+<rect x="889.2" y="560" width="200.8" height="64" rx="8" fill="#0f2644" stroke="#4493f8" stroke-width="1.5"/>
+<text x="989.6" y="589.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Zink</text>
+<text x="989.6" y="606.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">OpenGL 4.6 on Vulkan</text>
+<line x1="130.4" y1="546" x2="130.4" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="345.2" y1="546" x2="345.2" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="560.0" y1="546" x2="560.0" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="774.8" y1="546" x2="774.8" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="989.6" y1="546" x2="989.6" y2="558" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="459.6" y="664" width="630.4" height="64" rx="8" fill="#0a2c29" stroke="#2ec4b6" stroke-width="1.5"/>
+<text x="774.8" y="693.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">KosmicKrisp</text>
+<text x="774.8" y="710.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Mesa's Vulkan driver on Metal 4, with Hadron's patches</text>
+<line x1="560.0" y1="624" x2="560.0" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="774.8" y1="624" x2="774.8" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="989.6" y1="624" x2="989.6" y2="662" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
 <rect x="30.0" y="768" width="1060.0" height="50" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
 <text x="560.0" y="790.0" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Metal</text>
 <text x="560.0" y="807.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="middle">Apple's graphics API</text>
-<line x1="112.5" y1="624" x2="112.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="291.5" y1="624" x2="291.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="649.5" y1="728" x2="649.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="1007.5" y1="728" x2="1007.5" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="122.5" y="700.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">direct</text>
-<text x="301.5" y="700.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">direct</text>
+<line x1="130.4" y1="624" x2="130.4" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="345.2" y1="624" x2="345.2" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="774.8" y1="728" x2="774.8" y2="766" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="140.4" y="700.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">direct</text>
+<text x="355.2" y="700.0" font-size="12" font-weight="400" fill="#9198a1" text-anchor="start">direct</text>
 <line x1="560.0" y1="818" x2="560.0" y2="844" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
 <rect x="360.0" y="846" width="400.0" height="34" rx="8" fill="#21262d" stroke="#6e7681" stroke-width="1.5"/>
 <text x="560.0" y="868.0" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">Apple silicon GPU</text>
