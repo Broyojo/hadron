@@ -34,6 +34,23 @@ that also has a Mac version needs Properties -> Compatibility -> Hadron to get i
 
 To build it yourself instead, see [Building](#building).
 
+## Before you try it
+
+- **It is unofficial.** Hadron is not affiliated with or endorsed by Valve, Apple, CodeWeavers or
+  any of the projects it builds on.
+- **It changes Steam.** Setting up adds a library to `/Applications/Steam.app` and signs that app
+  again, which replaces Valve's signature on it. That is how Steam for Mac learns to offer
+  Windows games. `hadron uninstall` takes it out, and reinstalling Steam from Valve restores
+  Valve's signature. A Steam update can undo the setup; open Hadron and choose Repair. Valve has
+  said nothing about tools like this on the Mac either way, so use it at your own risk.
+- **It is early.** A handful of games play well ([Status](#status)). Many do not start yet.
+  Games with kernel-level anti-cheat, which means most competitive multiplayer games, are not
+  expected to work, and neither are games that need a third-party launcher.
+- **First launches are slow.** A game's first start sets up its Windows environment, which
+  takes minutes, and compiles its shaders.
+- **Nothing is sent anywhere.** There is no telemetry. If something breaks, Hadron can save a
+  report file for you to attach to an issue yourself.
+
 ## How it works
 
 <picture>
@@ -66,8 +83,9 @@ results of the Khronos conformance suites on the graphics drivers.
 | Five Nights at Freddy's, Ultimate Custom Night | Direct3D 9 | Run well |
 | Among Us | Direct3D 11 | Runs, online sign-in works |
 | Teardown | Direct3D 12 | Runs; frame rate is held back by CPU translation |
-| Geometry Dash | OpenGL | Runs |
-| Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Being tested: the driver now provides the shader model 6.6 features Unreal requires |
+| Subnautica | Direct3D 11 | Runs well |
+| Geometry Dash | OpenGL | Runs well |
+| Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Does not load yet: Metal's shader compiler gives up on its largest compute shaders |
 
 [docs/test-games.md](docs/test-games.md) has the details and [docs/roadmap.md](docs/roadmap.md)
 the order of work. Not in scope for now: games with kernel-level anti-cheat, and games that need
@@ -140,6 +158,14 @@ tools/                test programs, Metal probes and benchmarks behind docs/fin
 docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup
 src/ build/ dist/     checkouts, build trees and the installed runtime (git-ignored)
 ```
+
+## How it was made
+
+Most of Hadron's code was written with an AI coding assistant, directed and tested by its author;
+the commits say so in their trailers. What it claims rests on tests rather than on who typed it:
+the games in [docs/test-games.md](docs/test-games.md), and the Khronos conformance suites for
+Vulkan and OpenGL, whose results and known gaps are in [docs/conformance.md](docs/conformance.md).
+Patches follow their upstreams' rules on AI-written code ([CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## License
 
