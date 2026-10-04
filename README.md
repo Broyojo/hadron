@@ -1,4 +1,9 @@
-# Hadron
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/hadron-dark.svg">
+    <img alt="Hadron" src="docs/hadron-light.svg" width="420">
+  </picture>
+</h1>
 
 An open-source, Proton-style compatibility tool for Apple Silicon Macs: install and play
 Windows games from the Steam library of the native Mac Steam client. Nothing runs under
