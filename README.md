@@ -10,8 +10,28 @@ Windows games from the Steam library of the native Mac Steam client. Nothing run
 Rosetta. Wine is built natively for arm64, FEX translates the game's x86 code, and Direct3D
 and Vulkan are translated to Metal.
 
-Hadron is in early development. A handful of games play well, many don't start yet, and there
-are no binary releases: you build it from source.
+Hadron is in early development. A handful of games play well and many don't start yet;
+[docs/test-games.md](docs/test-games.md) says which.
+
+## Install
+
+You need an Apple Silicon Mac with macOS 27 and [Steam for Mac](https://store.steampowered.com/about/).
+
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask broyojo/hadron/hadron
+```
+
+Or download `Hadron.dmg` from the [latest release](https://github.com/Broyojo/hadron/releases/latest)
+and drag Hadron to Applications.
+
+Then open Hadron once and choose **Set up Steam**, or run `hadron setup`. That adds Hadron to
+Steam as a Steam Play tool (and `hadron uninstall` takes it out again). After that Hadron does
+not need to be open: install and play Windows games from your Steam library as usual. A game
+that also has a Mac version needs Properties -> Compatibility -> Hadron to get its Windows build.
+
+To build it yourself instead, see [Building](#building).
 
 ## How it works
 
@@ -52,7 +72,9 @@ results of the Khronos conformance suites on the graphics drivers.
 the order of work. Not in scope for now: games with kernel-level anti-cheat, and games that need
 a third-party launcher.
 
-## Requirements
+## Building
+
+To build Hadron yourself you need:
 
 - An Apple Silicon Mac with macOS 27. Hadron has only been built and run there.
 - Xcode with its Metal toolchain, and Homebrew.
@@ -62,17 +84,18 @@ a third-party launcher.
   below runs 64-bit programs only.
 - The Mac Steam client, to play games from your library.
 
-## Building
+Then:
 
 ```sh
 scripts/setup-toolchain.sh     # Homebrew dependencies and llvm-mingw
 scripts/fetch.sh               # clone the upstream sources and apply patches/
+scripts/build-ffmpeg.sh        # FFmpeg, decoding only, for Wine's media playback
 scripts/build-wine.sh          # Wine -> dist/
 scripts/build-fex.sh           # FEX's emulator DLLs
 scripts/build-llvm15.sh        # static LLVM 15, for DXMT's shader compiler
 scripts/build-dxmt.sh          # Direct3D 10/11
 scripts/build-mtld3d.sh        # Direct3D 9 (Rust; see the script for the MSVC CRT licence step)
-scripts/build-vulkan.sh        # KosmicKrisp, vkd3d-proton and DXVK's DXGI
+scripts/build-vulkan.sh        # KosmicKrisp, Zink, vkd3d-proton and DXVK's DXGI
 scripts/build-lsteamclient.sh  # the Steam bridge
 scripts/build-launcher.sh      # hadron-steam.exe
 scripts/package-loader.sh <profile.provisionprofile>   # sign the loader with the entitlement
@@ -85,8 +108,9 @@ scripts/build-steam-play.sh    # the Steam Play integration
 scripts/steam-install          # install it into Steam.app (scripts/steam-uninstall undoes it)
 ```
 
-Install and play Windows games from the Steam library as usual. A game that also has a Mac
-version needs Properties -> Compatibility -> Hadron to get its Windows build.
+Steam then runs games straight from this checkout. `scripts/package-runtime.sh` makes the
+self-contained copy of the runtime that a release carries, with no reference to the checkout or
+to Homebrew.
 
 ## Running and debugging
 

@@ -63,8 +63,8 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 cp -Rc "$DIST" "$OUT/dist"
 # What only a build needs: headers, import and static libraries, pkg-config files, Wine's tools.
-rm -rf "$OUT/dist/include" "$OUT/dist/share/man" "$OUT/dist/share/aclocal" "$OUT/dist"/{.,mesa,mesa-zink}/lib/pkgconfig \
-       "$OUT/dist"/{mesa,mesa-zink}/include
+rm -rf "$OUT/dist/include" "$OUT/dist/share/man" "$OUT/dist/share/aclocal" "$OUT/dist"/{.,mesa,mesa-zink,ffmpeg}/lib/pkgconfig \
+       "$OUT/dist"/{mesa,mesa-zink,ffmpeg}/include "$OUT/dist/ffmpeg/share"
 find "$OUT/dist" -name '*.a' -delete
 for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ winemaker wmc wrc; do
     rm -f "$OUT/dist/bin/$tool"
@@ -77,13 +77,15 @@ done
 cp -R "$ROOT/config" "$OUT/config"
 cp "$BUILD/notproton/notproton.dylib" "$OUT/steam/"
 cp -R "$SRC/notproton/signatures" "$OUT/steam/signatures"
+# What fetches Valve's Windows client files on the user's Mac: they are not ours to ship.
+cp "$SRC/notproton/bridge/fetch-valve.sh" "$SRC/notproton/app/Sources/NotProtonApp/Resources/valve-packages.manifest" "$OUT/steam/"
 
 # The runtime's own Mach-O files, except the loader's bundle, which keeps its signature.
 machos=()
 while IFS= read -r f; do
     [[ "$f" == */wine.app/* ]] && continue
     file -b "$f" | grep -q 'Mach-O' && machos+=("$f")
-done < <(find "$OUT/dist/bin" "$OUT/dist/lib" "$OUT/dist/mesa" "$OUT/dist/mesa-zink" -type f \
+done < <(find "$OUT/dist/bin" "$OUT/dist/lib" "$OUT/dist/mesa" "$OUT/dist/mesa-zink" "$OUT/dist/ffmpeg" -type f \
               \( -name '*.so' -o -name '*.dylib' -o -perm +111 \) ! -path '*-windows/*' ! -path '*/ext/*')
 
 log "bundling the libraries from Homebrew"
