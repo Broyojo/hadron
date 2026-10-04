@@ -28,7 +28,7 @@ if [ "$setting" != "$INSERT" ] || [ ! -f "$INSERT" ]; then
     if [ -n "$setting" ] && [ "$setting" != "$INSERT" ]; then
         printf 'broken\nSteam loads another library (%s).\n' "$setting"
     else
-        printf 'broken\nA Steam update removed part of the setup.\n'
+        printf 'broken\nPart of the setup is missing, which a Steam update can cause. Repair puts it back.\n'
     fi
     exit 0
 fi

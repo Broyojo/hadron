@@ -127,7 +127,8 @@ struct ContentView: View {
                 }
             }
 
-            if !model.output.isEmpty {
+            // What a script printed matters when it failed; a success shows in the status line.
+            if model.failed && !model.output.isEmpty {
                 ScrollView {
                     Text(model.output).font(.caption.monospaced()).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
