@@ -51,8 +51,9 @@ To build it yourself instead, see [Building](#building).
   expected to work, and neither are games that need a third-party launcher.
 - **First launches are slow.** A game's first start sets up its Windows environment, which
   takes minutes, and compiles its shaders.
-- **Nothing is sent anywhere.** There is no telemetry. If something breaks, Hadron can save a
-  report file for you to attach to an issue yourself.
+- **Nothing about you is sent anywhere.** There is no telemetry. The one request Hadron makes
+  on its own is to GitHub, when you open its window, to see whether a newer version exists. If
+  something breaks, Hadron can save a report file for you to attach to an issue yourself.
 
 ## How it works
 

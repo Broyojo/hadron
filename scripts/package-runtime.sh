@@ -54,6 +54,11 @@ bundle() {
     dir=$(dirname "$(/bin/realpath "$src")")
     cp -L "$src" "$EXT/$name"
     chmod u+w "$EXT/$name"
+    # Which Homebrew package it came from, for the notices: <prefix>/Cellar/<formula>/<version>/...
+    if [[ "$dir" == "$BREW"/Cellar/*/*/* ]]; then
+        keg="${dir#"$BREW"/Cellar/}"
+        echo "${keg%%/*} $(cut -d/ -f2 <<<"$keg")" >> "$OUT/licenses/.bundled"
+    fi
     install_name_tool -id "@rpath/$name" "$EXT/$name" 2>/dev/null
     for dep in $(links "$EXT/$name"); do
         is_outside "$dep" || continue
@@ -75,7 +80,7 @@ for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ win
     rm -f "$OUT/dist/bin/$tool"
 done
 
-mkdir -p "$OUT/scripts" "$OUT/steam" "$EXT"
+mkdir -p "$OUT/scripts" "$OUT/steam" "$OUT/licenses" "$EXT"
 for script in hadron-procs.sh mtld3d-prefix paths.sh play report shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
@@ -125,6 +130,126 @@ done
 for json in "$OUT"/dist/mesa*/share/vulkan/icd.d/*.json; do
     sed -i '' -E 's#"library_path": *"[^"]*/lib/([^"/]*)"#"library_path": "../../../lib/\1"#' "$json"
 done
+
+log "collecting licences"
+# Each project's own licence files, and THIRD-PARTY-NOTICES.md: what is in here, under which
+# licence, and which exact sources it was built from.
+notices="$OUT/licenses/THIRD-PARTY-NOTICES.md"
+commit=$(git -C "$ROOT" rev-parse HEAD)
+mkdir -p "$OUT/licenses/hadron"
+cp "$ROOT/LICENSE" "$ROOT/LICENSE.hadron" "$OUT/licenses/hadron/"
+{
+    echo "# Third-party notices"
+    echo
+    echo "Hadron $version is built from https://github.com/Broyojo/hadron at commit $commit."
+    echo "Hadron's own code is under the BSD 3-Clause licence (hadron/LICENSE.hadron). Everything else"
+    echo "in this application comes from the projects below, each under its own licence, whose text"
+    echo "is in the directory named after it."
+    echo
+    echo "The complete corresponding source of every component is that repository at that commit:"
+    echo "sources.conf names the upstream repository and revision of each, patches/<name>/ holds"
+    echo "Hadron's changes to it as a patch series, and the scripts in scripts/ build and install"
+    echo "them. You may replace any of these libraries in the application with your own build."
+    echo
+    echo "| Component | Licence | Upstream revision | Hadron's patches |"
+    echo "|---|---|---|---|"
+} > "$notices"
+while IFS='|' read -r name what licence files dir source; do
+    [[ -z "$name" || "$name" == \#* ]] && continue
+    dir="$ROOT/${dir:-src/$name}"
+    mkdir -p "$OUT/licenses/$name"
+    for f in $files; do
+        [[ -e "$dir/$f" ]] || die "missing licence file $dir/$f"
+        cp -R "$dir/$f" "$OUT/licenses/$name/$(tr / - <<<"$f")"
+    done
+    # The projects a component carries inside its own tree (FEX's External, the subprojects of
+    # vkd3d-proton and DXVK, and so on) have their licence files there.
+    while IFS= read -r f; do
+        mkdir -p "$OUT/licenses/$name/vendored"
+        cp "$f" "$OUT/licenses/$name/vendored/$(tr / - <<<"${f#"$dir"/}")"
+    done < <(find "$dir" -maxdepth 5 -type f \( -iname 'LICEN[CS]E*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
+                  \( -path '*/External/*' -o -path '*/external/*' -o -path '*/subprojects/*' -o -path '*/third_party/*' \
+                     -o -path '*/vendor/*' -o -path '*/3rdparty/*' \) ! -path '*/test/*' 2>/dev/null)
+    queue=("$ROOT/patches/$name"/*.patch)
+    if [[ -e "${queue[0]}" ]]; then patches=${#queue[@]}; else patches=none; fi
+    if [[ -z "$source" ]]; then
+        read -r _ url ref < <(grep -E "^$name[[:space:]]" "$ROOT/sources.conf")
+        source="$url at \`$ref\`"
+    fi
+    echo "| $what | $licence | $source | $patches |" >> "$notices"
+done < "$ROOT/packaging/third-party.conf"
+# mtld3d is Rust: the crates its Cargo.lock files name, each with the licence its manifest
+# declares and its licence files, from Cargo's registry on this Mac.
+python3 - "$SRC/mtld3d" "$OUT/licenses/mtld3d" >> "$notices" <<'CRATES'
+import glob, os, re, shutil, sys
+src, out = sys.argv[1], sys.argv[2]
+crates = set()
+for lock in glob.glob(src + "/*/Cargo.lock"):
+    text = open(lock).read()
+    crates |= {(n, v) for n, v in re.findall(r'\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"\nsource = ', text)}
+registries = glob.glob(os.path.expanduser("~/.cargo/registry/src/*"))
+rows = []
+for name, version in sorted(crates):
+    dirs = [d for r in registries for d in glob.glob(f"{r}/{name}-{version}")]
+    if not dirs:
+        # Cargo fetches only what a build for its targets needs: this one was never compiled in.
+        continue
+    manifest = open(dirs[0] + "/Cargo.toml").read()
+    declared = re.search(r'^license = "([^"]+)"', manifest, re.M)
+    files = [f for f in glob.glob(dirs[0] + "/*") if re.match(r"(?i)(licen[cs]e|copying|notice)", os.path.basename(f)) and os.path.isfile(f)]
+    for f in files:
+        os.makedirs(f"{out}/crates/{name}-{version}", exist_ok=True)
+        shutil.copy(f, f"{out}/crates/{name}-{version}/")
+    rows.append((name, version, declared.group(1) if declared else "see its repository"))
+if not rows:
+    sys.exit("none of the crates in mtld3d's Cargo.lock files is in Cargo's registry")
+print()
+print("## Rust crates in mtld3d")
+print()
+print("The crates of its Cargo.lock files that this build fetched; the licence files they ship are")
+print("in mtld3d/crates.")
+print()
+print("| Crate | Version | Licence |")
+print("|---|---|---|")
+for row in rows:
+    print("| %s | %s | %s |" % row)
+CRATES
+{
+    echo
+    echo "## Libraries taken as built by Homebrew"
+    echo
+    echo "These are unmodified, in dist/ext/lib. Their sources are the Homebrew formulae of the"
+    echo "same name at these versions (https://formulae.brew.sh)."
+    echo
+    echo "| Library | Version | Licence files |"
+    echo "|---|---|---|"
+} >> "$notices"
+sort -u "$OUT/licenses/.bundled" | while read -r formula ver; do
+    mkdir -p "$OUT/licenses/$formula"
+    found=
+    for f in "$BREW/Cellar/$formula/$ver"/{LICENSE,LICENCE,COPYING,NOTICE}*; do
+        [[ -f "$f" ]] && cp "$f" "$OUT/licenses/$formula/" && found+="$(basename "$f") "
+    done
+    [[ -n "$found" ]] || die "Homebrew's $formula $ver has no licence file to carry"
+    echo "| $formula | $ver | $found|" >> "$notices"
+done
+rm -f "$OUT/licenses/.bundled"
+cat >> "$notices" <<'NOTES'
+
+## Code that compilers and linkers add
+
+- The Windows libraries built with llvm-mingw contain parts of LLVM's compiler-rt and libc++
+  (Apache-2.0 with LLVM exceptions) and of mingw-w64's runtime (public domain and permissive
+  licences, https://www.mingw-w64.org).
+- mtld3d contains parts of Rust's standard library (MIT or Apache-2.0). Its 32-bit library is linked with Microsoft's Visual C++ runtime import libraries and contains
+  the startup code that linking puts in; nothing else of Microsoft's is included. The files named
+  like Microsoft's runtime (vcruntime140.dll, ucrtbase.dll and so on) are Wine's own.
+
+## What is not in here
+
+Valve's Windows client libraries are not part of Hadron. Setting up Steam downloads them from
+Valve's servers to your Mac.
+NOTES
 
 log "removing debug information"
 find "$OUT/dist/lib/wine" "$OUT/dist/lib/hadron" "$OUT/dist/vkd3d-proton" "$OUT/dist/dxvk" -type f \

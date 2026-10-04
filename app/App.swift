@@ -25,6 +25,8 @@ final class Model: ObservableObject {
     @Published var busy = false
     @Published var output = ""
     @Published var failed = false
+    @Published var newVersion: String?
+    @Published var newVersionPage: URL?
 
     func refresh() {
         Task.detached {
@@ -85,6 +87,14 @@ struct ContentView: View {
                 }
             }
 
+            if let version = model.newVersion, let page = model.newVersionPage {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(.blue)
+                    Text("Hadron \(version) is available.")
+                    Button("Get it") { NSWorkspace.shared.open(page) }
+                }
+            }
+
             HStack(spacing: 8) {
                 Image(systemName: isSetUp ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     .foregroundStyle(isSetUp ? .green : .orange)
@@ -92,7 +102,8 @@ struct ContentView: View {
             }
 
             Text("Setting up closes Steam, adds Hadron to it as a Steam Play tool and signs Steam again. "
-                 + "After that, install and play Windows games from Steam as usual; Hadron does not need to stay open.")
+                 + "After that, install and play Windows games from Steam as usual; Hadron does not need to stay open."
+                 + (isSetUp ? "" : "\n\nThe first time, macOS stops Hadron and asks you to allow it under Privacy & Security, App Management. Allow it there, then set up again."))
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
             HStack {
@@ -140,6 +151,12 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(width: 520)
-        .onAppear { model.refresh() }
+        .onAppear {
+            model.refresh()
+            Updates.check { version, page in
+                model.newVersion = version
+                model.newVersionPage = page
+            }
+        }
     }
 }
