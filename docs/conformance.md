@@ -178,10 +178,18 @@ With the patches through 0083, on an M2 Pro with macOS 27:
 | Suite | Pass | Fail | Other |
 |---|---|---|---|
 | Vulkan, full must-pass list (`vk-full-r4`) | 668,582 | 111 | 14 crash, 23 passed on a second try, 6 warnings |
-| OpenGL 4.6 (`gl46-r12`) | 15,304 | 1 | none retried, 1 warning |
-| OpenGL ES 3.1 (`gles31-r12`) | 35,078 | 0 | none retried |
-| OpenGL ES 3 (`gles3-r11`) | 42,494 | 0 | 5 warnings (line interpolation, sample counts) |
-| OpenGL ES 2 (`gles2-r11`) | 14,312 | 0 | 2 warnings (line interpolation) |
+| OpenGL 4.6 (`gl46-r13`) | 15,304 | 1 | 1 passed on a second try (a process crashed at exit, below), 1 warning |
+| OpenGL 4.2 with the compatibility profile (`gl42-r13`) | 10,954 | 0 | none retried |
+| OpenGL ES 3.1 (`gles31-r13`) | 35,078 | 0 | none retried |
+| OpenGL ES 3 (`gles3-r13`) | 42,494 | 0 | 5 warnings (line interpolation, sample counts) |
+| OpenGL ES 2 (`gles2-r13`) | 14,312 | 0 | 2 warnings (line interpolation) |
+
+The OpenGL rows are from Zink built without LLVM (`-Ddraw-use-llvm=false`, 2026-10-04). Mesa's
+software vertex stage, which serves feedback and selection mode and `glRasterPos`, otherwise takes
+a JIT from LLVM and makes the OpenGL library need a 144 MB LLVM at run time; without it the
+results are the same as with it. In `gl46-r13` one test process ended with SIGSEGV after its last
+test had passed, with no crash report; the same 500 tests ran eight more times without it. Seen
+once, cause unknown, and not known to be tied to this build.
 
 What is left, and what was decided about it with the project owner on 2026-10-04. "Left" means
 left for the alpha with the reason written here, not forgotten. The one gap that was ours and was
