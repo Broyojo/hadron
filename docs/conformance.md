@@ -166,28 +166,29 @@ All are Mesa patches in `patches/mesa`.
 | 0080 | Waiting for a fence or semaphore blocked on a Metal shared event with no way out. When Metal ends a command buffer with an error, the event behind a later signal may never fire, and `vkWaitForFences` with no timeout hung instead of reporting the lost device (seen as a test process idle for minutes after `MTL4CommandQueueErrorTimeout`). The wait now sleeps in slices of 100 ms and returns `VK_ERROR_DEVICE_LOST` once the device is lost. | The reproduction (a kernel Metal ends for running too long, then an infinite wait) returns `VK_ERROR_DEVICE_LOST` in seconds; 31,869 synchronization and fence tests pass |
 | 0081 | The sampler's LOD bias reached the shader as a 16-bit float and was added to the shader's bias or LOD in 16 bits. Between 8 and 16 a 16-bit float resolves 1/128, so a sampler bias of -10.277 and a shader bias of 12.874 added up to 2.586 instead of 2.598: one step of the mip blend weight. The bias is now a 32-bit float in the descriptor and the sum is taken in 32 bits (an option of the shared lowering; its default stays 16-bit). This was listed as a limit of Apple's 6-bit mip weights; that was wrong. Metal truncates the LOD fraction to 64ths and gives a passing result for the LOD the test asks for, in compute, vertex and fragment functions alike (`tools/metal-probes/mip-weight-vertex.m`, `mip-weight-bias.m`). | OpenGL 4.6 `texture_lod_bias.texture_lod_bias_all` (its fragment shader half; the log labels it "vertex shader"). 20,941 Vulkan LOD, mipmap and bias tests, 100 in OpenGL 4.6, 268 in ES 3.1 and 1,125 in ES 3 pass |
 | 0082 | macOS has no `pthread_barrier`, so Mesa builds one from a mutex and a condition variable. That version told every thread it was the "serial" one, where the real one tells exactly one. `util_queue_finish` destroys its barrier in the serial thread, so on macOS the last thread to arrive destroyed the mutex and condition variable while the others were still waking up inside them, and one of them could block for good: a test process sat idle at exit in Zink's screen teardown for an hour (seen once, with the machine under load; an OpenGL program would hang when it quits). The barrier now returns true to the last thread only, and only after the others have left it. | A stress test of the barrier alone: the old version hangs within a minute, the new one passes 200,000 reuse rounds and 20,000 barriers destroyed by their serial thread |
+| 0083 | Zink submits a finished batch from a separate thread, and a read of a buffer waits for the batch that last wrote it. Two races between the two, both seen in `shader_atomic_counter_ops`, which reads a buffer straight after `glFlush`. The reader checked the batch's "not submitted yet" flag and then waited on a condition variable without looking again, so when the submit thread finished in between, the wake-up was already gone and the read waited for good (25 of 300 runs of those four tests; a program doing this would freeze). And the check for "does this buffer have a pending use" read the batch's id and then the flag while the submit thread wrote both: the old id with the new flag reads as "no use", and the read returned without waiting (6 of 300 runs: the first buffer still held its input, the second, read microseconds later, was complete, and reading the first again gave the right value). The flag is now cleared under the batch's mutex and the reader waits on it as a predicate; the flag is read before the id, with an ordered load. The wrong-value race is established from the compiled code, the captured values and the comparison below, not reproduced by injection. | 0 of 200 runs fail, beside 31 of 300 for the build before it, run at the same time. A delay injected between the reader's check and its wait hung 2 of 2 runs before and 0 of 3 after. `gl46-r12` has no retried test |
 
-0041, 0052, 0053, 0055, 0062, 0071, 0075 and 0077 are in Zink, 0058 and 0074 in the geometry shader emulation shared with other Mesa drivers, 0069 in NIR, part of 0081 in NIR's texture lowering and 0082 in Mesa's shared utilities. The rest are in the Vulkan driver, so they are not specific
+0041, 0052, 0053, 0055, 0062, 0071, 0075, 0077 and 0083 are in Zink, 0058 and 0074 in the geometry shader emulation shared with other Mesa drivers, 0069 in NIR, part of 0081 in NIR's texture lowering and 0082 in Mesa's shared utilities. The rest are in the Vulkan driver, so they are not specific
 to OpenGL: they can equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
 
 ## Where it stands (2026-10-04) and what is left on purpose
 
-With the patches through 0082, on an M2 Pro with macOS 27:
+With the patches through 0083, on an M2 Pro with macOS 27:
 
 | Suite | Pass | Fail | Other |
 |---|---|---|---|
 | Vulkan, full must-pass list (`vk-full-r4`) | 668,582 | 111 | 14 crash, 23 passed on a second try, 6 warnings |
-| OpenGL 4.6 (`gl46-r11`) | 15,303 | 1 | 1 intermittent (below), 1 warning |
-| OpenGL ES 3.1 (`gles31-r11`) | 35,078 | 0 | none retried |
+| OpenGL 4.6 (`gl46-r12`) | 15,304 | 1 | none retried, 1 warning |
+| OpenGL ES 3.1 (`gles31-r12`) | 35,078 | 0 | none retried |
 | OpenGL ES 3 (`gles3-r11`) | 42,494 | 0 | 5 warnings (line interpolation, sample counts) |
 | OpenGL ES 2 (`gles2-r11`) | 14,312 | 0 | 2 warnings (line interpolation) |
 
 What is left, and what was decided about it with the project owner on 2026-10-04. "Left" means
-left for the alpha with the reason written here, not forgotten.
+left for the alpha with the reason written here, not forgotten. The one gap that was ours and was
+to be fixed, `shader_atomic_counter_ops` failing in about one run in five, is fixed by 0083.
 
 | Gap | Tests | Kind | Decision |
 |---|---|---|---|
-| `shader_atomic_counter_ops` fails in about one run in five, in every operation | 4 in OpenGL 4.6, intermittent | Ours: a bug somewhere in Zink or the driver, present before this round of fixes | Fix. Being looked into |
 | Fragment input components: Metal takes 124, OpenGL 4.6 asks for 128 | `limits.max_fragment_input_components` | Metal's documented limit | Left. No program uses 31 full varyings; reporting 128 honestly needs the extra inputs passed through a buffer and interpolated in the fragment shader, in every draw path. Build it only if the conformance mark itself is wanted |
 | Sparse 3D images | 57 `image_format_properties` | Metal bug (open item 1) | Left. Sparse is off for the alpha. Mapping the tail one position at a time may work around it; only worth it if a game needs sparse 3D textures |
 | Sparse block-compressed formats | 54 `image_format_properties` | Metal bug (0051) | Left. No workaround known; the formats stay out of sparse images |
