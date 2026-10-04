@@ -33,4 +33,4 @@ body:
     id: report
     attributes:
       label: Report file
-      description: "Run `hadron report` (or choose Save a report in Hadron) right after the problem and attach the file it writes. It holds the logs with your home folder's path removed."
+      description: "Run `hadron report` (or choose Save a report in Hadron) right after the problem and attach the file it writes. It holds the logs with your home folder's path, your user name and your Steam account removed; that is done by pattern, so look through it before you attach it."

@@ -5,8 +5,8 @@
 Open an issue with the game and its Steam app ID, what happened (does not start, crashes, looks
 wrong, runs slowly), your Mac and macOS version, and a report file: run `hadron report`, or choose
 **Save a report** in Hadron. The report holds the game's logs and any shader Metal refused, with
-your home folder's path taken out. Nothing is ever sent automatically; you attach the file
-yourself.
+your home folder's path, your user name and your Steam account taken out. That is done by
+pattern, so look through the file before you attach it. Nothing is ever sent automatically.
 
 [docs/test-games.md](docs/test-games.md) lists the games that have been tried.
 
