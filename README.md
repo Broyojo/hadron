@@ -23,7 +23,7 @@ are no binary releases: you build it from source.
 | Direct3D 10 and 11 | [DXMT](https://github.com/3Shain/dxmt) | Direct to Metal |
 | Direct3D 12 | [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) | On Vulkan |
 | Vulkan | KosmicKrisp, the Metal driver in [Mesa](https://mesa3d.org), with Hadron's patches | On Metal 4 |
-| OpenGL | Wine's OpenGL on Apple's OpenGL 4.1, or [Zink](https://docs.mesa3d.org/drivers/zink.html) on KosmicKrisp with `HADRON_OPENGL=zink` | Zink is opt-in and reports OpenGL 4.6, core and compatibility; [conformance](docs/conformance.md) is not complete yet |
+| OpenGL | [Zink](https://docs.mesa3d.org/drivers/zink.html), Mesa's OpenGL on Vulkan, on KosmicKrisp | OpenGL 4.6, core and compatibility; [conformance](docs/conformance.md) lists the gaps left |
 | Steam | [NotProton](https://github.com/NotProtonNot/NotProton)'s Steam Play hook and an lsteamclient bridge | The Mac Steam client serves the game: sign-in, friends, cloud saves |
 
 Fixes go into these shared layers, never into per-game hacks, and the graphics drivers only

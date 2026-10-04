@@ -15,7 +15,7 @@ for one game is checked against the others. All are the **Windows** versions.
 | Half-Life | 70 | i386 | OpenGL | GoldSrc | old 32-bit OpenGL |
 
 | Teardown | 1167630 | x86_64 | D3D12 | custom | D3D12 through vkd3d-proton on KosmicKrisp |
-| Geometry Dash | 322170 | x86_64 | OpenGL | Cocos2d-x | OpenGL on Apple's OpenGL |
+| Geometry Dash | 322170 | x86_64 | OpenGL | Cocos2d-x | OpenGL on Zink |
 | Subnautica 2 | 1962700 | x86_64 | D3D12 | Unreal Engine 5 | shader model 6.6, Nanite: what most Unreal Engine 5 games need |
 
 Later: Vulkan titles.
@@ -49,5 +49,5 @@ Manual launches (`scripts/play`) have no Steam client serving them, so run them 
 | Subnautica | **Runs well** | Played by hand from Mac Steam on 2026-10-03: smoother than the game's own Intel macOS version under Rosetta. Not profiled yet. |
 | Portal 2 | **Plays fully** from Mac Steam through Hadron | D3D9 (Source), mtld3d. With an external display, games open on the main (menu-bar) display, and moving a running game between displays is unreliable. |
 | Teardown | **Runs** | D3D12 through vkd3d-proton on KosmicKrisp, at feature level 12_0 with no overrides (docs/findings.md #22). The first launch after a driver change is slow while pipelines compile. Frame rate is held back by CPU translation; open. |
-| Geometry Dash | **Runs** | OpenGL through Wine on Apple's OpenGL. Signing in to a Geometry Dash account crashed on 2026-09-30; on 2026-10-02 signing in and relaunching both work, cause not identified. |
+| Geometry Dash | **Runs** | Ran on Apple's OpenGL until 2026-10-04, when OpenGL moved to Zink; not checked on Zink yet. Signing in to a Geometry Dash account crashed on 2026-09-30; on 2026-10-02 signing in and relaunching both work, cause not identified. |
 | Subnautica 2 | **Being tested** | Unreal Engine 5 requires its SM6 tier: shader model 6.6 and 64-bit atomics on typed resources. Fixed on the way (docs/findings.md #23): the Visual C++ runtime check (Wine 0019), SSE4.2 reported to x86 code (Wine 0020), D3D12 through vkd3d-proton for every game, and the Vulkan features vkd3d-proton needs to report shader model 6.6 (Mesa 0026-0029). |

@@ -3,8 +3,9 @@
 #   dist/mesa/lib/libvulkan_kosmickrisp.dylib   KosmicKrisp, Mesa's Vulkan driver on Metal (src/mesa)
 #   dist/vkd3d-proton/x64/{d3d12,d3d12core}.dll  vkd3d-proton, D3D12 on Vulkan (src/vkd3d-proton)
 #   dist/dxvk/x64/dxgi.dll                       DXVK's DXGI, which vkd3d-proton presents through (src/dxvk)
+#   dist/mesa-zink/lib/libEGL.1.dylib            Zink, Mesa's OpenGL on Vulkan (src/mesa)
 #
-# Usage: scripts/build-vulkan.sh [mesa|vkd3d-proton|dxvk|zink...]   (default: all but zink)
+# Usage: scripts/build-vulkan.sh [mesa|zink|vkd3d-proton|dxvk...]   (default: all)
 
 source "$(dirname "$0")/env.sh"
 
@@ -32,7 +33,7 @@ build_mesa() {
 }
 
 # Zink, Mesa's OpenGL on Vulkan, with EGL, for KosmicKrisp: dist/mesa-zink/lib/libEGL.1.dylib,
-# which Wine's Mac driver uses for OpenGL when HADRON_OPENGL=zink (scripts/play). Build it before
+# which Wine's Mac driver uses for OpenGL (scripts/play). Build it before
 # Wine, whose configure looks for EGL there. Zink's macOS build wants MoltenVK's headers (it has
 # code for MoltenVK, unused here) and loads the Vulkan loader.
 build_zink() {
@@ -114,7 +115,7 @@ build_dxvk() {
 }
 
 want=("$@")
-(( ${#want[@]} )) || want=(mesa vkd3d-proton dxvk)
+(( ${#want[@]} )) || want=(mesa zink vkd3d-proton dxvk)
 for target in "${want[@]}"; do
     case "$target" in
         mesa) build_mesa ;;
