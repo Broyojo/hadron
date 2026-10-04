@@ -70,7 +70,7 @@ as open, not as passing (see below).
 
 Again on 2026-10-03, with the fixes through 0071: OpenGL ES 3.1 (dEQP), 37,653 tests: 35,076
 pass, 2 fail (the depth-compare border colours), no crash, no test that needed a second try, 2,575
-skipped. OpenGL 4.6 (Khronos), 19,714 tests: 15,296 pass, 6 fail (open items 3 to 5, and three fixed since and checked on their own: the 16-bit depth clear by 0072, the two geometry shader side effect tests by 0074), 3 that
+skipped. OpenGL 4.6 (Khronos), 19,714 tests: 15,296 pass, 6 fail (open items 3 and 4, and four fixed since and checked on their own: the 16-bit depth clear by 0072, the two geometry shader side effect tests by 0074, cube map array sampling by 0077), 3 that
 passed on a second try, 1 warning, 4,408 skipped. Results in `build/cts-results/gles31-r9` and
 `gl46-r9`.
 
@@ -152,8 +152,9 @@ All are Mesa patches in `patches/mesa`.
 | 0074 | The geometry shader emulation ran a shader with side effects more than once: the count pass and the rasterization vertex shader, which runs the whole shader again for each output vertex to pick that vertex's outputs, kept every store and atomic. A geometry shader that writes memory now runs once, in the main compute pass, with all its side effects; that pass writes every emitted vertex (and its place in the strip, for transform feedback) to a buffer, and also writes the counts the count pass would have, and the rasterization shader reads its vertex back instead of running the shader. The prefix sum and transform feedback setup move after the main pass. Shaders without side effects keep the old path. | `shader_atomic_counters.basic-usage-gs`, `geometry_shader.api.max_shader_storage_blocks` (OpenGL 4.6); the Vulkan geometry, tessellation, clipping, transform feedback and query lists (25,103 tests) and the OpenGL 4.6 (579) and ES 3.1 (1,873) geometry and tessellation groups pass in full |
 | 0075 | Zink lowered mediump to 16-bit floats in every stage. A mediump `inverse(mat3)` in a vertex shader then overflowed half precision at the vertices where the matrix is close to singular, which fragment shaders never sample exactly. Mediump stays 32-bit outside fragment shaders now, which the specification allows and which keeps vertex results within range. | `shaders.matrix.inverse.dynamic.{lowp,mediump}_mat3_float_vertex` (ES 3); all 18 matrix inverse tests pass |
 | 0076 | Replaces 0070's workaround: the emulation passes whose thread counts come from the GPU are dispatched as indirect threadgroups (`dispatchThreadgroupsWithIndirectBuffer`, right in every case `indirect-threads.m` tried) with a bounds check at the start of each pass, so they keep their 64-thread (or patch-sized) limit and the buggy call is not used at all. The setup kernels write the threadgroup counts next to the thread counts. | same tests as 0070, all still passing; the full tessellation and geometry regression lists pass |
+| 0077 | Zink emulates non-seamless cube maps (OpenGL's default outside ES; Metal only filters across faces) by binding a 2D array view of the cube texture and compiling the shader to sample it as one, guided by a mask of which bound textures are cubes. Binding a stage's textures cleared that mask for every slot first, and a slot whose texture had not changed was skipped before its bit was set again. When the same cube map array was bound again, the mask lost it: the shader was compiled for a cube array, while the slot still held the 2D array view. Metal then read level 0 at every level. Slots unbound at the end of the range also kept their bit; both are fixed. This was open item 4, which looked like a problem of stages that run as Metal compute kernels: those were the stages where the test bound the same texture again. | OpenGL 4.6 `texture_cube_map_array.sampling` (416 of 720 cases); all 47 OpenGL 4.6 and 6,386 ES 3.1 cube map tests pass |
 
-0041, 0052, 0053, 0055, 0062, 0071 and 0075 are in Zink, 0058 and 0074 in the geometry shader emulation shared with other Mesa drivers and 0069 in NIR. The rest are in the Vulkan driver, so they are not specific
+0041, 0052, 0053, 0055, 0062, 0071, 0075 and 0077 are in Zink, 0058 and 0074 in the geometry shader emulation shared with other Mesa drivers and 0069 in NIR. The rest are in the Vulkan driver, so they are not specific
 to OpenGL: they can equally be hit by a Direct3D 12 game through vkd3d-proton or by a Vulkan game.
 
 ## Open failures, by cause
@@ -184,29 +185,14 @@ Ordered by how much they matter.
    components into a fragment shader (`tools/metal-probes/varyings.m`), so the driver reports 124
    (0059) and Zink passes that on as `GL_MAX_FRAGMENT_INPUT_COMPONENTS`, under OpenGL 4.6's
    minimum of 128.
-4. **Cube map arrays sampled in compute kernels** (`texture_cube_map_array.sampling`, 416 of 720
-   cases): every stage that runs as a Metal compute kernel (compute, geometry and tessellation
-   control shaders, and a vertex shader before an added geometry stage) reads level 0's texels at
-   every mip level of the cube map array, with `textureLod`, `textureGrad`, a fixed mipmapped sampler
-   or a plain `read()` alike; `textureGather` gets the wrong face. Fragment and evaluation shaders
-   (Metal render functions) read the same texture right. Inside the kernel the texture view
-   reports the right level count and array size, and the LOD arrives intact. The view is a cube
-   array view of a 2D array texture with all levels; a standalone Metal program with the same view
-   (`texturecube_array`, 2D array base, swizzle, usage read/write/render target) samples every level
-   right from a compute kernel. Device visibility on every barrier and device instead of constant
-   descriptor loads do not change it. A small OpenGL program on Zink that samples every level of
-   2D, 2D array, cube and cube array textures from a compute shader (`textureLod` and `texelFetch`,
-   mutable and immutable storage, per-face uploads, after a fragment draw with the texture) reads
-   every level right, so compute sampling is not broken in general; what the test does
-   differently is not found yet.
-5. Small ones: `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a
+4. Small ones: `texture_lod_bias` (one combination of sampler and shader bias, in a vertex shader, a
    few units off: Apple GPUs blend mip levels with 6-bit weights, `tools/metal-probes/filter-precision.m`;
    meeting the test would mean filtering between levels in the shader), and two ES 3.1
    `texture.border_clamp.depth_compare_mode.depth32f_stencil8.gather_size_*` iterations that compare
    against depth texels above 1 in a 32-bit float depth texture: Metal clamps them to [0, 1], and
    Vulkan only allows such values with `VK_EXT_depth_range_unrestricted`, which the driver does not
    offer, so Zink's upload of them is outside what the driver promises.
-6. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
+5. Warning from Zink at start: no `rectangularLines` (wide lines are drawn as parallelograms).
 
 ## What the first day showed
 
