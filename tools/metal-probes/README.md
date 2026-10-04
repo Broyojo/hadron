@@ -22,19 +22,113 @@ checked on M2 Pro and M4 instead of assumed. Build one with
 - `compute-lod.m`: implicit-LOD sampling and LOD queries in a compute kernel (always LOD 0: Metal takes no
   derivatives there, so the driver passes gradients from quad operations)
 - `atomic64-lock.m`: what makes a locked 64-bit read-modify-write atomic (a plain spin lock deadlocks
-  a SIMD group; lanes taking turns works; loads, stores and texture reads need device-scope fences)
+  a SIMD group; lanes taking turns works here, with one kernel and one lock; loads, stores and
+  texture reads need device-scope fences). The driver no longer relies on turns, see
+  `turn-lock-stall.m`
+- `turn-lock-stall.m` with `turn-lock-stall.metal`: a kernel the Vulkan driver emitted for a memory
+  model test, with a lock in which the lanes of a SIMD group take turns, run without the driver.
+  Dispatched 8 times in one Metal 4 command buffer with a barrier after each it takes 7 to 9
+  seconds and threads give up on the lock, though none is left held; one dispatch, or 8 without
+  barriers, take milliseconds (two dispatches stall now and then). A size-optimised compile
+  changes nothing. Small edits to the kernel that keep its meaning hide the stall, and a kernel
+  where every lane spins at once shows it with one dispatch. Cause not established; the driver
+  uses a lock that does not depend on turns
+- `atomic64-stress.m`: the same kind of lock written by hand, under the tests' load (65,536 threads,
+  each exchanging two 64-bit words; `HOT=1` puts about 16,000 threads on one lock), on the older
+  API or Metal 4 (`METAL4=1`, optionally `RAW=1`, `GRID2D=1`, `DISPATCHES=n`). It does not stall in
+  tens of thousands of dispatches. What it does show: with `HOT=1` a dispatch takes 40 to 50 ms,
+  and when the GPU is shared (two instances at once) macOS ends most of them, as "Impacting
+  Interactivity" on the older API and as `MTL4CommandQueueErrorTimeout` on Metal 4, with locks left
+  held by the threads it stopped. Also: `atomic_load_explicit` on one half of a 64-bit word in this
+  kernel (`MODE=1`) crashes the compiler service
+- `cas-weak.m`: `atomic_compare_exchange_weak_explicit` did not fail spuriously in 5 runs of 4,096
+  threads incrementing one counter 256 times each: a loop that trusts only the value read back
+  loses no increment
+- `atomic-load-loop.m`: a thread waiting in a loop for another thread's atomic store, reading with a
+  relaxed `atomic_load_explicit` (or `atomic_fetch_or` of 0), mostly never sees the store when the
+  other thread is in a different threadgroup (1,672 of 2,048 waiters); inside one threadgroup it
+  always does. With a device-scope fence before the load, or reading through a compare-and-swap,
+  every waiter sees it. Whether the compiler hoists the load or the hardware serves a stale copy
+  is not known
 - `sparse-write.m`: sparse textures with shader-write usage (sparse tier 1, where read-only ones get
   tier 2): writes land in mapped tiles, residency is reported per tile and per level, a write to an
   unmapped tile reads back within the kernel and is gone in the next command buffer
-- `sparse-residency-views.m`: residency through views of a writable sparse texture (a view's first
-  level is ignored: levels 1-2 report the residency of levels 0-1; read-only textures are right)
+- `sparse-residency-views.m`: residency (`sparse_read`, `sparse_sample`) through a view of a writable
+  sparse texture ignores the view's first level: levels 1-2 of the view report the residency of
+  levels 0-1, while values read through the view are right, and read-only textures are right (for
+  in-bounds reads; the probe's reads at x=133 on a 128-wide level have no defined residency). The
+  probe does not make the heap resident; a minimal Metal 4 version that does shows the same. The MSL
+  specification says sparse textures do not support `write` or `read_write` access, while the
+  `MTLTextureSparseTier1` header describes writes to them
 - `sparse-residency-fault.m`: `sparse_read` on writable sparse textures of some sizes ends the
-  command buffer with a GPU address fault (129x129 and 11x37 do, 128x128 does not)
+  command buffer with a GPU address fault (129x129 and 11x37 do, 128x128 does not), whether or not
+  any tile is mapped; plain reads are fine, and so are read-only textures. Its tail mapping assumes
+  16 KB tiles where placement sparse uses 64 KB, which maps more tail tiles than exist, but the
+  fault does not depend on it
 - `sparse-twin.m`: mip tail layouts of read-only and writable sparse textures of one shape, and a
   read-only texture mapped to the same heap pages as a writable one reporting residency for it
-- `sparse-mapping-order.m`: mapping a read-only sparse texture, a writable one and the read-only one
-  again in one batch crashes in `updateTextureMappings`; a signal or a commit in between avoids it
+- `sparse-mapping-order.m`: three `updateTextureMappings` calls in a row on one queue, mapping a
+  read-only sparse texture, a writable one and the read-only one again, crash inside Metal
+  (`EXC_BAD_ACCESS` in `updateTextureMappings`, with validation on and nothing reported); a signal,
+  a wait or a committed command buffer between the writable and the second read-only mapping avoids
+  it
 - `sparse-3d-tail.m`: the mip tail of a placement-sparse 3D texture (1024x128x8 RGBA8: a 10-page
   tail). Mapped in one operation from consecutive heap pages it reads back right; mapped one page
   per operation it does not: tail position n covers several pages (here 4, 4 and 2), so the
   page-sized operations overlap. Why sparse binding stays off for 3D images
+- `filter-precision.m`: texture filtering weights take 6 bits between mip levels (65 distinct
+  weights from LOD 2 to 3) and 8 bits between texel centres, so the driver reports
+  `mipmapPrecisionBits` 6 and `subTexelPrecisionBits` 8. The mip weight is the LOD's fraction
+  truncated to 64ths (k/64 from a fraction of (k - 1/16)/64 on)
+- `mip-weight-vertex.m`: the mip weight for an explicit LOD is the same in a vertex function as in a
+  fragment function (64 LODs, none differs)
+- `mip-weight-bias.m`: in a fragment function, an implicit LOD of 0 plus a bias gives the same mip
+  weight as an explicit `level()` of that value (256 biases, none differs)
+- `varyings.m`: a render pipeline takes 124 user varying components into a fragment shader, as scalar
+  members of mixed types and interpolation or as `float4` members; built-in fragment inputs do not
+  count. 124 is Apple's documented limit (Metal feature set tables). At 125 and 126 components Metal
+  reports the limit; at 127 or more, of any shape, the compiler service aborts and the pipeline
+  fails with a lost connection instead of that message (a Metal bug, but only for shaders already
+  over the limit). A value interpolates to the same bits in a scalar member and in a vector
+  component
+- `sparse-3d-units.m`: which heap pages each mip tail position of a placement-sparse 3D texture
+  covers, found by reading the heap back through a buffer placed over the same pages
+  (`WHOLE=1` maps the whole tail in one operation, `PAGES=1` prints the page map, `BPP1=1` and
+  `BPP16=1` change the format). Positions cover different numbers of pages (4, 4 and 2 for a
+  1024x128x8 RGBA8 texture; one position covers all 64 pages of 256x256x256), and the tail can
+  use more heap pages than `tailSizeInBytes` (R8 1024x128x8: 20 reported, pages up to 22 written)
+- `indirect-threads.m`: a compute pipeline with `maxTotalThreadsPerThreadgroup` set, dispatched with
+  `dispatchThreadsWithIndirectBuffer` on a Metal 4 encoder, computes wrong values in most threads
+  (36 to 43 of 48 for a kernel holding 32 floats live, against a CPU reference, with limits from
+  16 to 128). Deterministic, uniform grids too, with safe math too, and with a pipeline built by the
+  legacy API too; API validation reports nothing. Groups of 4 threads are right; groups of 8 are
+  right under a limit of 8 or 16 and wrong under 32 and up. Kernels holding 16 or 64 floats live are
+  right, 24 wrong; 40 and 48 with a limit of 64 hang the GPU until the command buffer times out. The
+  same pipeline dispatched directly, or with `dispatchThreadgroupsWithIndirectBuffer` (right for 16
+  to 56 live floats, limits 16 to 128, groups of 8 to 64), is right, and so is one left at the
+  default limit. Why the driver dispatches its emulation passes as indirect threadgroups (0076)
+- `depth16-clear.m`: a render pass that clears a `Depth16Unorm` texture to n/65535 stores n - 1 for
+  half of all n (32,895 of 65,536 values): Metal converts the clear value by truncating, also for the
+  exact double n/65535. Metal documents no conversion rule, and Vulkan and OpenGL allow either
+  neighbour (rounding to nearest is only preferred), so this is Metal behaviour, not a bug; the
+  OpenGL suite's `clear_tex_image` expects the nearest value. A depth written by rasterization
+  rounds. `BIAS=0.25` shows the fix the driver uses: clear to (round(d * 65535) + 0.25) / 65535
+- `depth-compare-range.m`: `sample_compare` and `gather_compare` against depth texels and references
+  outside [0, 1]. `Depth32Float` and `Depth32Float_Stencil8` compare them unclamped, whether filled
+  with `replaceRegion` or a blit from a buffer; `Depth16Unorm` clamps the reference to [0, 1], as
+  Vulkan asks for fixed-point formats. No difference from the expected answer anywhere
+- `sparse-bc-tail.m`: block-compressed placement-sparse textures with full mip chains, every level
+  written by blit and read back for every size in a grid (`FMT=BC1|BC7|ETC2|EAC|ASTC`): for some
+  sizes copies place two levels of the mip tail on the same blocks (39 of 1,225 sizes for BC1, ETC2
+  and EAC, 43 for BC7, where this probe's 256-byte pattern hides 4; ASTC 0). Writing one level then
+  the other clobbers whichever came first: aliasing, not a race. Uncompressed formats are clean,
+  which this probe cannot show (it has no uncompressed mode)
+- `sparse-bc-sampler.m`: the same textures read through the sampler, against a non-sparse texture
+  filled the same way (`<w> <h>` for one size, `4 4 grid BC1|BC7|RGBA8` for the grid): blit copies
+  and the sampler disagree on where tail levels live, in 265 of 1,225 BC1 sizes (BC7 the same);
+  RGBA8 0. Written by an independent review of `sparse-bc-tail.m`
+- `sparse-3d-positions.m`: a placement-sparse 3D tail mapped in one operation or one position per
+  operation (`OPS=x:page,...`, `X0`, `WIDTH`, `FMT=R8|RGBA8|RGBA32`, args `w h d`): positions cover
+  several pages each and positions from 3 up do nothing for 1024x128x8 RGBA8; mapped one position
+  per operation back to back, the tail fills exactly `tailSizeInBytes` and every level is right,
+  while the single whole-tail operation skips a page and writes one past the tail

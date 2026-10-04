@@ -1,0 +1,194 @@
+From 738d8412f0f6d39a4c2c824b3bcbd2ec75ece31f Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sun, 4 Oct 2026 09:40:41 -0400
+Subject: [PATCH] shortcuts: Give a game's shortcut its icon when it is
+ installed
+
+Steam's shortcut for a game in ~/Applications carries Steam's own icon when
+the game has no Mac icon. Run Hadron's scripts/shortcut-icon, which puts the
+game's icon there, when the client starts and when Steam adds a shortcut or
+an application manifest, and every 30 seconds while a game with a shortcut
+is still being installed. Only the listings of ~/Applications and of each
+library's steamapps directory are watched, so what a running game writes
+below them wakes nothing.
+---
+ Makefile                     |   1 +
+ dylib/core/loader.c          |   2 +
+ dylib/feats/shortcut_icons.c | 116 +++++++++++++++++++++++++++++++++++
+ dylib/feats/shortcut_icons.h |   9 +++
+ 4 files changed, 128 insertions(+)
+ create mode 100644 dylib/feats/shortcut_icons.c
+ create mode 100644 dylib/feats/shortcut_icons.h
+
+diff --git a/Makefile b/Makefile
+index 8b58f7f..afa8284 100644
+--- a/Makefile
++++ b/Makefile
+@@ -40,6 +40,7 @@ SRCS := \
+ 	dylib/feats/webui.c \
+ 	dylib/feats/compatsvc.c \
+ 	dylib/feats/webpatch.c \
++	dylib/feats/shortcut_icons.c \
+ 	vendor/cJSON.c
+ 
+ OUT_DIR     := out
+diff --git a/dylib/core/loader.c b/dylib/core/loader.c
+index 1a97a99..a9f9e6f 100644
+--- a/dylib/core/loader.c
++++ b/dylib/core/loader.c
+@@ -7,6 +7,7 @@
+ #include "../core/macho.h"
+ #include "../hooks/hooks.h"
+ #include "../feats/compat.h"
++#include "../feats/shortcut_icons.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -257,6 +258,7 @@ static void np_init(void) {
+     np_log_platform_overrides();
+     np_compat_export_tools_path();
+     np_hooks_spawn_install();
++    np_shortcut_icons_start();
+ 
+     if (pthread_create(&g_install, NULL, install_thread, NULL) == 0)
+         g_install_started = 1;
+diff --git a/dylib/feats/shortcut_icons.c b/dylib/feats/shortcut_icons.c
+new file mode 100644
+index 0000000..b206e71
+--- /dev/null
++++ b/dylib/feats/shortcut_icons.c
+@@ -0,0 +1,116 @@
++// Game icons for Steam's shortcuts in ~/Applications
++//
++// Steam makes ~/Applications/<name>.app for an installed game and gives it
++// Steam's own icon when the game has no Mac icon, so for every Windows game.
++// Hadron's scripts/shortcut-icon puts the game's icon there. It runs when the
++// client starts and when Steam adds a shortcut or an application manifest, so a
++// game has its icon as soon as it is installed.
++//
++// Only the listings of ~/Applications and of each library's steamapps directory
++// are watched: what a running game writes, below them, wakes nothing.
++#include "shortcut_icons.h"
++#include "../util/log.h"
++
++#include <dispatch/dispatch.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <spawn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/wait.h>
++#include <unistd.h>
++
++// Seconds between a change and the script: a shortcut is written in steps.
++#define SHORTCUT_ICONS_SETTLE 3
++// Seconds between runs while a game with a shortcut is still being installed.
++#define SHORTCUT_ICONS_RETRY 30
++// The script's exit status for that.
++#define SHORTCUT_ICONS_PENDING 3
++
++extern char **environ;
++
++static char             g_script[PATH_MAX];
++static dispatch_queue_t g_queue;
++static unsigned         g_generation;
++
++static void schedule(int seconds);
++
++static void run_script(void) {
++    char *argv[] = { "/bin/sh", g_script, NULL };
++    pid_t pid;
++    int status = 0;
++    if (posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, environ) != 0) {
++        NP_ERR("shortcut_icons: cannot run %s", g_script);
++        return;
++    }
++    if (waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
++        WEXITSTATUS(status) == SHORTCUT_ICONS_PENDING)
++        schedule(SHORTCUT_ICONS_RETRY);
++}
++
++// Run the script once, `seconds` after the last request.
++static void schedule(int seconds) {
++    unsigned generation = ++g_generation;
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, seconds * (int64_t)NSEC_PER_SEC), g_queue, ^{
++        if (generation == g_generation)
++            run_script();
++    });
++}
++
++static void watch(const char *dir) {
++    int fd = open(dir, O_EVTONLY);
++    if (fd < 0) {
++        NP_LOG("shortcut_icons: no %s", dir);
++        return;
++    }
++    dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE, fd,
++                                                      DISPATCH_VNODE_WRITE, g_queue);
++    dispatch_source_set_event_handler(source, ^{ schedule(SHORTCUT_ICONS_SETTLE); });
++    dispatch_resume(source);
++    NP_LOG("shortcut_icons: watching %s", dir);
++}
++
++// The libraries besides Steam's own directory: the "path" values of
++// steamapps/libraryfolders.vdf.
++static void watch_libraries(const char *steam) {
++    char file[PATH_MAX], line[PATH_MAX + 64], dir[PATH_MAX], own[PATH_MAX];
++    snprintf(own, sizeof(own), "%s/steamapps", steam);
++    watch(own);
++    snprintf(file, sizeof(file), "%s/libraryfolders.vdf", own);
++    FILE *f = fopen(file, "r");
++    if (!f) return;
++    while (fgets(line, sizeof(line), f)) {
++        char *key = strstr(line, "\"path\"");
++        char *start = key ? strchr(key + 6, '"') : NULL;
++        char *end = start ? strrchr(start + 1, '"') : NULL;
++        if (!end || end == start) continue;
++        *end = '\0';
++        snprintf(dir, sizeof(dir), "%s/steamapps", start + 1);
++        if (strcmp(dir, own) != 0) watch(dir);
++    }
++    fclose(f);
++}
++
++void np_shortcut_icons_start(void) {
++    const char *home = getenv("HOME");
++    const char *runtime = getenv("HADRON_RUNTIME");
++    if (!home) return;
++    if (runtime)
++        snprintf(g_script, sizeof(g_script), "%s/scripts/shortcut-icon", runtime);
++    else
++        snprintf(g_script, sizeof(g_script),
++                 "%s/Library/Application Support/Hadron/runtime/scripts/shortcut-icon", home);
++    if (access(g_script, X_OK) != 0) {
++        NP_LOG("shortcut_icons: no %s, shortcuts keep Steam's icon", g_script);
++        return;
++    }
++
++    g_queue = dispatch_queue_create("notproton.shortcut-icons", DISPATCH_QUEUE_SERIAL);
++    char dir[PATH_MAX];
++    snprintf(dir, sizeof(dir), "%s/Applications", home);
++    watch(dir);
++    snprintf(dir, sizeof(dir), "%s/Library/Application Support/Steam", home);
++    watch_libraries(dir);
++    dispatch_async(g_queue, ^{ schedule(SHORTCUT_ICONS_SETTLE); });
++}
+diff --git a/dylib/feats/shortcut_icons.h b/dylib/feats/shortcut_icons.h
+new file mode 100644
+index 0000000..2deca64
+--- /dev/null
++++ b/dylib/feats/shortcut_icons.h
+@@ -0,0 +1,9 @@
++// Game icons for Steam's shortcuts in ~/Applications
++#ifndef NOTPROTON_FEATS_SHORTCUT_ICONS_H
++#define NOTPROTON_FEATS_SHORTCUT_ICONS_H
++
++// Run Hadron's scripts/shortcut-icon now and whenever Steam adds a shortcut or
++// an application manifest.
++void np_shortcut_icons_start(void);
++
++#endif
+-- 
+2.54.0 (Apple Git-157)
+

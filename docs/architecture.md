@@ -22,7 +22,7 @@ The diagram is drawn by `tools/arch-diagram/gen.py`.
 | D3D12 | vkd3d-proton on KosmicKrisp | The default for every game; presents through DXVK's DXGI. Watch DXMT's D3D12 work. |
 | D3D8/9 | mtld3d now, DXVK on KosmicKrisp later | DXVK 3.x needs geometry shaders, transform feedback and fillModeNonSolid. |
 | Vulkan | KosmicKrisp, Mesa's Vulkan driver on Metal 4 | Via winevulkan. Hadron's patches add what vkd3d-proton needs (docs/findings.md #22). |
-| OpenGL | Wine's OpenGL on Apple's OpenGL 4.1 | Zink on KosmicKrisp planned, for OpenGL above 4.1. |
+| OpenGL | Zink on KosmicKrisp | Mesa's OpenGL on Vulkan, through EGL in Wine's Mac driver (OpenGL 4.6, core and compatibility). Apple's OpenGL stops at 4.1 and is not used. |
 | Steam | NotProton's lsteamclient port, Steam Play in native Mac Steam | |
 | Fixes | umu-protonfixes | |
 

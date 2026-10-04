@@ -16,7 +16,7 @@
 # limits those not marked large address aware to 2GB, as on Windows.
 # D3D12 runs through vkd3d-proton on KosmicKrisp (docs/findings.md #22); HADRON_D3D12=wine uses
 # Wine's own d3d12 instead, for comparisons.
-# OpenGL runs on Apple's OpenGL; HADRON_OPENGL=zink runs it on Zink and KosmicKrisp instead.
+# OpenGL runs on Zink, Mesa's OpenGL on Vulkan, on KosmicKrisp.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
@@ -115,20 +115,24 @@ fi
 # Wine process is the same loader: "wine". So each game gets a bundle of its own, holding nothing
 # but a link to the loader under the game's name (HADRON_APP_NAME: scripts/steam-run passes
 # Steam's name for it), and Wine starts the game's processes through that link (WINELOADER).
+# The bundle's icon is the game's own, from its executable (launcher/hadron-icon.c): the Dock
+# marks the game's minimized windows with it.
 name=$(printf '%s' "${HADRON_APP_NAME:-$(basename "$exe" .exe)}" | tr -d '/:<>&\n' | cut -c1-80)
 name="${name:-game}"
 loader=$(/bin/realpath "$ROOT/dist/bin/wine")
 app="$HOME/Library/Application Support/Hadron/apps/$appid/$name.app"
 wine="$app/Contents/MacOS/$name"
-if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ]; then
+if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ] || ! grep -q CFBundleIconFile "$app/Contents/Info.plist" 2>/dev/null; then
     rm -rf "$HOME/Library/Application Support/Hadron/apps/$appid"
-    mkdir -p "$app/Contents/MacOS" && ln -s "$loader" "$wine" && cat > "$app/Contents/Info.plist" <<EOF
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" && ln -s "$loader" "$wine" && cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
     <string>$name</string>
+    <key>CFBundleIconFile</key>
+    <string>icon</string>
     <key>CFBundleIdentifier</key>
     <string>com.broyojo.hadron.game.$appid</string>
     <key>CFBundleName</key>
@@ -144,6 +148,9 @@ if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ]; then
 </dict>
 </plist>
 EOF
+fi
+if [ ! -f "$app/Contents/Resources/icon.icns" ] && [ -x "$ROOT/dist/bin/hadron-icon" ]; then
+    "$ROOT/dist/bin/hadron-icon" "$exe" "$app/Contents/Resources/icon.icns" 2>/dev/null || true
 fi
 [ -x "$wine" ] || wine="$ROOT/dist/bin/wine"
 
@@ -161,17 +168,15 @@ done
 # Paths may contain spaces (Steam runs this through ~/Library/Application Support), so these go
 # through the argument list too rather than as unquoted expansions below.
 [ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "MESA_KK_EXPERIMENTAL=${MESA_KK_EXPERIMENTAL:-dgc,xfb,sparse}" "$@"
-# OpenGL: Wine's Mac driver uses Apple's OpenGL (4.1 core, no compatibility profile above 2.1).
-# HADRON_OPENGL=zink uses Zink on KosmicKrisp instead, Mesa's OpenGL on Vulkan, through EGL.
+# OpenGL: Wine's Mac driver uses Zink on KosmicKrisp, Mesa's OpenGL on Vulkan, through EGL. Apple's
+# OpenGL stops at 4.1 with no compatibility profile above 2.1, and is not used.
 libpath=/opt/homebrew/lib
-if [ "${HADRON_OPENGL:-apple}" = zink ]; then
-    if [ -f "$ROOT/dist/mesa-zink/lib/libEGL.1.dylib" ] && [ -n "$icd" ]; then
-        libpath="$ROOT/dist/mesa-zink/lib:$libpath"
-        set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" "$@"
-    else
-        echo "HADRON_OPENGL=zink needs Zink and KosmicKrisp: run scripts/build-vulkan.sh mesa zink" >&2
-        exit 1
-    fi
+if [ -f "$ROOT/dist/mesa-zink/lib/libEGL.1.dylib" ] && [ -n "$icd" ]; then
+    libpath="$ROOT/dist/mesa-zink/lib:$libpath"
+    set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" "$@"
+else
+    echo "OpenGL needs Zink and KosmicKrisp: run scripts/build-vulkan.sh" >&2
+    exit 1
 fi
 # A shader Metal refuses to compile is a driver bug: KosmicKrisp saves its source here.
 mkdir -p "$ROOT/build/logs/failed-msl"

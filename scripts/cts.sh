@@ -81,8 +81,11 @@ case "$suite" in
         case "$suite" in
             gles*-khr) deqp="$BUILD/gl-cts/external/openglcts/modules/glcts"
                        default=("$khr/gles/khronos_mustpass/main/$suite-main.txt") ;;
+            # The -gtf lists need the Khronos members' kc-cts sources, which the public suite
+            # does not have. gl42 also has a list for the compatibility profile.
             gl[34][0-9]) deqp="$BUILD/gl-cts/external/openglcts/modules/glcts"
-                       default=("$khr/gl/khronos_mustpass/main/$suite-main.txt") ;;
+                       default=("$khr/gl/khronos_mustpass/main/$suite-main.txt"
+                                "$khr/gl/khronos_mustpass/main/$suite-compat-main.txt") ;;
             # the must-pass list is split by the year its tests were added
             *)         deqp="$BUILD/gl-cts/modules/$suite/deqp-$suite"
                        default=("$cts"/android/cts/main/$suite-main-*.txt) ;;
