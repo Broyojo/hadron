@@ -154,18 +154,66 @@ cp "$ROOT/LICENSE" "$ROOT/LICENSE.hadron" "$OUT/licenses/hadron/"
     echo "| Component | Licence | Upstream revision | Hadron's patches |"
     echo "|---|---|---|---|"
 } > "$notices"
-while IFS='|' read -r name what licence files; do
+while IFS='|' read -r name what licence files dir source; do
     [[ -z "$name" || "$name" == \#* ]] && continue
+    dir="$ROOT/${dir:-src/$name}"
     mkdir -p "$OUT/licenses/$name"
     for f in $files; do
-        [[ -e "$SRC/$name/$f" ]] || die "missing licence file $SRC/$name/$f"
-        cp -R "$SRC/$name/$f" "$OUT/licenses/$name/$(tr / - <<<"$f")"
+        [[ -e "$dir/$f" ]] || die "missing licence file $dir/$f"
+        cp -R "$dir/$f" "$OUT/licenses/$name/$(tr / - <<<"$f")"
     done
+    # The projects a component carries inside its own tree (FEX's External, the subprojects of
+    # vkd3d-proton and DXVK, and so on) have their licence files there.
+    while IFS= read -r f; do
+        mkdir -p "$OUT/licenses/$name/vendored"
+        cp "$f" "$OUT/licenses/$name/vendored/$(tr / - <<<"${f#"$dir"/}")"
+    done < <(find "$dir" -maxdepth 5 -type f \( -iname 'LICEN[CS]E*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
+                  \( -path '*/External/*' -o -path '*/external/*' -o -path '*/subprojects/*' -o -path '*/third_party/*' \
+                     -o -path '*/vendor/*' -o -path '*/3rdparty/*' \) ! -path '*/test/*' 2>/dev/null)
     queue=("$ROOT/patches/$name"/*.patch)
     if [[ -e "${queue[0]}" ]]; then patches=${#queue[@]}; else patches=none; fi
-    read -r _ url ref < <(grep -E "^$name[[:space:]]" "$ROOT/sources.conf")
-    echo "| $what | $licence | $url at \`$ref\` | $patches |" >> "$notices"
+    if [[ -z "$source" ]]; then
+        read -r _ url ref < <(grep -E "^$name[[:space:]]" "$ROOT/sources.conf")
+        source="$url at \`$ref\`"
+    fi
+    echo "| $what | $licence | $source | $patches |" >> "$notices"
 done < "$ROOT/packaging/third-party.conf"
+# mtld3d is Rust: the crates its Cargo.lock files name, each with the licence its manifest
+# declares and its licence files, from Cargo's registry on this Mac.
+python3 - "$SRC/mtld3d" "$OUT/licenses/mtld3d" >> "$notices" <<'CRATES'
+import glob, os, re, shutil, sys
+src, out = sys.argv[1], sys.argv[2]
+crates = set()
+for lock in glob.glob(src + "/*/Cargo.lock"):
+    text = open(lock).read()
+    crates |= {(n, v) for n, v in re.findall(r'\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"\nsource = ', text)}
+registries = glob.glob(os.path.expanduser("~/.cargo/registry/src/*"))
+rows = []
+for name, version in sorted(crates):
+    dirs = [d for r in registries for d in glob.glob(f"{r}/{name}-{version}")]
+    if not dirs:
+        # Cargo fetches only what a build for its targets needs: this one was never compiled in.
+        continue
+    manifest = open(dirs[0] + "/Cargo.toml").read()
+    declared = re.search(r'^license = "([^"]+)"', manifest, re.M)
+    files = [f for f in glob.glob(dirs[0] + "/*") if re.match(r"(?i)(licen[cs]e|copying|notice)", os.path.basename(f)) and os.path.isfile(f)]
+    for f in files:
+        os.makedirs(f"{out}/crates/{name}-{version}", exist_ok=True)
+        shutil.copy(f, f"{out}/crates/{name}-{version}/")
+    rows.append((name, version, declared.group(1) if declared else "see its repository"))
+if not rows:
+    sys.exit("none of the crates in mtld3d's Cargo.lock files is in Cargo's registry")
+print()
+print("## Rust crates in mtld3d")
+print()
+print("The crates of its Cargo.lock files that this build fetched; the licence files they ship are")
+print("in mtld3d/crates.")
+print()
+print("| Crate | Version | Licence |")
+print("|---|---|---|")
+for row in rows:
+    print("| %s | %s | %s |" % row)
+CRATES
 {
     echo
     echo "## Libraries taken as built by Homebrew"
@@ -193,8 +241,7 @@ cat >> "$notices" <<'NOTES'
 - The Windows libraries built with llvm-mingw contain parts of LLVM's compiler-rt and libc++
   (Apache-2.0 with LLVM exceptions) and of mingw-w64's runtime (public domain and permissive
   licences, https://www.mingw-w64.org).
-- mtld3d is written in Rust and contains parts of Rust's standard library (MIT or Apache-2.0).
-  Its 32-bit library is linked with Microsoft's Visual C++ runtime import libraries and contains
+- mtld3d contains parts of Rust's standard library (MIT or Apache-2.0). Its 32-bit library is linked with Microsoft's Visual C++ runtime import libraries and contains
   the startup code that linking puts in; nothing else of Microsoft's is included. The files named
   like Microsoft's runtime (vcruntime140.dll, ucrtbase.dll and so on) are Wine's own.
 

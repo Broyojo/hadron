@@ -36,6 +36,9 @@ cmake -S "$LLVM_SRC/llvm" -B "$BUILD/llvm15" -G Ninja \
     -DLLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO=Off >/dev/null
 cmake --build "$BUILD/llvm15"
 cmake --install "$BUILD/llvm15" >/dev/null
+# DXMT links these libraries into its shader compiler, so the app carries LLVM's licence
+# (scripts/package-runtime.sh takes it from here).
+cp "$LLVM_SRC/llvm/LICENSE.TXT" "$LLVM_PREFIX/LICENSE.TXT"
 
 # Source and build tree are large and no longer needed once installed.
 rm -rf "$BUILD/llvm15" "$LLVM_SRC"
