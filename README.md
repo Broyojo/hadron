@@ -127,9 +127,9 @@ scripts/build-steam-play.sh    # the Steam Play integration
 scripts/steam-install          # install it into Steam.app (scripts/steam-uninstall undoes it)
 ```
 
-Steam then runs games straight from this checkout. `scripts/package-runtime.sh` makes the
-self-contained copy of the runtime that a release carries, with no reference to the checkout or
-to Homebrew.
+Steam then runs games straight from this checkout. `scripts/build-app.sh` builds `Hadron.app`
+around a self-contained copy of the runtime (`scripts/package-runtime.sh`), with no reference to
+the checkout or to Homebrew: what a release carries.
 
 ## Running and debugging
 
@@ -152,7 +152,9 @@ low addresses moved above 4GB. It runs 64-bit programs only, through `scripts/wi
 sources.conf          upstream repositories and the revisions Hadron builds
 patches/<component>/  Hadron's changes, as git format-patch queues applied by scripts/fetch.sh
 scripts/              build, install and launch scripts
-launcher/             hadron-steam.exe, the stand-in for Steam's Windows process
+launcher/             hadron-steam.exe, the stand-in for Steam's Windows process, and hadron-icon
+app/                  Hadron.app: the window and the hadron command (scripts/build-app.sh)
+assets/logo/          the logo and the app icon, as drawings
 config/games.conf     per-game settings
 tools/                test programs, Metal probes and benchmarks behind docs/findings.md
 docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup

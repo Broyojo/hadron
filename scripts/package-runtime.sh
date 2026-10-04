@@ -71,10 +71,14 @@ for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ win
 done
 
 mkdir -p "$OUT/scripts" "$OUT/steam" "$EXT"
-for script in hadron-procs.sh paths.sh play shortcut-icon steam-install steam-run steam-uninstall stop watchdog; do
+for script in hadron-procs.sh paths.sh play report shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"
+# The version it will report: VERSION, marked with the commit unless this commit is that release's tag.
+version=$(cat "$ROOT/VERSION")
+[[ "$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)" == "v$version" ]] || version+="-dev.$(git -C "$ROOT" rev-parse --short HEAD)"
+echo "$version" > "$OUT/VERSION"
 cp "$BUILD/notproton/notproton.dylib" "$OUT/steam/"
 cp -R "$SRC/notproton/signatures" "$OUT/steam/signatures"
 # What fetches Valve's Windows client files on the user's Mac: they are not ours to ship.

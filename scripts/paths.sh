@@ -19,9 +19,8 @@ if [ -d "$ROOT/dist/ext/lib" ]; then
 else
     HADRON_LIBPATH=/opt/homebrew/lib
 fi
-# The version: an installed runtime carries it in VERSION, a checkout asks git.
-if [ -f "$ROOT/VERSION" ]; then
-    HADRON_VERSION=$(cat "$ROOT/VERSION")
-else
-    HADRON_VERSION=$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo unknown)
+# The version: VERSION, and in a checkout the commit it is built from as well.
+HADRON_VERSION=$(cat "$ROOT/VERSION" 2>/dev/null || echo unknown)
+if [ -d "$ROOT/.git" ]; then
+    HADRON_VERSION="$HADRON_VERSION-dev.$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi

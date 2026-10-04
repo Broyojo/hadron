@@ -1,0 +1,44 @@
+#!/bin/sh
+# Save a report to attach to a GitHub issue: the logs of the last few launches, the shaders Metal
+# refused, and what Mac and which Hadron this is, in one zip file. Nothing is sent anywhere.
+# Paths in it have the home folder and the user's name taken out.
+#
+# Usage: scripts/report [output.zip]   (default: ~/Desktop/Hadron-report-<date>.zip)
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/paths.sh"
+out="${1:-$HOME/Desktop/Hadron-report-$(date +%Y%m%d-%H%M%S).zip}"
+work=$(mktemp -d)
+dir="$work/Hadron-report"
+mkdir -p "$dir/logs" "$dir/shaders"
+
+{
+    echo "Hadron $HADRON_VERSION"
+    echo "macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+    echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string), $(( $(sysctl -n hw.memsize) / 1073741824 )) GB"
+    echo "Steam setup: $("$ROOT/scripts/steam-status" | head -1)"
+    echo "Saved: $(date)"
+} > "$dir/system.txt"
+
+# The last three launches: Wine's log and the watchdog's memory log of each.
+ls -t "$HADRON_LOGS"/*.log 2>/dev/null | head -6 | while IFS= read -r f; do cp "$f" "$dir/logs/"; done
+# What the launcher wrote for the two games played last (the end of each: these files only grow).
+ls -t "$HOME/Library/Application Support/Steam/steamapps/compatdata"/*/hadron-run.log 2>/dev/null | head -2 |
+    while IFS= read -r f; do
+        appid=$(basename "$(dirname "$f")")
+        tail -n 400 "$f" > "$dir/logs/$appid-hadron-run.log"
+    done
+# The newest shaders Metal's compiler refused, which is a driver bug each time.
+ls -t "$HADRON_LOGS/failed-msl"/*.metal 2>/dev/null | head -4 | while IFS= read -r f; do cp "$f" "$dir/shaders/"; done
+
+# The home folder as ~, the user's name out of Windows-style paths (Z:\Users\name\...), and the
+# Steam account's name and number out altogether.
+find "$dir" -type f | while IFS= read -r f; do
+    LC_ALL=C sed -i '' -E -e "s#$HOME#~#g" -e "s#(Users[\\\\/]+)$USER#\\1user#g" \
+        -e 's#^(Steam(App)?User)=.*#\1=removed#' -e 's#7656119[0-9]{10}#steam-id-removed#g' "$f"
+done
+
+rm -f "$out"
+(cd "$work" && /usr/bin/zip -qr "$out" Hadron-report)
+rm -rf "$work"
+echo "$out"
