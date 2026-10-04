@@ -552,6 +552,11 @@ residency queries can't be used:
   (`sparse-residency-fault.m`). Plain reads and writes are fine, and so is everything on read-only
   (tier 2) textures.
 
+The two Apple documents disagree on whether this is allowed at all: the Metal Shading Language
+specification says sparse textures do not support `write` or `read_write` access, while the
+`MTLTextureSparseTier1` header describes what writes to unbacked regions do. Writable sparse
+images rely on the header's reading; another reason sparse stays off for the alpha.
+
 So a writable sparse image gets a read-only twin of the same shape that exists only to answer
 residency queries (`sparse-twin.m`). Every bind maps the twin's tile to the same heap page as the
 real one, which Metal allows. A sparse read in a shader becomes a plain read of the real texture for

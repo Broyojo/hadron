@@ -91,7 +91,7 @@ the latest fix, run again on their own.
 | Group | Count | What it is |
 |---|---|---|
 | `api.info.image_format_properties` | 173 fail | Sparse binding was limited to 2D single-sample colour images, while the driver reports `sparseBinding`, which requires it for every image type and sample count a format supports. Fixed by 0049 except for 3D (open item 1): 57 remain. |
-| `texture.swizzle`, `texture.compressed` | 134 fail | A Metal bug: in a sparse texture of a block-compressed format, Metal's mip tail places two levels on the same memory for some sizes (39 of 1,225 sizes from 4x4 to 140x140 for BC1, BC7, ETC2 and EAC, mostly where a level is 17 or 33 blocks across; power-of-two sizes from 8x8 up are fine, 4x4 is not). Uncompressed formats are clean (0 of 2,209 sizes). Reproduced without the driver by `tools/metal-probes/sparse-bc-tail.m`. 0051 keeps compressed formats out of sparse images: these tests are now unsupported, 54 `image_format_properties` tests for compressed formats fail instead, and 1,486 sparse tests on compressed formats that passed are skipped. |
+| `texture.swizzle`, `texture.compressed` | 134 fail | A Metal bug: in a sparse texture of a block-compressed format, blit copies address the mip tail levels differently from the sampler. Sampled data differs from what was copied in for 265 of 1,225 sizes from 4x4 to 140x140 (BC1 and BC7; `tools/metal-probes/sparse-bc-sampler.m`), and for 39 of them (43 for BC7) copies place one level on another level's blocks (`sparse-bc-tail.m`; a 51x65 BC1 texture loses a level-0 block to level 3). It happens with the older `MTLHeapTypeSparse` textures too. Uncompressed formats are clean (0 of 1,225 sizes through the sampler, 0 of 2,209 through copies), and so are non-sparse textures. Checked by an independent review of the probes. 0051 keeps compressed formats out of sparse images: these tests are now unsupported, 54 `image_format_properties` tests for compressed formats fail instead, and 1,486 sparse tests on compressed formats that passed are skipped. |
 | `memory_model.message_passing`, `write_after_read` | 79 crash, most of the 104 retries | Lost devices: Metal ends the command buffer with a timeout (`MTL4CommandQueueErrorDomain` error 1). The tests run long shaders, and with six test processes sharing the GPU some exceed Metal's time limit. The same on the driver before and after this round's fixes; open item 2. |
 | `glsl.440.linkage.varying.component.frag_out` | 22 crash | `nir_lower_blend` expects one store per colour output; outputs written per component broke it. Fixed by 0050. |
 | `spirv_assembly...opfma.fp32...denorm_preserve` | 16 fail | The emulated `fma` for denormal operands rounded twice. Fixed by 0046. |
@@ -170,9 +170,12 @@ Ordered by how much they matter.
    reports, into whatever memory follows: RGBA8 1024x128x8 (10 pages reported, page 10 written),
    2048x64x4 (37, page 40), 1000x10x3 (4, page 4); R8 1024x128x8 (20, page 22), 2048x64x4 (10,
    page 10); RGBA32 1000x10x3 (14, page 15). All are textures with few slices
-   (`tools/metal-probes/sparse-3d-units.m`). A Metal bug like the block-compressed tail overlap;
-   with it no tail size from the API is safe, and a tail bound in pieces from scattered memory
-   could not be mapped exactly anyway. Sparse binding stays off for 3D images; the
+   (`tools/metal-probes/sparse-3d-units.m`). `tailSizeInBytes` itself is right: mapping each tail
+   position in an operation of its own, back to back, fills exactly that many pages and every level
+   reads back right in all six shapes (`sparse-3d-positions.m`); the single operation for the whole
+   tail misplaces the positions. That would be a workaround if the driver knew how many pages each
+   position takes, which only measurement shows, and a tail bound in pieces from scattered memory
+   still could not be mapped exactly. Sparse binding stays off for 3D images; the
    57 `image_format_properties.3d` failures stay with it. Zink no longer exposes
    `ARB_sparse_texture` (or `_texture2`, `_clamp`) without sparse 3D images (0062), so OpenGL loses
    sparse textures until this is solved.

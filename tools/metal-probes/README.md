@@ -86,6 +86,17 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   with `replaceRegion` or a blit from a buffer; `Depth16Unorm` clamps the reference to [0, 1], as
   Vulkan asks for fixed-point formats. No difference from the expected answer anywhere
 - `sparse-bc-tail.m`: block-compressed placement-sparse textures with full mip chains, every level
-  written and read back for every size in a grid (`FMT=BC1|BC7|ETC2|EAC|ASTC`): for some sizes two
-  levels of the mip tail share memory (39 of 1,225 sizes for BC1, BC7, ETC2 and EAC; a 51x65 BC1
-  texture loses its last level-0 block to level 3). Uncompressed formats do not show it
+  written by blit and read back for every size in a grid (`FMT=BC1|BC7|ETC2|EAC|ASTC`): for some
+  sizes copies place two levels of the mip tail on the same blocks (39 of 1,225 sizes for BC1, ETC2
+  and EAC, 43 for BC7, where this probe's 256-byte pattern hides 4; ASTC 0). Writing one level then
+  the other clobbers whichever came first: aliasing, not a race. Uncompressed formats are clean,
+  which this probe cannot show (it has no uncompressed mode)
+- `sparse-bc-sampler.m`: the same textures read through the sampler, against a non-sparse texture
+  filled the same way (`<w> <h>` for one size, `4 4 grid BC1|BC7|RGBA8` for the grid): blit copies
+  and the sampler disagree on where tail levels live, in 265 of 1,225 BC1 sizes (BC7 the same);
+  RGBA8 0. Written by an independent review of `sparse-bc-tail.m`
+- `sparse-3d-positions.m`: a placement-sparse 3D tail mapped in one operation or one position per
+  operation (`OPS=x:page,...`, `X0`, `WIDTH`, `FMT=R8|RGBA8|RGBA32`, args `w h d`): positions cover
+  several pages each and positions from 3 up do nothing for 1024x128x8 RGBA8; mapped one position
+  per operation back to back, the tail fills exactly `tailSizeInBytes` and every level is right,
+  while the single whole-tail operation skips a page and writes one past the tail
