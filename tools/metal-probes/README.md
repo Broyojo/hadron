@@ -22,7 +22,34 @@ checked on M2 Pro and M4 instead of assumed. Build one with
 - `compute-lod.m`: implicit-LOD sampling and LOD queries in a compute kernel (always LOD 0: Metal takes no
   derivatives there, so the driver passes gradients from quad operations)
 - `atomic64-lock.m`: what makes a locked 64-bit read-modify-write atomic (a plain spin lock deadlocks
-  a SIMD group; lanes taking turns works; loads, stores and texture reads need device-scope fences)
+  a SIMD group; lanes taking turns works here, with one kernel and one lock; loads, stores and
+  texture reads need device-scope fences). The driver no longer relies on turns, see
+  `turn-lock-stall.m`
+- `turn-lock-stall.m` with `turn-lock-stall.metal`: a kernel the Vulkan driver emitted for a memory
+  model test, with a lock in which the lanes of a SIMD group take turns, run without the driver.
+  Dispatched 8 times in one Metal 4 command buffer with a barrier after each it takes 7 to 9
+  seconds and threads give up on the lock, though none is left held; one dispatch, or 8 without
+  barriers, take milliseconds (two dispatches stall now and then). A size-optimised compile
+  changes nothing. Small edits to the kernel that keep its meaning hide the stall, and a kernel
+  where every lane spins at once shows it with one dispatch. Cause not established; the driver
+  uses a lock that does not depend on turns
+- `atomic64-stress.m`: the same kind of lock written by hand, under the tests' load (65,536 threads,
+  each exchanging two 64-bit words; `HOT=1` puts about 16,000 threads on one lock), on the older
+  API or Metal 4 (`METAL4=1`, optionally `RAW=1`, `GRID2D=1`, `DISPATCHES=n`). It does not stall in
+  tens of thousands of dispatches. What it does show: with `HOT=1` a dispatch takes 40 to 50 ms,
+  and when the GPU is shared (two instances at once) macOS ends most of them, as "Impacting
+  Interactivity" on the older API and as `MTL4CommandQueueErrorTimeout` on Metal 4, with locks left
+  held by the threads it stopped. Also: `atomic_load_explicit` on one half of a 64-bit word in this
+  kernel (`MODE=1`) crashes the compiler service
+- `cas-weak.m`: `atomic_compare_exchange_weak_explicit` did not fail spuriously in 5 runs of 4,096
+  threads incrementing one counter 256 times each: a loop that trusts only the value read back
+  loses no increment
+- `atomic-load-loop.m`: a thread waiting in a loop for another thread's atomic store, reading with a
+  relaxed `atomic_load_explicit` (or `atomic_fetch_or` of 0), mostly never sees the store when the
+  other thread is in a different threadgroup (1,672 of 2,048 waiters); inside one threadgroup it
+  always does. With a device-scope fence before the load, or reading through a compare-and-swap,
+  every waiter sees it. Whether the compiler hoists the load or the hardware serves a stale copy
+  is not known
 - `sparse-write.m`: sparse textures with shader-write usage (sparse tier 1, where read-only ones get
   tier 2): writes land in mapped tiles, residency is reported per tile and per level, a write to an
   unmapped tile reads back within the kernel and is gone in the next command buffer

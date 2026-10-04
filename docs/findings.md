@@ -509,9 +509,15 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
   a lock from a device table of 4,096 32-bit atomics. What had to be found out
   (`tools/metal-probes/atomic64-lock.m`):
   - A plain spin lock deadlocks. The threads of a SIMD group run in lockstep, so the one that takes
-    the lock is held until the others stop spinning, and they are waiting for it. Lanes take turns
-    instead, so only one lane of a group ever waits. Stages without SIMD-group built-ins use a state
-    machine whose exit the compiler can't predict, which keeps the locked section inside the loop.
+    the lock is held until the others stop spinning, and they are waiting for it. The lock is a state
+    machine instead: a lane that gets the lock runs its locked section in the next pass of the same
+    loop, so it never waits for its group, and the loop's exit depends on the value the unlock
+    returns, which the compiler can't predict, so the locked section stays inside the loop. Compute
+    and fragment shaders first let lanes take turns (only the lane whose turn it is spins). That
+    stalled in the memory model tests, with threads giving up on locks nobody held, whenever the
+    kernel was dispatched three or more times in a command buffer with Metal 4 barriers between;
+    any small change to the kernel hid it (`tools/metal-probes/turn-lock-stall.m`, Mesa 0079). The
+    cause is not established.
   - Plain loads, stores and texture reads are not coherent across threads, even under the lock.
     They are with `atomic_thread_fence` at device scope before the read, between the read and the
     write, and after the write. Without the middle fence an exchange on a texture returned stale
@@ -524,7 +530,9 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
   - macOS aborts a command buffer that holds up the display for about 40 ms ("Impacting
     Interactivity"). Threads killed inside the lock leave it held, and later kernels would spin
     forever. The device is lost at that point anyway, but the driver clears the lock table when a
-    command buffer fails and bounds the spin, so the GPU is not left busy.
+    command buffer fails and bounds the spin (about 8 seconds), so the GPU is not left busy. Metal 4
+    reports the same abort as `MTL4CommandQueueErrorTimeout`, after about 50 ms on the GPU when
+    several processes compete for it.
 
   R64 image views are RG32Uint views; the lock is keyed on texel coordinates so every view of an
   image agrees. `tools/atomic64-test` checks exact totals on a buffer and on an r64ui image, with up
