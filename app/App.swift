@@ -27,15 +27,28 @@ final class Model: ObservableObject {
     @Published var failed = false
     @Published var newVersion: String?
     @Published var newVersionPage: URL?
+    @Published var command = CommandLink.State.linked
 
     func refresh() {
         Task.detached {
             let status = Runtime.status()
+            let command = Runtime.app == nil ? .linked : CommandLink.state()
             await MainActor.run {
                 self.state = status.state
                 self.message = status.message
+                self.command = command
             }
         }
+    }
+
+    func installCommand() {
+        output = ""
+        failed = false
+        if let problem = CommandLink.install() {
+            output = problem + "\n"
+            failed = true
+        }
+        command = CommandLink.state()
     }
 
     /// Run a script off the main thread, showing what it prints.
@@ -147,6 +160,11 @@ struct ContentView: View {
                 .frame(height: 110)
                 .padding(8)
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            if model.command == .missing {
+                Button("Add the hadron command for Terminal…") { model.installCommand() }
+                    .buttonStyle(.link).font(.callout).disabled(model.busy)
             }
         }
         .padding(20)

@@ -38,8 +38,8 @@ library as usual. A game that also has a Mac version needs Properties -> Compati
 to get its Windows build.
 
 Everything the window does is also a command: `hadron setup`, `hadron uninstall`, `hadron status`
-(`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image it is the
-app's own program, `/Applications/Hadron.app/Contents/MacOS/Hadron`.
+(`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's
+window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
 
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it.
 
