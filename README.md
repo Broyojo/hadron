@@ -27,13 +27,17 @@ With [Homebrew](https://brew.sh):
 brew install --cask broyojo/hadron/hadron
 ```
 
-Or download `Hadron.dmg` from the [latest release](https://github.com/Broyojo/hadron/releases/latest)
+Or download the disk image from the [latest release](https://github.com/Broyojo/hadron/releases/latest)
 and drag Hadron to Applications.
 
-Then open Hadron once and choose **Set up Steam**, or run `hadron setup`. That adds Hadron to
-Steam as a Steam Play tool (and `hadron uninstall` takes it out again). After that Hadron does
-not need to be open: install and play Windows games from your Steam library as usual. A game
-that also has a Mac version needs Properties -> Compatibility -> Hadron to get its Windows build.
+Then open Hadron once and choose **Set up Steam**, or run `hadron setup`. macOS stops the first
+attempt, because Hadron is changing another app: allow Hadron under System Settings, Privacy &
+Security, App Management, and set up again. That adds Hadron to Steam as a Steam Play tool
+(`hadron uninstall` takes it out again). After that Hadron does not need to be open: install and
+play Windows games from your Steam library as usual. A game that also has a Mac version needs
+Properties -> Compatibility -> Hadron to get its Windows build.
+
+If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it.
 
 To build it yourself instead, see [Building](#building).
 
@@ -49,8 +53,8 @@ To build it yourself instead, see [Building](#building).
 - **It is early.** A handful of games play well ([Status](#status)). Many do not start yet.
   Games with kernel-level anti-cheat, which means most competitive multiplayer games, are not
   expected to work, and neither are games that need a third-party launcher.
-- **First launches are slow.** A game's first start sets up its Windows environment, which
-  takes minutes, and compiles its shaders.
+- **First launches are slow.** A game's first start sets up its Windows environment and
+  compiles its shaders, and the first start after a Hadron update compiles them again.
 - **Nothing about you is sent anywhere.** There is no telemetry. The one request Hadron makes
   on its own is to GitHub, when you open its window, to see whether a newer version exists. If
   something breaks, Hadron can save a report file for you to attach to an issue yourself.
@@ -64,7 +68,7 @@ To build it yourself instead, see [Building](#building).
 
 | Layer | Component | Role |
 |---|---|---|
-| Windows API | [Wine](https://www.winehq.org), upstream master with Hadron's patches | Built as a native arm64 macOS program |
+| Windows API | [Wine](https://www.winehq.org), a pinned revision of upstream with Hadron's patches | Built as a native arm64 macOS program |
 | x86 translation | [FEX](https://github.com/FEX-Emu/FEX) | Runs inside Wine as its ARM64EC (x86-64) and WoW64 (32-bit x86) emulator |
 | Direct3D 9 | [mtld3d](https://github.com/athei/mtld3d) | Direct to Metal |
 | Direct3D 10 and 11 | [DXMT](https://github.com/3Shain/dxmt) | Direct to Metal |
@@ -113,12 +117,12 @@ Then:
 scripts/setup-toolchain.sh     # Homebrew dependencies and llvm-mingw
 scripts/fetch.sh               # clone the upstream sources and apply patches/
 scripts/build-ffmpeg.sh        # FFmpeg, decoding only, for Wine's media playback
+scripts/build-vulkan.sh        # KosmicKrisp, Zink, vkd3d-proton and DXVK's DXGI (before Wine, which looks for Zink's EGL)
 scripts/build-wine.sh          # Wine -> dist/
 scripts/build-fex.sh           # FEX's emulator DLLs
 scripts/build-llvm15.sh        # static LLVM 15, for DXMT's shader compiler
 scripts/build-dxmt.sh          # Direct3D 10/11
 scripts/build-mtld3d.sh        # Direct3D 9 (Rust; see the script for the MSVC CRT licence step)
-scripts/build-vulkan.sh        # KosmicKrisp, Zink, vkd3d-proton and DXVK's DXGI
 scripts/build-lsteamclient.sh  # the Steam bridge
 scripts/build-launcher.sh      # hadron-steam.exe
 scripts/package-loader.sh <profile.provisionprofile>   # sign the loader with the entitlement
@@ -144,7 +148,7 @@ scripts/stop                              # stop every Hadron process
 ```
 
 Each Steam launch logs to `steamapps/compatdata/<appid>/hadron-run.log` and to
-`build/logs/<appid>-*.log`. Settings are environment variables, given as a game's Steam launch
+`build/logs/<appid>-*.log` (`~/Library/Logs/Hadron` for the installed app). Settings are environment variables, given as a game's Steam launch
 options or per app ID in `config/games.conf`; `scripts/play` documents them.
 
 `scripts/build-wine.sh --dev` builds a variant that needs no entitlement, with Windows' fixed
@@ -159,6 +163,7 @@ scripts/              build, install and launch scripts
 launcher/             hadron-steam.exe, the stand-in for Steam's Windows process, and hadron-icon
 app/                  Hadron.app: the window and the hadron command (scripts/build-app.sh)
 assets/logo/          the logo and the app icon, as drawings
+packaging/            entitlements, the list of third-party components, the Homebrew cask
 config/games.conf     per-game settings
 tools/                test programs, Metal probes and benchmarks behind docs/findings.md
 docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup
@@ -177,5 +182,6 @@ Patches follow their upstreams' rules on AI-written code ([CONTRIBUTING.md](CONT
 
 Hadron's own code is under the BSD 3-Clause license ([LICENSE.hadron](LICENSE.hadron)). The
 patches in `patches/` carry the license of the project they modify (Wine's are
-LGPL-2.1-or-later, FEX's and Mesa's MIT), and fetched upstream sources keep their own licenses.
-See [LICENSE](LICENSE).
+LGPL-2.1-or-later, FEX's and Mesa's MIT, NotProton's GPL-3.0), and fetched upstream sources keep
+their own licenses. See [LICENSE](LICENSE). The app carries every component's license and a list
+of what it was built from, in `Contents/SharedSupport/runtime/licenses`.
