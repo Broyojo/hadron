@@ -42,7 +42,8 @@ Everything the window does is also a command: `hadron setup`, `hadron uninstall`
 window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
 
 To remove Hadron, take it out of Steam first (Uninstall in the window, or `hadron uninstall`),
-then delete the app or run `brew uninstall --cask hadron`.
+then delete the app or run `brew uninstall --cask hadron`. If you had the window add the `hadron`
+command, remove that link too: `sudo rm /usr/local/bin/hadron`.
 
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it.
 
