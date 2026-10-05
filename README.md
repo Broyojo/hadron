@@ -41,6 +41,9 @@ Everything the window does is also a command: `hadron setup`, `hadron uninstall`
 (`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's
 window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
 
+To remove Hadron, take it out of Steam first (Uninstall in the window, or `hadron uninstall`),
+then delete the app or run `brew uninstall --cask hadron`.
+
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it.
 
 To build it yourself instead, see [Building](#building).
