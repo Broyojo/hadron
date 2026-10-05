@@ -1,38 +1,55 @@
 # Roadmap and open decisions
 
-## Order of work (agreed 2026-09-29)
+## Where it stands (2026-10-04)
 
-1. Ultimate Custom Night: done bar the frame-time dips in nights (docs/findings.md #18). Next small items: Portal's
-   quit-time assert (worker threads terminated at exit) and a clean mtld3d failure when a 32-bit process runs out of
-   address space.
-2. Harden the MAP_JIT code buffers (Wine 0011, FEX 0005):
-   - an off switch (e.g. `HADRON_FEX_MAP_JIT=0`) falling back to page flipping, for A/B testing;
-   - a real nesting counter for write windows (thread-local storage crashed in FEX's Windows DLLs; use
-     another per-thread slot, e.g. a TEB field);
-   - a stress test in the regression suite hammering code writes, invalidation and relinking across threads.
-3. Steam Play integration (decided 2026-09-30: inside the macOS Steam client, NotProton-style; never the
-   Windows Steam client under Wine). **Prototype works:** Among Us installs and launches from the Mac Steam
-   library through Hadron, and its online sign-in succeeds through the bridge (docs/findings.md #21). Next:
-   - per-game `.app` wrappers so games get Game Mode and a Dock icon, and the overlay shim for Steam's overlay;
-   - replace NotProton's "CrossOver options" panel with Hadron's options (vsync, D3D9 backend, HUD);
-   - first-launch prefix creation takes minutes; seed new prefixes from a template instead;
-   - Steam updates: detect a build the signatures don't cover and say so instead of failing silently.
-4. Vulkan on Metal (KosmicKrisp in Mesa, or MoltenVK) wired into Wine, then vkd3d-proton on it for D3D12
-   and Zink for OpenGL beyond Apple's 4.1. Teardown needs one or the other (docs/test-games.md).
-5. Run the rest of the test game set (docs/test-games.md) to find the next general bugs.
-6. Distribution: a Hadron.app that installs the runtime into ~/Library/Application Support/Hadron and the
-   Steam integration into Steam.app (what scripts/steam-install does), notices when a Steam update undoes the
-   injection and re-applies it, and offers a small GUI: repair, per-game settings, logs, and self-updates
-   (Sparkle). Signing: a Developer ID Application certificate and a Developer Needs a Developer ID Application certificate and a Developer
-   ID provisioning profile for com.broyojo.hadron.loader (only the team's Account Holder can create the
-   certificate).
+Done, in the order it was built: Wine native on arm64 with FEX inside it; Direct3D 9 (mtld3d) and
+10/11 (DXMT) straight to Metal; Steam Play inside the Mac Steam client; Vulkan on Metal
+(KosmicKrisp) with Direct3D 12 (vkd3d-proton) and OpenGL 4.6 (Zink) on it, checked against the
+Khronos conformance suites ([conformance.md](conformance.md)); `Hadron.app` and the `hadron`
+command around a self-contained runtime; a signed, notarized 0.1.0.
 
-Later: external displays (games open on the main display; moving a running game across displays is
-unreliable); lower vsync input latency (fewer queued drawables while display sync is on); mtld3d should fail an allocation cleanly when a 32-bit process runs out of address space (it
-crashed on a null pointer in `LeaseCompletion::consume` with 79 MB left); hardware TSO limited to emulated code (a toggle costs ~0.27 us; enabling it on whole threads made
-Portal unplayably slow); mtld3d/DXMT presenting through Wine's client surfaces (removes Wine 0012's special
-case); D3D12 (vkd3d-proton on KosmicKrisp or DXMT's D3D12); the remaining ~50 ms steamclient retry cost should be gone for
-Steam launches (re-measure).
+## Next
+
+1. **Macs that did not build it.** Everything so far ran on one Mac. Install 0.1.0 from the disk
+   image on others, starting from a Steam that still has Valve's signature, and fix what that
+   finds.
+2. **A game's first launch.** Creating its Windows prefix and running Steam's install scripts is
+   the first thing a new user waits for: measure it, and seed new prefixes from a template.
+3. **Unreal Engine 5.** Subnautica 2 does not load: Metal's compiler gives up on its largest
+   compute kernels, 8-13 MB of generated MSL each ([test-games.md](test-games.md)). The failing
+   shaders are saved by the driver, so this can be worked on without the game.
+4. **Speed.** Nothing has been optimised yet. Teardown is held back by CPU translation, Geometry
+   Dash drops frames while one core is at 100%, and macOS ends GPU work that runs about 50 ms
+   while other processes wait (seen with six test processes; to be checked for a game in front).
+5. **Game controllers.** Wine's controller service starts in the packaged runtime; no controller
+   has been tried in a game.
+6. **Updates.** The window says when a newer release exists. Installing it in place (Sparkle), and
+   the official Homebrew cask in place of the project's own tap.
+7. **Steam updates.** Notice when a Steam update removes the setup and say so, instead of
+   Windows games quietly losing their Install button until Hadron is opened.
+8. **Direct3D 9 to 11 against a ground truth.** The Khronos suites say nothing about mtld3d and
+   DXMT; Wine's Direct3D tests would.
+9. **macOS 26.** Only macOS 27 is supported.
+
+## Hardening left from earlier
+
+- The MAP_JIT code buffers (Wine 0011, FEX 0005): an off switch falling back to page flipping,
+  for A/B testing; a real nesting counter for write windows; a stress test hammering code writes,
+  invalidation and relinking across threads.
+- Ultimate Custom Night's frame-time dips in nights (findings.md #18), Portal's quit-time assert,
+  and a clean mtld3d failure when a 32-bit process runs out of address space (it crashed on a
+  null pointer in `LeaseCompletion::consume` with 79 MB left).
+- Steam's overlay; replacing NotProton's "CrossOver options" panel with Hadron's own options; a
+  Steam build the hook signatures do not cover should be reported, not fail silently.
+
+## Later
+
+External displays (games open on the main display; moving a running game across displays is
+unreliable); lower vsync input latency (fewer queued drawables while display sync is on);
+hardware TSO limited to emulated code (a toggle costs ~0.27 us; enabling it on whole threads made
+Portal unplayably slow); mtld3d/DXMT presenting through Wine's client surfaces (removes Wine
+0012's special case); sparse 3D textures and the other gaps left on purpose in
+[conformance.md](conformance.md), when a game needs them.
 
 ## Facts established by experiment
 
@@ -56,7 +73,11 @@ Steam launches (re-measure).
 - NotProton (the Steam-side integration, src/notproton + patches/notproton) is GPLv3; only its authors can
   relicense it (worth asking them about LGPL or dual licensing). Hadron's own code keeps its licence: the GPL
   component only executes scripts/steam-run as a separate program.
-- lsteamclient includes Steamworks-SDK-derived code (Valve's SDK licence) and NotProton overlays (GPLv3):
-  fine to build locally; check both before redistributing binaries.
+- lsteamclient includes Steamworks-SDK-derived code (Valve's SDK licence) and NotProton overlays (GPLv3).
+  The SDK licence grants building software that uses Steamworks and redistributing the SDK's own
+  `redistributable_bin`; it does not plainly grant redistributing a built lsteamclient. Proton forks ship
+  one all the same. 0.1.0 carries it, with the licence named in its notices: a known grey area.
+- A release carries every component's licence files and `THIRD-PARTY-NOTICES.md`
+  (`scripts/package-runtime.sh`, from `packaging/third-party.conf`).
 - Portal's Mac saves from January 2026 are in ~/Library/Application Support/Steam/steamapps/common/Portal
   and could be copied into the Windows version.
