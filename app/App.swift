@@ -74,8 +74,12 @@ final class Model: ObservableObject {
         let stamp = DateFormatter()
         stamp.dateFormat = "yyyyMMdd-HHmmss"
         panel.nameFieldStringValue = "Hadron-report-\(stamp.string(from: Date())).zip"
-        panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        // The folder the last report went to, or the Desktop the first time.
+        let folder = UserDefaults.standard.url(forKey: "reportFolder")
+        panel.directoryURL = folder.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        UserDefaults.standard.set(url.deletingLastPathComponent(), forKey: "reportFolder")
         perform("report", [url.path]) { ok in
             if ok { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }

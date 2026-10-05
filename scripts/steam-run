@@ -201,7 +201,9 @@ fi
 "$ROOT/scripts/shortcut-icon" >> "$log" 2>&1
 # Keep a Wine log of every Steam launch while the integration is new (build/logs/<appid>-*.log).
 export HADRON_LOG="${HADRON_LOG:-1}"
-cd "$(dirname "$program")" || exit 1
+# The working directory stays the one Steam started this in: the game's launch entry names it
+# (the install folder unless it says otherwise), and a game started as "jre\bin\javaw.exe -jar
+# desktop-1.0.jar" finds its files only from there.
 # Stay in the foreground: Steam tracks this process, and its Stop button sends it SIGTERM, which
 # has to end the game's whole Wine session rather than just the launcher.
 trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
