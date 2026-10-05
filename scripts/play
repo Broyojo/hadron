@@ -20,6 +20,9 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
+# Steam starts a game in the working directory its launch entry names, and scripts/steam-run
+# keeps it. Run by hand, the game starts in its own directory.
+[ -n "${STEAM_COMPAT_DATA_PATH:-}" ] || cd "$(dirname "$exe")" || exit 1
 
 MAC_STEAM="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
 [ -f "$MAC_STEAM/steamclient.dylib" ] || { echo "Mac Steam not found at $MAC_STEAM" >&2; exit 1; }

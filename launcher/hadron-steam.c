@@ -109,7 +109,7 @@ int wmain( int argc, WCHAR **argv )
     const WCHAR *steam_dir = L"C:\\Program Files (x86)\\Steam";
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
-    WCHAR *cmdline, *game_dir, *p;
+    WCHAR *cmdline;
     DWORD exit_code = 1;
 
     if (forwarded >= 0) return forwarded;
@@ -120,14 +120,11 @@ int wmain( int argc, WCHAR **argv )
     else while (*cmdline && *cmdline != ' ') cmdline++;
     while (*cmdline == ' ') cmdline++;
 
-    /* run the game from its own directory, as Steam does */
-    game_dir = _wcsdup( argv[1] );
-    if ((p = wcsrchr( game_dir, '\\' ))) *p = 0;
-    else game_dir = NULL;
-
     register_steam_process( steam_dir );
 
-    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, game_dir, &si, &pi ))
+    /* the game starts in the directory this was started in: Steam's working directory for the
+     * launch, which is not always the executable's own */
+    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
     {
         fwprintf( stderr, L"hadron-steam: failed to start %ls: error %lu\n", argv[1], GetLastError() );
         clear_steam_process();
