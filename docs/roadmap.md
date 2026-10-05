@@ -20,7 +20,9 @@ command around a self-contained runtime; a signed, notarized 0.1.0.
    shaders are saved by the driver, so this can be worked on without the game.
 4. **Speed.** Nothing has been optimised yet. Teardown is held back by CPU translation, Geometry
    Dash drops frames while one core is at 100%, and macOS ends GPU work that runs about 50 ms
-   while other processes wait (seen with six test processes; to be checked for a game in front).
+   while other processes wait (seen with six test processes; to be checked for a game in front). Portal loses a third of its
+   frame rate while a failed portal shot's effect is alive, to lock waits between the engine's
+   threads ([findings #25](findings.md)).
 5. **Game controllers.** Wine's controller service starts in the packaged runtime; no controller
    has been tried in a game.
 6. **Updates.** The window says when a newer release exists. Installing it in place (Sparkle), and

@@ -659,6 +659,39 @@ spawn is Hadron's tool, and leave every other spawn, a Mac game among them, as t
 `make spawn-env` starts real children through the hook with the client's preference and reads
 `sysctl.proc_translated` in them.
 
+## Portal: the frame rate drops while a failed portal shot's effect is alive (open, #25)
+
+Reported by the first outside tester (M5 Max) and reproduced here on 2026-10-05: in Portal, a
+shot at a surface that cannot take a portal drops the frame rate from the 120 cap to about 80
+for as long as the effect lasts, every time. Setting `r_threaded_particles 0` did not change it
+on the tester's Mac.
+
+What was measured:
+
+- mtld3d's instrumented build (`MTLD3D_PERF=1`, its report is in
+  `<game>/mtld3d-logs/<exe>-<pid>.log`): a frame goes from 8.3 ms to 12-13 ms, and all of the
+  difference is outside Direct3D. Time inside D3D9 calls is 0.07 ms calm and 0.08 ms during the
+  drop, and the GPU wait goes to 0.01 ms. The D3D9 layer and the GPU are not the cause.
+- `sample` of the game process in 5 s windows: during the drop three unnamed threads of the game
+  become about 20% busy each, in translated code (about 6% of it in FEX itself), and the main
+  thread is blocked in `NtWaitForAlertByThreadId` for 43% of its samples (6 samples calm, 373
+  during the drop, of about 860). That is `RtlWaitOnAddress` with a timeout, which is how this
+  Wine waits on a contended critical section (`wait_semaphore` in dlls/ntdll/sync.c).
+- wineserver stays at 3-4% CPU and about 5,500 context switches a second in both phases, so
+  server round trips are not the bottleneck.
+
+So the main thread loses about 4 ms a frame to lock waits against the engine's worker threads.
+Which lock is not known: `sample` cannot unwind past Wine's syscall dispatcher into the PE side.
+The next step is a temporary trace in `RtlEnterCriticalSection` that records, for each contended
+wait, the section, the caller's return address and the time waited, summed and printed every few
+seconds, with the addresses resolved through the `+loaddll` lines of the game's log. The process
+heap's lock is the first suspect, since Windows avoids contention there with its
+low-fragmentation heap.
+
+A Steam launch option cannot carry an environment variable in front of `%command%` on the Mac:
+Steam does not run the command through a shell and fails with "OS Error 260". To run a game on
+another runtime, point `~/Library/Application Support/Hadron/runtime` at it for the test.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
