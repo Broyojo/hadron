@@ -30,12 +30,16 @@ brew install --cask broyojo/hadron/hadron
 Or download the disk image from the [latest release](https://github.com/Broyojo/hadron/releases/latest)
 and drag Hadron to Applications.
 
-Then open Hadron once and choose **Set up Steam**, or run `hadron setup`. macOS stops the first
-attempt, because Hadron is changing another app: allow Hadron under System Settings, Privacy &
-Security, App Management, and set up again. That adds Hadron to Steam as a Steam Play tool
-(`hadron uninstall` takes it out again). After that Hadron does not need to be open: install and
-play Windows games from your Steam library as usual. A game that also has a Mac version needs
-Properties -> Compatibility -> Hadron to get its Windows build.
+Then open Hadron once and choose **Set up Steam**. macOS stops the first attempt, because Hadron
+is changing another app: allow Hadron under System Settings, Privacy & Security, App Management,
+and set up again. That adds Hadron to Steam as a Steam Play tool (Uninstall takes it out again).
+After that Hadron does not need to be open: install and play Windows games from your Steam
+library as usual. A game that also has a Mac version needs Properties -> Compatibility -> Hadron
+to get its Windows build.
+
+Everything the window does is also a command: `hadron setup`, `hadron uninstall`, `hadron status`
+(`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's
+window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
 
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it.
 
@@ -47,7 +51,7 @@ To build it yourself instead, see [Building](#building).
   any of the projects it builds on.
 - **It changes Steam.** Setting up adds a library to `/Applications/Steam.app` and signs that app
   again, which replaces Valve's signature on it. That is how Steam for Mac learns to offer
-  Windows games. `hadron uninstall` takes it out, and reinstalling Steam from Valve restores
+  Windows games. Uninstall in Hadron takes it out, and reinstalling Steam from Valve restores
   Valve's signature. A Steam update can undo the setup; open Hadron and choose Repair. Valve has
   said nothing about tools like this on the Mac either way, so use it at your own risk.
 - **It is early.** A handful of games play well ([Status](#status)). Many do not start yet.
