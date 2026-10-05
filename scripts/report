@@ -34,9 +34,16 @@ ls -t "$HOME/Library/Application Support/Steam/steamapps/compatdata"/*/hadron-ru
 ls -t "$HADRON_LOGS/failed-msl"/*.metal 2>/dev/null | head -4 | while IFS= read -r f; do cp "$f" "$dir/shaders/"; done
 
 # The home folder as ~, the user's name out of Windows-style paths (Z:\Users\name\...), and the
-# Steam account's name and number out altogether.
+# Steam account's name and number out altogether. Wine prints some paths in lower case
+# (z:\users\name\...), so the name is matched in any case.
+name=$(printf '%s' "$USER" | LC_ALL=C awk '{
+    for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1); l = tolower(c); u = toupper(c)
+        printf "%s", (l != u) ? "[" l u "]" : (c ~ /[0-9_-]/ ? c : "\\" c)
+    }
+}')
 find "$dir" -type f | while IFS= read -r f; do
-    LC_ALL=C sed -i '' -E -e "s#$HOME#~#g" -e "s#(Users[\\\\/]+)$USER#\\1user#g" \
+    LC_ALL=C sed -i '' -E -e "s#$HOME#~#g" -e "s#([Uu][Ss][Ee][Rr][Ss][\\\\/]+)$name#\\1user#g" \
         -e 's#^(Steam(App)?User)=.*#\1=removed#' -e 's#7656119[0-9]{10}#steam-id-removed#g' "$f"
 done
 
