@@ -1,0 +1,213 @@
+From 5f9bf35027717caf5b18a9d101ca44a9b76b930c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 5 Oct 2026 16:56:48 -0400
+Subject: [PATCH] spawn: Start the compatibility tool as arm64
+
+The client starts a game's process with a binary preference of x86_64
+ahead of arm64. A compatibility tool is run as sh -c, and /bin/sh has
+both, so the shell and every script it runs come up under Rosetta. On a
+Mac without Rosetta the x86_64 sh cannot start at all: the launch fails
+with "OS Error" before the tool has run, while the install script, which
+the client starts another way, works.
+
+Hadron's tool is arm64 throughout. When the spawn is the tool, set the
+preference to arm64 on the caller's attributes for that one spawn and
+put the caller's preference back after it; every other spawn, a Mac game
+among them, keeps the client's preference. The tool is told by its whole
+directory name, so a tool in a directory that only starts the same is
+left alone.
+---
+ dylib/hooks/hook_spawn.c | 65 ++++++++++++++++++++++++++++++++-----
+ dylib/tests/spawn-env.c  | 70 +++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 126 insertions(+), 9 deletions(-)
+
+diff --git a/dylib/hooks/hook_spawn.c b/dylib/hooks/hook_spawn.c
+index a8d486b..a892209 100644
+--- a/dylib/hooks/hook_spawn.c
++++ b/dylib/hooks/hook_spawn.c
+@@ -2,6 +2,7 @@
+ #include "hooks.h"
+ #include "../util/log.h"
+ 
++#include <mach/machine.h>
+ #include <spawn.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -34,6 +35,33 @@ static int np_target_keeps_insert(const char *path) {
+         || strcmp(base, "Steam Helper") == 0;
+ }
+ 
++// The client starts a game with a binary preference of x86_64 ahead of arm64, so the
++// shell that runs a compatibility tool comes up under Rosetta, and does not come up at
++// all on a Mac without it. Hadron's tool is arm64 throughout
++#define NP_TOOL_MARK "/compatibilitytools.d/notproton"
++// The kernel keeps four preferences at most
++#define NP_BINPREF_MAX 4
++
++// The directory's whole name: one that only starts the same is another tool
++static int np_names_tool(const char *s) {
++    for (const char *hit = s ? strstr(s, NP_TOOL_MARK) : NULL; hit; hit = strstr(hit + 1, NP_TOOL_MARK)) {
++        char next = hit[sizeof(NP_TOOL_MARK) - 1];
++        if (next == '/' || next == '\'' || next == '"' || next == '\0')
++            return 1;
++    }
++    return 0;
++}
++
++static int np_spawns_tool(const char *path, char *const argv[]) {
++    if (np_names_tool(path))
++        return 1;
++    for (int i = 0; argv && argv[i]; i++) {
++        if (np_names_tool(argv[i]))
++            return 1;
++    }
++    return 0;
++}
++
+ static char **np_without_insert(char *const envp[]) {
+     if (!envp)
+         return NULL;
+@@ -83,16 +111,37 @@ static int np_spawn_without_insert(fn_posix_spawn orig, const char *api,
+                                    const posix_spawn_file_actions_t *fa,
+                                    const posix_spawnattr_t *attr,
+                                    char *const argv[], char *const envp[]) {
+-    if (np_target_keeps_insert(path))
+-        return orig(pid, path, fa, attr, argv, envp);
+-
+-    char **clean = np_without_insert(envp);
+-    if (!clean)
+-        return orig(pid, path, fa, attr, argv, envp);
++    posix_spawnattr_t native;
++    int own_attr = 0;
++    // The caller's preference, put back after the spawn: the attributes are the caller's
++    // and may start something else next
++    cpu_type_t asked[NP_BINPREF_MAX];
++    size_t asked_count = 0;
++    int changed = 0;
++    if (np_spawns_tool(path, argv)) {
++        cpu_type_t arm64 = CPU_TYPE_ARM64;
++        if (!attr && posix_spawnattr_init(&native) == 0) {
++            attr = &native;
++            own_attr = 1;
++        }
++        if (attr && posix_spawnattr_getbinpref_np(attr, NP_BINPREF_MAX, asked, &asked_count) == 0
++                 && posix_spawnattr_setbinpref_np((posix_spawnattr_t *)attr, 1, &arm64, NULL) == 0) {
++            changed = !own_attr;
++            NP_DBG("[spawn] %s '%s' runs the tool, as arm64", api, path);
++        } else {
++            NP_WARN("[spawn] %s '%s': cannot ask for arm64, the tool starts under Rosetta", api, path);
++        }
++    }
+ 
+-    NP_DBG("[spawn] %s '%s' without the insert", api, path);
+-    int rc = orig(pid, path, fa, attr, argv, (char *const *)clean);
++    char **clean = np_target_keeps_insert(path) ? NULL : np_without_insert(envp);
++    if (clean)
++        NP_DBG("[spawn] %s '%s' without the insert", api, path);
++    int rc = orig(pid, path, fa, attr, argv, clean ? (char *const *)clean : envp);
+     free(clean);
++    if (changed)
++        posix_spawnattr_setbinpref_np((posix_spawnattr_t *)attr, asked_count, asked, NULL);
++    if (own_attr)
++        posix_spawnattr_destroy(&native);
+     return rc;
+ }
+ 
+diff --git a/dylib/tests/spawn-env.c b/dylib/tests/spawn-env.c
+index 873135c..7a6b060 100644
+--- a/dylib/tests/spawn-env.c
++++ b/dylib/tests/spawn-env.c
+@@ -4,6 +4,8 @@
+ #include "../hooks/hook_spawn.c"
+ 
+ #include <stdio.h>
++#include <sys/sysctl.h>
++#include <sys/wait.h>
+ 
+ int   np_log_level = 0;
+ FILE *np_log_file  = NULL;
+@@ -57,7 +59,72 @@ static void survives(char *const envp[], const char *const want[], const char *w
+     free(got);
+ }
+ 
++static void tool(const char *path, char *const argv[], int want, const char *what) {
++    check(np_spawns_tool(path, argv) == want, what);
++}
++
++extern char **environ;
++
++// What a child started through the hook reports for sysctl.proc_translated: 1 under
++// Rosetta, 0 native, -1 when it could not be started or asked.
++static int translated(char *const argv[], const posix_spawnattr_t *attr) {
++    pid_t pid;
++    if (np_spawn_without_insert(posix_spawn, "posix_spawn", &pid, "/bin/sh", NULL, attr, argv, environ) != 0)
++        return -1;
++    int status;
++    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status))
++        return -1;
++    return WEXITSTATUS(status) > 1 ? -1 : WEXITSTATUS(status);
++}
++
+ int main(void) {
++    // The client runs a tool as sh -c with the quoted command line it logs.
++    char *game[] = { (char *)"/bin/sh", (char *)"-c",
++                     (char *)"'/Users/x/Library/Application Support/Steam/compatibilitytools.d/notproton/.'/run"
++                             " waitforexitandrun  '/Users/x/Library/Application Support/Steam/steamapps/common/G/g.exe'",
++                     NULL };
++    char *mac[] = { (char *)"/bin/sh", (char *)"-c",
++                    (char *)"'/Users/x/Library/Application Support/Steam/steamapps/common/G/G.app'", NULL };
++    char *other[] = { (char *)"/bin/sh", (char *)"-c",
++                      (char *)"'/Users/x/Library/Application Support/Steam/compatibilitytools.d/another/run' run", NULL };
++    tool("/bin/sh", game, 1, "a launch through the tool is the tool");
++    tool("/Users/x/Library/Application Support/Steam/compatibilitytools.d/notproton/run", NULL, 1,
++         "the tool started by its own path is the tool");
++    tool("/bin/sh", mac, 0, "a Mac game is not the tool");
++    tool("/bin/sh", other, 0, "another compatibility tool is not this one");
++    tool(NULL, NULL, 0, "nothing named is not the tool");
++    char *longer_name[] = { (char *)"/bin/sh", (char *)"-c",
++                            (char *)"'/Users/x/Library/Application Support/Steam/compatibilitytools.d/notproton-old/.'/run run", NULL };
++    tool("/bin/sh", longer_name, 0, "a tool whose directory only starts with the name is not this one");
++    char *bare[] = { (char *)"/bin/sh", (char *)"-c",
++                     (char *)"'/Users/x/Library/Application Support/Steam/compatibilitytools.d/notproton'/run run", NULL };
++    tool("/bin/sh", bare, 1, "the tool's directory quoted without a trailing dot is the tool");
++
++    // The client's preference, as it is in steamclient.dylib. A Mac without Rosetta cannot
++    // start the x86_64 sh it selects; one with Rosetta runs it translated, which is what the
++    // checks below can see. They need Rosetta to tell the difference, so they are skipped
++    // without it.
++    cpu_type_t client[2] = { CPU_TYPE_X86_64, CPU_TYPE_ARM64 };
++    char *probe = (char *)"exit \"$(/usr/sbin/sysctl -n sysctl.proc_translated)\"";
++    char *mac_probe[] = { (char *)"/bin/sh", (char *)"-c", probe, NULL };
++    char *tool_probe[] = { (char *)"/bin/sh", (char *)"-c", probe,
++                           (char *)"/compatibilitytools.d/notproton/./run", NULL };
++    posix_spawnattr_t attr;
++    posix_spawnattr_init(&attr);
++    posix_spawnattr_setbinpref_np(&attr, 2, client, NULL);
++    int mac_game = translated(mac_probe, &attr);
++    if (mac_game == 1) {
++        check(translated(tool_probe, &attr) == 0, "the tool starts as arm64 against the client's preference");
++        // The same attributes again, as a caller that reuses them would: the tool's spawn
++        // must have put the preference back.
++        check(translated(mac_probe, &attr) == 1, "a Mac game started next keeps the client's preference");
++    } else {
++        printf("==> spawn env: no Rosetta here, the preference checks were skipped\n");
++        check(translated(tool_probe, &attr) == 0, "the tool starts without Rosetta");
++    }
++    posix_spawnattr_destroy(&attr);
++    check(translated(tool_probe, NULL) == 0, "the tool starts as arm64 when the caller gave no attributes");
++
+     // The client's own re-exec is the one child that has to keep the insert, because the
+     // hooks install in that process and an exec does not get LSEnvironment.
+     keeps("/Applications/Steam.app/Contents/MacOS/steam_osx", 1, "an absolute steam_osx keeps it");
+@@ -112,6 +179,7 @@ int main(void) {
+         printf("==> spawn env: %d check(s) failed\n", failures);
+         return 1;
+     }
+-    printf("==> spawn env: steam_osx and Steam Helper keep the insert, every other child loses it\n");
++    printf("==> spawn env: steam_osx and Steam Helper keep the insert, every other child loses it;"
++           " the tool starts as arm64\n");
+     return 0;
+ }
+-- 
+2.54.0 (Apple Git-157)
+

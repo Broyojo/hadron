@@ -43,3 +43,7 @@ jobs:
         run: scripts/fetch.sh wine fex dxmt notproton mtld3d mesa vkd3d-proton dxvk
       - name: The queues match what was fetched
         run: scripts/check-patches.sh
+      # Which child processes of Steam keep the inserted library, and that the tool is started
+      # as arm64 against the client's preference for x86_64 (docs/findings.md #24).
+      - name: The Steam library's spawn hook
+        run: make -C src/notproton spawn-env

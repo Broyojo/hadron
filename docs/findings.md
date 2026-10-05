@@ -638,6 +638,27 @@ remaining driver work is a checklist.
 Open: `dEQP-VK.api.info.image_format_properties.*` fails for every format, because the suite
 requires sparse binding on 1D, 3D and multisampled images and KosmicKrisp has single-sampled 2D only.
 
+## Steam starts a game as x86_64 first: the launch needed Rosetta (#24)
+
+Found by the first test on a Mac that had never had Hadron or Rosetta (2026-10-05, M5 Max,
+macOS 27.0.1). Setup worked and a game's install script ran through Hadron, but every game
+launch failed in Steam with "OS Error", and `hadron-run.log` had no entry for it: Steam failed
+before the tool ran. Installing Rosetta made it work.
+
+`steamclient.dylib` starts a game's process with `posix_spawn` and a binary preference
+(`posix_spawnattr_setbinpref_np`) of x86_64, then arm64. A compatibility tool is run as
+`/bin/sh -c '<tool>/run waitforexitandrun <exe>'`, and `/bin/sh` has both architectures, so the
+x86_64 one is chosen. Without Rosetta it cannot start. With Rosetta it runs translated, and so
+does everything it starts that has an x86_64 slice: `scripts/steam-run` and `scripts/play` ran
+under Rosetta on every Mac so far, reporting `uname -m` as x86_64. Wine, FEX and the game were
+native all along, because those binaries are arm64 only. The install script is started another
+way (`fork` and `execvp`), with no preference, which is why it worked.
+
+NotProton patch 0003 has the library's `posix_spawn` hook set the preference to arm64 when the
+spawn is Hadron's tool, and leave every other spawn, a Mac game among them, as the client asked.
+`make spawn-env` starts real children through the hook with the client's preference and reads
+`sysctl.proc_translated` in them.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
