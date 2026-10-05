@@ -85,6 +85,10 @@ for script in hadron-procs.sh mtld3d-prefix paths.sh play report shortcut-icon s
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"
+cp "$BUILD/notproton/notproton.dylib" "$OUT/steam/"
+cp -R "$SRC/notproton/signatures" "$OUT/steam/signatures"
+# What fetches Valve's Windows client files on the user's Mac: they are not ours to ship.
+cp "$SRC/notproton/bridge/fetch-valve.sh" "$SRC/notproton/app/Sources/NotProtonApp/Resources/valve-packages.manifest" "$OUT/steam/"
 # The packaged scripts run on Macs without Apple's developer tools, where otool, python3 and the
 # like are stubs that only offer to install them: none of those may be used.
 # By name or by path (/usr/bin/otool), and as an interpreter (#!/usr/bin/python3); comments apart.
@@ -100,10 +104,6 @@ done
 version=$(cat "$ROOT/VERSION")
 [[ "$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)" == "v$version" ]] || version+="-dev.$(git -C "$ROOT" rev-parse --short HEAD)"
 echo "$version" > "$OUT/VERSION"
-cp "$BUILD/notproton/notproton.dylib" "$OUT/steam/"
-cp -R "$SRC/notproton/signatures" "$OUT/steam/signatures"
-# What fetches Valve's Windows client files on the user's Mac: they are not ours to ship.
-cp "$SRC/notproton/bridge/fetch-valve.sh" "$SRC/notproton/app/Sources/NotProtonApp/Resources/valve-packages.manifest" "$OUT/steam/"
 
 # The runtime's own Mach-O files, except the loader's bundle, which keeps its signature.
 machos=()
