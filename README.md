@@ -9,6 +9,7 @@
   <a href="https://discord.gg/ShNTcxWjKN"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://github.com/Broyojo/hadron/discussions"><img alt="Discussions" src="https://img.shields.io/badge/GitHub-Discussions-24292F?logo=github&logoColor=white"></a>
   <a href="https://github.com/Broyojo/hadron/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Broyojo/hadron?label=release"></a>
+  <a href="#install"><img alt="Homebrew cask" src="https://img.shields.io/badge/Homebrew-cask-FBB040?logo=homebrew&logoColor=white"></a>
 </p>
 
 An open-source way to play Windows games on Apple Silicon Macs: install and play them from the
