@@ -160,7 +160,8 @@ Each Steam launch logs to `steamapps/compatdata/<appid>/hadron-run.log` and to
 options or per app ID in `config/games.conf`; `scripts/play` documents them.
 
 `scripts/build-wine.sh --dev` builds a variant that needs no entitlement, with Windows' fixed
-low addresses moved above 4GB. It runs 64-bit programs only, through `scripts/wine-dev`.
+low addresses moved above 4GB, and `scripts/build-fex.sh --dev` gives it the x86 translator. It
+runs 64-bit programs only, through `scripts/wine-dev`.
 
 ## Repository layout
 

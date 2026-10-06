@@ -71,7 +71,7 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
 - **Another runtime for one test.** Copy the runtime, change the copy, and point
   `~/Library/Application Support/Hadron/runtime` at it (CONTRIBUTING.md, "Working without an
   Apple Developer account"). A game's prefix keeps copies of some libraries from when it was
-  made.
+  made, and its saves: copy a changed library into it, do not delete it.
 - **What is known.** [docs/findings.md](docs/findings.md) is the numbered log of what was
   measured and fixed, with the open problems marked; [docs/test-games.md](docs/test-games.md)
   says how each game fares; [docs/roadmap.md](docs/roadmap.md) is the order of work. Read the

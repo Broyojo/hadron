@@ -4,8 +4,14 @@
 #   libwow64fex.dll    aarch64 PE, emulates i386 code under WoW64      (xtajit.dll role)
 #   libarm64ecfex.dll  arm64ec PE, emulates x86_64 code in ARM64EC     (xtajit64.dll role)
 #   lib*fex.so         Darwin unix-side helpers loaded by the DLLs via __wine_unix_call
+#
+# Usage: scripts/build-fex.sh [--dev]    (--dev installs into the dev variant, dist-dev)
 
 source "$(dirname "$0")/env.sh"
+
+# The same build serves both variants; only where it is installed differs.
+INSTALL="$DIST"
+[[ "${1:-}" == --dev ]] && INSTALL="$ROOT/dist-dev"
 
 FEX_SRC="$SRC/fex"
 MINGW="$ROOT/toolchains/llvm-mingw/bin"
@@ -27,7 +33,7 @@ for target in wow64 arm64ec; do
         -DENABLE_LTO=False -DENABLE_ASSERTIONS=False -DENABLE_JEMALLOC_GLIBC_ALLOC=False \
         -DBUILD_TESTING=False -DTUNE_ARCH=generic -DTUNE_CPU=none -DRANGES_NATIVE=OFF >/dev/null
     PATH="$MINGW:$PATH" cmake --build "$BUILD/fex-$target"
-    PATH="$MINGW:$PATH" cmake --install "$BUILD/fex-$target" >/dev/null
+    PATH="$MINGW:$PATH" cmake --install "$BUILD/fex-$target" --prefix "$INSTALL" >/dev/null
 done
 
 log "building FEX unix helpers"
@@ -37,14 +43,14 @@ cmake -S "$FEX_SRC/Source/Windows/UnixLib" -B "$BUILD/fex-unixlib" -G Ninja \
     -DCMAKE_INSTALL_PREFIX="$DIST" \
     -DCMAKE_INSTALL_LIBDIR=lib/wine/aarch64-unix >/dev/null
 cmake --build "$BUILD/fex-unixlib"
-cmake --install "$BUILD/fex-unixlib" >/dev/null
+cmake --install "$BUILD/fex-unixlib" --prefix "$INSTALL" >/dev/null
 
 # Install FEX under the emulator names Wine loads by default (HKLM\Software\Microsoft\Wow64\x86
 # and \amd64 fall back to xtajit.dll / xtajit64.dll), so it works from the first prefix boot.
-W="$DIST/lib/wine/aarch64-windows"
+W="$INSTALL/lib/wine/aarch64-windows"
 rm -f "$W/xtajit.dll" "$W/xtajit64.dll"
 cp "$W/libwow64fex.dll" "$W/xtajit.dll"
 cp "$W/libarm64ecfex.dll" "$W/xtajit64.dll"
 
 log "done:"
-ls -la "$DIST"/lib/wine/aarch64-windows/lib*fex.dll "$DIST"/lib/wine/aarch64-unix/lib*fex.so
+ls -la "$INSTALL"/lib/wine/aarch64-windows/lib*fex.dll "$INSTALL"/lib/wine/aarch64-unix/lib*fex.so
