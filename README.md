@@ -38,8 +38,16 @@ Then open Hadron once and choose **Set up Steam**. macOS stops the first attempt
 is changing another app: allow Hadron under System Settings, Privacy & Security, App Management,
 and set up again. That adds Hadron to Steam as a Steam Play tool (Uninstall takes it out again).
 After that Hadron does not need to be open: install and play Windows games from your Steam
-library as usual. A game that also has a Mac version needs Properties -> Compatibility -> Hadron
-to get its Windows build.
+library as usual.
+
+**A game that also has a Mac version** is installed as that Mac version unless you say
+otherwise. Many older Mac versions are 32-bit and no longer run at all; a 64-bit Intel one still
+runs, through Rosetta. To play the Windows version through Hadron instead, right-click the game
+in your library, open **Properties**, go to **Compatibility**, and tick **Force the use of a
+specific Steam Play compatibility tool**. Hadron is selected for you, and Steam then downloads
+the Windows build. This is the same setting Proton uses on Linux, and the Portal games in the
+[table below](#status) were played this way. Games that only exist for Windows need nothing:
+they use Hadron on their own.
 
 Everything the window does is also a command: `hadron setup`, `hadron uninstall`, `hadron status`
 (`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's

@@ -35,7 +35,7 @@ HADRON_LOG=1 scripts/play <id> games/<name>/<game>.exe [args]
 
 Through Mac Steam (the normal way, with the Steam bridge): `scripts/build-steam-play.sh`, then
 `scripts/steam-install` once, and install and play Windows games from the Steam library as usual.
-Games with a Mac version need Properties -> Compatibility -> Hadron to get their Windows build. Each launch
+Games with a Mac version need Properties -> Compatibility -> "Force the use of a specific Steam Play compatibility tool" ticked to get their Windows build (Hadron is then selected). Each launch
 logs to `steamapps/compatdata/<appid>/hadron-run.log` and `build/logs/<appid>-*.log`.
 
 Manual launches (`scripts/play`) have no Steam client serving them, so run them with
@@ -58,3 +58,4 @@ Manual launches (`scripts/play`) have no Steam client serving them, so run them 
 | Besiege | **Runs** | Same tester, a few minutes, DXMT, clean log. Wine's file-browser windows appear: the game calls ShellExecute three times and each starts one. Threads time out on Wine's loader lock when it quits. |
 | 5D Chess With Multiverse Time Travel | **Runs** | Same tester, six minutes on Zink, clean log. |
 | Slay the Spire | **Does not start** | "A Java Exception has occurred" from its launcher; the exception itself has not been captured. A stock Java 8 misbehaves under FEX once its compilers run (docs/findings.md #27), which may be the same thing. |
+| Half-Life | **Runs** | OpenGL on Zink, played for a few minutes on 2026-10-06. The intro animation at launch is black, and it is a little laggy at times. Not investigated; the log has two `CreateSwapchainKHR failed with VK_ERROR_FORMAT_NOT_SUPPORTED` from Zink, a lead for the black intro, and 7,709 `GL_INVALID_ENUM in glTexEnv(param=GL_ALPHA)`. |
