@@ -160,7 +160,8 @@ Each Steam launch logs to `steamapps/compatdata/<appid>/hadron-run.log` and to
 options or per app ID in `config/games.conf`; `scripts/play` documents them.
 
 `scripts/build-wine.sh --dev` builds a variant that needs no entitlement, with Windows' fixed
-low addresses moved above 4GB. It runs 64-bit programs only, through `scripts/wine-dev`.
+low addresses moved above 4GB, and `scripts/build-fex.sh --dev` gives it the x86 translator. It
+runs 64-bit programs only, through `scripts/wine-dev`.
 
 ## Repository layout
 
@@ -175,16 +176,22 @@ packaging/            entitlements, the list of third-party components, the Home
 config/games.conf     per-game settings
 tools/                test programs, Metal probes and benchmarks behind docs/findings.md
 docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup
+AGENTS.md             how to work on Hadron: what a fix is, evidence, running games safely
 src/ build/ dist/     checkouts, build trees and the installed runtime (git-ignored)
 ```
 
 ## How it was made
 
-Most of Hadron's code was written with an AI coding assistant, directed and tested by its author;
-the commits say so in their trailers. What it claims rests on tests rather than on who typed it:
-the games in [docs/test-games.md](docs/test-games.md), and the Khronos conformance suites for
-Vulkan and OpenGL, whose results and known gaps are in [docs/conformance.md](docs/conformance.md).
-Patches follow their upstreams' rules on AI-written code ([CONTRIBUTING.md](CONTRIBUTING.md)).
+Most of Hadron's code was written by a coding agent, [Claude Code](https://claude.com/claude-code)
+running Claude Opus 5.5, directed and tested by its author; the commits say so in their trailers.
+What it claims rests on tests rather than on who typed it: the games in
+[docs/test-games.md](docs/test-games.md), and the Khronos conformance suites for Vulkan and
+OpenGL, whose results and known gaps are in [docs/conformance.md](docs/conformance.md).
+
+Fixing things the same way is welcome, and probably the way this project scales: a game's report
+and this repository are what an agent needs to start on a game that fails. How you work is up to
+you. Patches follow their upstreams' rules on AI-written code
+([CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## License
 
