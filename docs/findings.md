@@ -710,8 +710,33 @@ libraries.
 
 Wine patch 0024 registers 14.51.36247, which is what the redistributable Steam installs today
 writes. The entries are written without overwriting, as upstream has them, so a prefix made
-earlier keeps 14.42 (and a real redistributable's newer value is never lowered); such a prefix
-has to be made again for a game that needs it. Not verified on Astroneer itself.
+earlier keeps 14.42; such a prefix has to be made again for a game that needs it.
+
+That was not enough for Astroneer: its launcher still asked. It wants 14.24.28127.4 or newer
+and then loads `msvcp140_2.dll` and `vcruntime140_1.dll`, and the tester's logs show it never
+reached the two loads, so the version it read was too low. Steam's install script, which runs
+before the game, had run an older redistributable, and under Wine that installs and writes its
+own version over the registered one (reproduced: Steam's 2019 `VC_redist.x64.exe /quiet` in a
+new prefix exits 0 and leaves 14.28.29334 where 14.51 was). On Windows it would not: the
+installer is a WiX bundle, the installed redistributable is registered as one under
+`Uninstall` in the 32-bit registry view, and an older bundle that finds a newer one stops with
+`ERROR_PRODUCT_VERSION` (1638), which Steam's scripts accept.
+
+Registering Wine's runtime as such a bundle makes the older installers stop the same way (tried:
+with the keys a real 14.51 redistributable leaves, and a bundle path that exists, Steam's 2019
+installer logs "Detected related bundle … operation: Downgrade" and exits 1638). It was not kept:
+the redistributable also installs libraries Wine does not have, MFC among them, and a game that
+needs those gets them from exactly that installer. Claiming the whole bundle is installed would
+take them away.
+
+So the installers run as before, and `hadron-steam.exe`, which starts every game, keeps the
+registered version from being lower than the runtime that is there: it reads the file version
+of `msvcp140.dll` in the system directory (Wine's stays in place through an older installer,
+its version being higher) and raises `Major`, `Minor`, `Bld` and `Version` under
+`VC\Runtimes\x64` and `x86`, in both registry views, when they are below it. In a new prefix:
+14.51 after the first launch; 14.28.29334 after Steam's 2019 x64 and x86 installers, with their
+twelve MFC files installed and Wine's `msvcp140.dll` untouched; 14.50.35719 after the next
+launch. A prefix lowered earlier is repaired the same way. Not verified on Astroneer itself.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 

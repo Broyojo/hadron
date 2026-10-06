@@ -10,6 +10,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <wchar.h>
 
 static void set_dword( HKEY key, const WCHAR *name, DWORD value )
@@ -20,6 +21,72 @@ static void set_dword( HKEY key, const WCHAR *name, DWORD value )
 static void set_string( HKEY key, const WCHAR *name, const WCHAR *value )
 {
     RegSetValueExW( key, name, 0, REG_SZ, (const BYTE *)value, (wcslen( value ) + 1) * sizeof(WCHAR) );
+}
+
+/* Keep the registered version of the Visual C++ runtime from being lower than the runtime that
+ * is there. Steam's install script runs the redistributable a game shipped with. On Windows an
+ * older one stops when a newer one is installed; in a prefix it installs, leaves Wine's newer
+ * libraries in place, since their file versions are higher, and writes its own version over the
+ * registered one. A launcher that reads that version (Unreal's does) then asks for the game's
+ * prerequisite installer. The version of msvcp140.dll in the system directory says what is
+ * there. */
+static void keep_vc_runtime_version( const WCHAR *arch, const WCHAR *system_dir, REGSAM view )
+{
+    static const WCHAR *names[] = { L"Major", L"Minor", L"Bld" };
+    WCHAR path[MAX_PATH], text[48];
+    DWORD handle, size, type, len, have[3], registered[3] = { 0, 0, 0 };
+    VS_FIXEDFILEINFO *info;
+    UINT info_len;
+    void *data;
+    HKEY key;
+    int i;
+
+    swprintf( path, MAX_PATH, L"%ls\\msvcp140.dll", system_dir );
+    if (!(size = GetFileVersionInfoSizeW( path, &handle )) || !(data = malloc( size ))) return;
+    if (!GetFileVersionInfoW( path, 0, size, data ) || !VerQueryValueW( data, L"\\", (void **)&info, &info_len ))
+    {
+        free( data );
+        return;
+    }
+    have[0] = HIWORD( info->dwFileVersionMS );
+    have[1] = LOWORD( info->dwFileVersionMS );
+    have[2] = HIWORD( info->dwFileVersionLS );
+    free( data );
+
+    /* only a key that exists: an architecture without a registered runtime stays without one */
+    swprintf( path, MAX_PATH, L"Software\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\%ls", arch );
+    if (RegOpenKeyExW( HKEY_LOCAL_MACHINE, path, 0, KEY_QUERY_VALUE | KEY_SET_VALUE | view, &key )) return;
+    for (i = 0; i < 3; i++)
+    {
+        len = sizeof(registered[i]);
+        if (RegQueryValueExW( key, names[i], NULL, &type, (BYTE *)&registered[i], &len ) || type != REG_DWORD)
+            registered[i] = 0;
+    }
+    for (i = 0; i < 3 && registered[i] == have[i]; i++) ;
+    if (i < 3 && registered[i] < have[i])
+    {
+        for (i = 0; i < 3; i++) set_dword( key, names[i], have[i] );
+        set_dword( key, L"Rbld", 0 );
+        set_dword( key, L"Installed", 1 );
+        swprintf( text, 48, L"%lu.%lu.%lu.0", have[0], have[1], have[2] );
+        set_string( key, L"Version", text );
+    }
+    RegCloseKey( key );
+}
+
+static void keep_vc_runtime_versions(void)
+{
+    static const REGSAM views[] = { KEY_WOW64_64KEY, KEY_WOW64_32KEY };
+    WCHAR system[MAX_PATH], wow64[MAX_PATH];
+    int i;
+
+    if (!GetSystemDirectoryW( system, MAX_PATH )) system[0] = 0;
+    if (!GetSystemWow64DirectoryW( wow64, MAX_PATH )) wow64[0] = 0;
+    for (i = 0; i < 2; i++)
+    {
+        if (system[0]) keep_vc_runtime_version( L"x64", system, views[i] );
+        if (wow64[0]) keep_vc_runtime_version( L"x86", wow64, views[i] );
+    }
 }
 
 static void register_steam_process( const WCHAR *steam_dir )
@@ -121,6 +188,7 @@ int wmain( int argc, WCHAR **argv )
     while (*cmdline == ' ') cmdline++;
 
     register_steam_process( steam_dir );
+    keep_vc_runtime_versions();
 
     /* the game starts in the directory this was started in: Steam's working directory for the
      * launch, which is not always the executable's own */
