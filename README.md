@@ -180,11 +180,16 @@ src/ build/ dist/     checkouts, build trees and the installed runtime (git-igno
 
 ## How it was made
 
-Most of Hadron's code was written with an AI coding assistant, directed and tested by its author;
-the commits say so in their trailers. What it claims rests on tests rather than on who typed it:
-the games in [docs/test-games.md](docs/test-games.md), and the Khronos conformance suites for
-Vulkan and OpenGL, whose results and known gaps are in [docs/conformance.md](docs/conformance.md).
-Patches follow their upstreams' rules on AI-written code ([CONTRIBUTING.md](CONTRIBUTING.md)).
+Most of Hadron's code was written by a coding agent, [Claude Code](https://claude.com/claude-code)
+running Claude Opus 5.5, directed and tested by its author; the commits say so in their trailers.
+What it claims rests on tests rather than on who typed it: the games in
+[docs/test-games.md](docs/test-games.md), and the Khronos conformance suites for Vulkan and
+OpenGL, whose results and known gaps are in [docs/conformance.md](docs/conformance.md).
+
+Fixing things the same way is welcome, and probably the way this project scales: a game's report
+and this repository are what an agent needs to start on a game that fails. How you work is up to
+you. Patches follow their upstreams' rules on AI-written code
+([CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## License
 

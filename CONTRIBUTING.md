@@ -65,6 +65,18 @@ those, delete the prefix so that the next launch makes it again, or copy the fil
 Without a release at hand, `scripts/build-wine.sh --dev` builds a variant that needs no
 entitlement and runs 64-bit programs only ([README](README.md#running-and-debugging)).
 
+## Using a coding agent
+
+Hadron was built with one ([README](README.md#how-it-was-made)), and fixing an issue with one is
+welcome; it is how most fixes here were found. What a game's report and `docs/findings.md` hold is
+usually enough for an agent to reproduce a failure and look for its cause. It is your choice
+either way, and a change is judged the same however it was written: by what was tested. Two
+things to keep to:
+
+- Say in the commit that an agent wrote it, with a `Co-Authored-By` trailer or the trailer the
+  upstream asks for.
+- The rules of the next section still apply. They rule out agent-written changes to some code.
+
 ## The upstreams' own rules
 
 Patches are written so they could go upstream, so their projects' rules apply here:
