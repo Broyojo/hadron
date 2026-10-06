@@ -35,7 +35,7 @@ HADRON_LOG=1 scripts/play <id> games/<name>/<game>.exe [args]
 
 Through Mac Steam (the normal way, with the Steam bridge): `scripts/build-steam-play.sh`, then
 `scripts/steam-install` once, and install and play Windows games from the Steam library as usual.
-Games with a Mac version need Properties -> Compatibility -> Hadron to get their Windows build. Each launch
+Games with a Mac version need Properties -> Compatibility -> "Force the use of a specific Steam Play compatibility tool" ticked to get their Windows build (Hadron is then selected). Each launch
 logs to `steamapps/compatdata/<appid>/hadron-run.log` and `build/logs/<appid>-*.log`.
 
 Manual launches (`scripts/play`) have no Steam client serving them, so run them with
