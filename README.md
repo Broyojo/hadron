@@ -41,11 +41,11 @@ After that Hadron does not need to be open: install and play Windows games from 
 library as usual.
 
 **A game that also has a Mac version** is installed as that Mac version unless you say
-otherwise, and many older Mac versions no longer run: they are 32-bit, or Intel-only. To play
-the Windows version through Hadron instead, right-click the game in your library, open
-**Properties**, go to **Compatibility**, and tick **Force the use of a specific Steam Play
-compatibility tool**. Hadron is selected for you, and Steam then downloads the Windows build.
-This is the same setting Proton uses on Linux, and the Portal games in the
+otherwise. Many older Mac versions are 32-bit and no longer run at all; a 64-bit Intel one still
+runs, through Rosetta. To play the Windows version through Hadron instead, right-click the game
+in your library, open **Properties**, go to **Compatibility**, and tick **Force the use of a
+specific Steam Play compatibility tool**. Hadron is selected for you, and Steam then downloads
+the Windows build. This is the same setting Proton uses on Linux, and the Portal games in the
 [table below](#status) were played this way. Games that only exist for Windows need nothing:
 they use Hadron on their own.
 
