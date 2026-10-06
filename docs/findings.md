@@ -722,13 +722,21 @@ installer is a WiX bundle, the installed redistributable is registered as one un
 `Uninstall` in the 32-bit registry view, and an older bundle that finds a newer one stops with
 `ERROR_PRODUCT_VERSION` (1638), which Steam's scripts accept.
 
-Wine patch 0025 adds that registration for the x64 and x86 bundles, with the keys a real
-14.51 redistributable leaves (read from a prefix where one was installed). The bundle engine
-also wants the registered bundle's file to exist ("Failed to get size of pseudo bundle"
-otherwise), so the path names `dism.exe`, a stub that does nothing and returns 0. With it, in a
-new prefix: Steam's 2019 installers log "Detected related bundle … operation: Downgrade" and
-exit 1638, the 2022 ones exit 0, the 2013 one still installs, and the version stays 14.51
-throughout. Not verified on Astroneer itself.
+Registering Wine's runtime as such a bundle makes the older installers stop the same way (tried:
+with the keys a real 14.51 redistributable leaves, and a bundle path that exists, Steam's 2019
+installer logs "Detected related bundle … operation: Downgrade" and exits 1638). It was not kept:
+the redistributable also installs libraries Wine does not have, MFC among them, and a game that
+needs those gets them from exactly that installer. Claiming the whole bundle is installed would
+take them away.
+
+So the installers run as before, and `hadron-steam.exe`, which starts every game, keeps the
+registered version from being lower than the runtime that is there: it reads the file version
+of `msvcp140.dll` in the system directory (Wine's stays in place through an older installer,
+its version being higher) and raises `Major`, `Minor`, `Bld` and `Version` under
+`VC\Runtimes\x64` and `x86`, in both registry views, when they are below it. In a new prefix:
+14.51 after the first launch; 14.28.29334 after Steam's 2019 x64 and x86 installers, with their
+twelve MFC files installed and Wine's `msvcp140.dll` untouched; 14.50.35719 after the next
+launch. A prefix lowered earlier is repaired the same way. Not verified on Astroneer itself.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
