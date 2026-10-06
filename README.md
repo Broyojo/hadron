@@ -175,6 +175,7 @@ packaging/            entitlements, the list of third-party components, the Home
 config/games.conf     per-game settings
 tools/                test programs, Metal probes and benchmarks behind docs/findings.md
 docs/                 architecture, findings, conformance, roadmap, test games, Apple developer setup
+AGENTS.md             how to work on Hadron: what a fix is, evidence, running games safely
 src/ build/ dist/     checkouts, build trees and the installed runtime (git-ignored)
 ```
 
