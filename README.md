@@ -132,10 +132,14 @@ To build Hadron yourself you need:
 
 - An Apple Silicon Mac with macOS 27. Hadron has only been built and run there.
 - Xcode with its Metal toolchain, and Homebrew.
-- An Apple Developer account. Windows needs memory below 4GB, which macOS only grants to a
-  loader signed with the cross-architecture entitlement; see
-  [docs/apple-developer-setup.md](docs/apple-developer-setup.md). Without it, the dev build
-  below runs 64-bit programs only.
+- An Apple Developer account, for one piece only. Windows needs memory below 4GB, which macOS
+  grants to a loader signed with the cross-architecture entitlement
+  ([docs/apple-developer-setup.md](docs/apple-developer-setup.md)). **You do not need one to
+  work on Hadron:** a release already has that loader, signed, and it runs libraries you built
+  yourself. Install a release, build what you are changing, and put it into a copy of the
+  release's runtime; [CONTRIBUTING.md](CONTRIBUTING.md#working-without-an-apple-developer-account)
+  has the steps. Without an account and without a release, the dev build below runs 64-bit
+  programs only.
 - The Mac Steam client, to play games from your library.
 
 Then:
