@@ -710,8 +710,25 @@ libraries.
 
 Wine patch 0024 registers 14.51.36247, which is what the redistributable Steam installs today
 writes. The entries are written without overwriting, as upstream has them, so a prefix made
-earlier keeps 14.42 (and a real redistributable's newer value is never lowered); such a prefix
-has to be made again for a game that needs it. Not verified on Astroneer itself.
+earlier keeps 14.42; such a prefix has to be made again for a game that needs it.
+
+That was not enough for Astroneer: its launcher still asked. It wants 14.24.28127.4 or newer
+and then loads `msvcp140_2.dll` and `vcruntime140_1.dll`, and the tester's logs show it never
+reached the two loads, so the version it read was too low. Steam's install script, which runs
+before the game, had run an older redistributable, and under Wine that installs and writes its
+own version over the registered one (reproduced: Steam's 2019 `VC_redist.x64.exe /quiet` in a
+new prefix exits 0 and leaves 14.28.29334 where 14.51 was). On Windows it would not: the
+installer is a WiX bundle, the installed redistributable is registered as one under
+`Uninstall` in the 32-bit registry view, and an older bundle that finds a newer one stops with
+`ERROR_PRODUCT_VERSION` (1638), which Steam's scripts accept.
+
+Wine patch 0025 adds that registration for the x64 and x86 bundles, with the keys a real
+14.51 redistributable leaves (read from a prefix where one was installed). The bundle engine
+also wants the registered bundle's file to exist ("Failed to get size of pseudo bundle"
+otherwise), so the path names `dism.exe`, a stub that does nothing and returns 0. With it, in a
+new prefix: Steam's 2019 installers log "Detected related bundle … operation: Downgrade" and
+exit 1638, the 2022 ones exit 0, the 2013 one still installs, and the version stays 14.51
+throughout. Not verified on Astroneer itself.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
