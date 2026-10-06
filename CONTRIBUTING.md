@@ -8,7 +8,9 @@ wrong, runs slowly), your Mac and macOS version, and a report file: run `hadron 
 your home folder's path, your user name and your Steam account taken out. That is done by
 pattern, so look through the file before you attach it. Nothing is ever sent automatically.
 
-[docs/test-games.md](docs/test-games.md) lists the games that have been tried.
+[docs/test-games.md](docs/test-games.md) lists the games that have been tried. A question, or a
+game that works and is not on the list, fits better in
+[Discussions](https://github.com/Broyojo/hadron/discussions) than in an issue.
 
 ## Where a change goes
 

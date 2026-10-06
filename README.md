@@ -45,7 +45,9 @@ To remove Hadron, take it out of Steam first (Uninstall in the window, or `hadro
 then delete the app or run `brew uninstall --cask hadron`. If you had the window add the `hadron`
 command, remove that link too: `sudo rm /usr/local/bin/hadron`.
 
-If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it.
+If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it. Questions,
+and which games work for you, go to
+[Discussions](https://github.com/Broyojo/hadron/discussions).
 
 To build it yourself instead, see [Building](#building).
 
