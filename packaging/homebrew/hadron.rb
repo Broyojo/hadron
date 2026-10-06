@@ -12,6 +12,7 @@ cask "hadron" do
   homepage "https://github.com/Broyojo/hadron"
 
   depends_on arch: :arm64
+  depends_on macos: :golden_gate
 
   app "Hadron.app"
   # The same program is the `hadron` command: setup, repair, uninstall, status, report, version.

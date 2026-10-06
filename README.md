@@ -5,6 +5,13 @@
   </picture>
 </h1>
 
+<p align="center">
+  <a href="https://discord.gg/ShNTcxWjKN"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://github.com/Broyojo/hadron/discussions"><img alt="Discussions" src="https://img.shields.io/badge/GitHub-Discussions-24292F?logo=github&logoColor=white"></a>
+  <a href="https://github.com/Broyojo/hadron/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Broyojo/hadron?label=release"></a>
+  <a href="#install"><img alt="Homebrew cask" src="https://img.shields.io/badge/Homebrew-cask-FBB040?logo=homebrew&logoColor=white"></a>
+</p>
+
 An open-source way to play Windows games on Apple Silicon Macs: install and play them from the
 Steam library of the native Mac Steam client. It is to the Mac what Proton is to Linux, and an
 open-source alternative to CrossOver for Steam games. Nothing runs under Rosetta: Wine is built
@@ -15,9 +22,6 @@ Hadron is in early development. A handful of games play well and many don't star
 [docs/test-games.md](docs/test-games.md) says which.
 
 ## Install
-
-> The first release is not out yet. Until it is, the Homebrew and download instructions below
-> do not work, and Hadron has to be [built from source](#building).
 
 You need an Apple Silicon Mac with macOS 27 and [Steam for Mac](https://store.steampowered.com/about/).
 
@@ -47,7 +51,8 @@ command, remove that link too: `sudo rm /usr/local/bin/hadron`.
 
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it. Questions,
 and which games work for you, go to
-[Discussions](https://github.com/Broyojo/hadron/discussions).
+[Discussions](https://github.com/Broyojo/hadron/discussions) or the
+[Discord](https://discord.gg/ShNTcxWjKN).
 
 To build it yourself instead, see [Building](#building).
 
@@ -206,3 +211,12 @@ patches in `patches/` carry the license of the project they modify (Wine's are
 LGPL-2.1-or-later, FEX's and Mesa's MIT, NotProton's GPL-3.0), and fetched upstream sources keep
 their own licenses. See [LICENSE](LICENSE). The app carries every component's license and a list
 of what it was built from, in `Contents/SharedSupport/runtime/licenses`.
+
+## Stars
+
+<a href="https://www.star-history.com/#Broyojo/hadron&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=broyojo%2Fhadron&type=Date&theme=dark">
+    <img alt="Star history of Broyojo/hadron" src="https://api.star-history.com/svg?repos=broyojo%2Fhadron&type=Date" width="600">
+  </picture>
+</a>
