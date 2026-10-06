@@ -692,6 +692,27 @@ A Steam launch option cannot carry an environment variable in front of `%command
 Steam does not run the command through a shell and fails with "OS Error 260". To run a game on
 another runtime, point `~/Library/Application Support/Hadron/runtime` at it for the test.
 
+## Unreal's launcher runs the prerequisite installer when Wine's VC runtime version is old (#26)
+
+Astroneer on the outside tester's Mac (2026-10-05): `Astro.exe`, Unreal's launcher, started
+`UE4PrereqSetup_x64.exe`, whose .NET Framework 4 step then sat without progress (26 of its MSI
+custom actions failed to load with error 193, the others ran; not investigated further).
+
+The launcher reads `Major`, `Minor` and `Bld` from
+`HKLM\Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64` and compares them with the
+toolset the game was built with (in Subnautica 2's launcher: `cmp $0xe`, `cmp $0x2a`, then the
+build number), and runs the game's redistributable installer when the registered version is
+older. Wine's wine.inf registers 14.42.34433, from November 2024 when the key was added
+upstream, so every game built with a later toolset starts its installer in a new prefix. The
+runtime libraries themselves are there: a 64-bit test program loads all of msvcp140, its `_1`
+and `_2`, vcruntime140 and `_1`, the 2010 to 2013 runtimes, XInput 1.3 and the DirectX audio
+libraries.
+
+Wine patch 0024 registers 14.51.36247, which is what the redistributable Steam installs today
+writes. The entries are written without overwriting, as upstream has them, so a prefix made
+earlier keeps 14.42 (and a real redistributable's newer value is never lowered); such a prefix
+has to be made again for a game that needs it. Not verified on Astroneer itself.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
