@@ -16,9 +16,6 @@ Hadron is in early development. A handful of games play well and many don't star
 
 ## Install
 
-> The first release is not out yet. Until it is, the Homebrew and download instructions below
-> do not work, and Hadron has to be [built from source](#building).
-
 You need an Apple Silicon Mac with macOS 27 and [Steam for Mac](https://store.steampowered.com/about/).
 
 With [Homebrew](https://brew.sh):
@@ -206,3 +203,12 @@ patches in `patches/` carry the license of the project they modify (Wine's are
 LGPL-2.1-or-later, FEX's and Mesa's MIT, NotProton's GPL-3.0), and fetched upstream sources keep
 their own licenses. See [LICENSE](LICENSE). The app carries every component's license and a list
 of what it was built from, in `Contents/SharedSupport/runtime/licenses`.
+
+## Stars
+
+<a href="https://www.star-history.com/#Broyojo/hadron&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Broyojo/hadron&type=Date&theme=dark">
+    <img alt="Star history of Broyojo/hadron" src="https://api.star-history.com/svg?repos=Broyojo/hadron&type=Date" width="600">
+  </picture>
+</a>

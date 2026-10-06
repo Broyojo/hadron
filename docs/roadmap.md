@@ -1,6 +1,6 @@
 # Roadmap and open decisions
 
-## Where it stands (2026-10-04)
+## Where it stands (2026-10-05)
 
 Done, in the order it was built: Wine native on arm64 with FEX inside it; Direct3D 9 (mtld3d) and
 10/11 (DXMT) straight to Metal; Steam Play inside the Mac Steam client; Vulkan on Metal
@@ -10,9 +10,10 @@ command around a self-contained runtime; a signed, notarized 0.1.0.
 
 ## Next
 
-1. **Macs that did not build it.** Everything so far ran on one Mac. Install 0.1.0 from the disk
-   image on others, starting from a Steam that still has Valve's signature, and fix what that
-   finds.
+1. **Macs that did not build it.** One outside Mac has run 0.1.0 from the disk image so far,
+   starting from a Steam with Valve's signature, and that evening found six things, all fixed
+   ([test-games.md](test-games.md), [findings.md](findings.md) #24 to #27). More Macs will find
+   more: a launch on a Mac that never had Rosetta is still to be seen.
 2. **A game's first launch.** Creating its Windows prefix and running Steam's install scripts is
    the first thing a new user waits for: measure it, and seed new prefixes from a template.
 3. **Unreal Engine 5.** Subnautica 2 does not load: Metal's compiler gives up on its largest
