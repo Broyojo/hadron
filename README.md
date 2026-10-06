@@ -5,6 +5,12 @@
   </picture>
 </h1>
 
+<p align="center">
+  <a href="https://discord.gg/qquKYDbTPC"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://github.com/Broyojo/hadron/discussions"><img alt="Discussions" src="https://img.shields.io/badge/GitHub-Discussions-24292F?logo=github&logoColor=white"></a>
+  <a href="https://github.com/Broyojo/hadron/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Broyojo/hadron?label=release"></a>
+</p>
+
 An open-source way to play Windows games on Apple Silicon Macs: install and play them from the
 Steam library of the native Mac Steam client. It is to the Mac what Proton is to Linux, and an
 open-source alternative to CrossOver for Steam games. Nothing runs under Rosetta: Wine is built
@@ -44,7 +50,8 @@ command, remove that link too: `sudo rm /usr/local/bin/hadron`.
 
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it. Questions,
 and which games work for you, go to
-[Discussions](https://github.com/Broyojo/hadron/discussions).
+[Discussions](https://github.com/Broyojo/hadron/discussions) or the
+[Discord](https://discord.gg/qquKYDbTPC).
 
 To build it yourself instead, see [Building](#building).
 
@@ -208,7 +215,7 @@ of what it was built from, in `Contents/SharedSupport/runtime/licenses`.
 
 <a href="https://www.star-history.com/#Broyojo/hadron&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Broyojo/hadron&type=Date&theme=dark">
-    <img alt="Star history of Broyojo/hadron" src="https://api.star-history.com/svg?repos=Broyojo/hadron&type=Date" width="600">
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=broyojo%2Fhadron&type=Date&theme=dark">
+    <img alt="Star history of Broyojo/hadron" src="https://api.star-history.com/svg?repos=broyojo%2Fhadron&type=Date" width="600">
   </picture>
 </a>
