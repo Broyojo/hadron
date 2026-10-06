@@ -744,9 +744,12 @@ been lowered.
 
 Slay the Spire (Java 8, x86-64, started as `jre\bin\javaw.exe -jar desktop-1.0.jar`) shows "A
 Java Exception has occurred" on the outside tester's Mac. The JVM loads `jvm.dll`, `java.dll`
-and `zip.dll` and nothing after.
+and `zip.dll` and nothing after. Which exception it is has not been captured, so what follows
+is a Java problem found while looking, not yet shown to be the game's: running the game's own
+`jre\bin\java.exe -Xint -jar desktop-1.0.jar`, or reading its exception from a console, would
+connect the two.
 
-It reproduces without the game, with a stock Windows JRE (Temurin 8u504, x64) in a test prefix:
+A stock Windows JRE (Temurin 8u504, x64) in a test prefix:
 
 - `java.exe -version` works.
 - `jjs.exe script.js` (Nashorn) fails differently in each mode: by default with

@@ -104,7 +104,7 @@ results of the Khronos conformance suites on the graphics drivers.
 | Astroneer (Unreal Engine 4) | Direct3D 11 | Runs well |
 | Besiege | Direct3D 11 | Runs |
 | 5D Chess With Multiverse Time Travel | OpenGL | Runs |
-| Slay the Spire (Java) | OpenGL | Does not start yet: Java's own compilers misbehave under the x86 translator |
+| Slay the Spire (Java) | OpenGL | Does not start yet: a Java exception at start-up, cause not established |
 | Subnautica 2 (Unreal Engine 5) | Direct3D 12 | Does not load yet: Metal's shader compiler gives up on its largest compute shaders |
 
 [docs/test-games.md](docs/test-games.md) has the details and [docs/roadmap.md](docs/roadmap.md)

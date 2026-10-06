@@ -13,7 +13,6 @@ for one game is checked against the others. All are the **Windows** versions.
 | Just Cause 3 | 225540 | x86_64 | D3D11 | Apex | heavy AAA, performance |
 | SpaceEngine | 314650 | x86_64 | OpenGL | custom | OpenGL path |
 | Half-Life | 70 | i386 | OpenGL | GoldSrc | old 32-bit OpenGL |
-
 | Teardown | 1167630 | x86_64 | D3D12 | custom | D3D12 through vkd3d-proton on KosmicKrisp |
 | Geometry Dash | 322170 | x86_64 | OpenGL | Cocos2d-x | OpenGL on Zink |
 | Subnautica 2 | 1962700 | x86_64 | D3D12 | Unreal Engine 5 | shader model 6.6, Nanite: what most Unreal Engine 5 games need |
@@ -58,4 +57,4 @@ Manual launches (`scripts/play`) have no Steam client serving them, so run them 
 | Astroneer | **Runs well** | On the first outside tester's Mac (M5 Max), 2026-10-05, after the Visual C++ runtime fix (docs/findings.md #26). Before it, Unreal's launcher started the prerequisite installer, which hung in its .NET Framework step. |
 | Besiege | **Runs** | Same tester, a few minutes, DXMT, clean log. Wine's file-browser windows appear: the game calls ShellExecute three times and each starts one. Threads time out on Wine's loader lock when it quits. |
 | 5D Chess With Multiverse Time Travel | **Runs** | Same tester, six minutes on Zink, clean log. |
-| Slay the Spire | **Does not start** | "A Java Exception has occurred": Java's compiled code misbehaves under FEX (docs/findings.md #27). |
+| Slay the Spire | **Does not start** | "A Java Exception has occurred" from its launcher; the exception itself has not been captured. A stock Java 8 misbehaves under FEX once its compilers run (docs/findings.md #27), which may be the same thing. |
