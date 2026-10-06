@@ -736,7 +736,36 @@ its version being higher) and raises `Major`, `Minor`, `Bld` and `Version` under
 `VC\Runtimes\x64` and `x86`, in both registry views, when they are below it. In a new prefix:
 14.51 after the first launch; 14.28.29334 after Steam's 2019 x64 and x86 installers, with their
 twelve MFC files installed and Wine's `msvcp140.dll` untouched; 14.50.35719 after the next
-launch. A prefix lowered earlier is repaired the same way. Not verified on Astroneer itself.
+launch. A prefix lowered earlier is repaired the same way. With this in the 0.1.0 build of
+2026-10-05 the tester's Astroneer starts without the prompt and runs well, in the prefix that had
+been lowered.
+
+## Java: HotSpot's compiled code gives wrong results under FEX (open, #27)
+
+Slay the Spire (Java 8, x86-64, started as `jre\bin\javaw.exe -jar desktop-1.0.jar`) shows "A
+Java Exception has occurred" on the outside tester's Mac. The JVM loads `jvm.dll`, `java.dll`
+and `zip.dll` and nothing after. Which exception it is has not been captured, so what follows
+is a Java problem found while looking, not yet shown to be the game's: running the game's own
+`jre\bin\java.exe -Xint -jar desktop-1.0.jar`, or reading its exception from a console, would
+connect the two.
+
+A stock Windows JRE (Temurin 8u504, x64) in a test prefix:
+
+- `java.exe -version` works.
+- `jjs.exe script.js` (Nashorn) fails differently in each mode: by default with
+  `IllegalArgumentException: not primitive: class java.lang.Object`, with the C1 compiler alone
+  (`-J-XX:TieredStopAtLevel=1`) with a `NoClassDefFoundError` for a class that is there, with C2
+  alone (`-J-XX:-TieredCompilation`) with `ArrayIndexOutOfBoundsException: 1632382876`.
+- With the interpreter alone (`-J-Xint`) system properties, file and network calls, eight
+  threads and a 20-million-iteration loop all give the right results. A deep recursion then ends
+  in `StackOverflowError` and a fatal `EXCEPTION_GUARD_PAGE`, which is a second problem.
+
+So results go wrong once HotSpot runs code it compiled. HotSpot patches that code in place while
+it runs (inline caches, class constants, entry points), which makes stale translations in FEX
+the first suspect: its detection of self-modifying code (`SMCChecks`, `mtrack` by default) may
+not see those writes here. Not verified. The next experiment is the same `jjs` test with
+`FEX_SMCCHECKS=full`, and with `FEX_DISKCACHE=0`; `scripts/wine-run` passes only `FEX_DISKCACHE`
+on, so run `dist/bin/wine` with its environment by hand.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 

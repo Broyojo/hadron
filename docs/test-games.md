@@ -13,10 +13,13 @@ for one game is checked against the others. All are the **Windows** versions.
 | Just Cause 3 | 225540 | x86_64 | D3D11 | Apex | heavy AAA, performance |
 | SpaceEngine | 314650 | x86_64 | OpenGL | custom | OpenGL path |
 | Half-Life | 70 | i386 | OpenGL | GoldSrc | old 32-bit OpenGL |
-
 | Teardown | 1167630 | x86_64 | D3D12 | custom | D3D12 through vkd3d-proton on KosmicKrisp |
 | Geometry Dash | 322170 | x86_64 | OpenGL | Cocos2d-x | OpenGL on Zink |
 | Subnautica 2 | 1962700 | x86_64 | D3D12 | Unreal Engine 5 | shader model 6.6, Nanite: what most Unreal Engine 5 games need |
+| Astroneer | 361420 | x86_64 | D3D11 | Unreal Engine 4 | first Unreal Engine 4 game; its launcher checks the Visual C++ runtime |
+| Besiege | 346010 | x86_64 | D3D11 | Unity | tried by the first outside tester |
+| 5D Chess With Multiverse Time Travel | 1349230 | x86_64 | OpenGL | custom | a second OpenGL game on Zink |
+| Slay the Spire | 646570 | x86_64 | OpenGL | Java 8, LWJGL | a Java game: HotSpot generates and patches its own code |
 
 Later: Vulkan titles.
 
@@ -51,3 +54,7 @@ Manual launches (`scripts/play`) have no Steam client serving them, so run them 
 | Teardown | **Runs** | D3D12 through vkd3d-proton on KosmicKrisp, at feature level 12_0 with no overrides (docs/findings.md #22). The first launch after a driver change is slow while pipelines compile. Frame rate is held back by CPU translation; open. |
 | Geometry Dash | **Runs** | OpenGL on Zink since 2026-10-04 (Apple's OpenGL before that); played on Zink that day and found good. Signing in to a Geometry Dash account crashed on 2026-09-30; on 2026-10-02 signing in and relaunching both work, cause not identified. |
 | Subnautica 2 | **Does not load yet** | Unreal Engine 5 requires its SM6 tier: shader model 6.6 and 64-bit atomics on typed resources. Fixed on the way (docs/findings.md #23): the Visual C++ runtime check (Wine 0019), SSE4.2 reported to x86 code (Wine 0020), D3D12 through vkd3d-proton for every game, and the Vulkan features vkd3d-proton needs to report shader model 6.6 (Mesa 0026-0029).  On 2026-10-04 (Mesa patches through 0083) a launch sat in loading while Metal's compiler died on the game's largest compute kernels, 8-13 MB of generated MSL each: 14 pipelines failed in 25 minutes. The failing shaders are saved by the driver; not yet investigated. It has never reached gameplay. |
+| Astroneer | **Runs well** | On the first outside tester's Mac (M5 Max), 2026-10-05, after the Visual C++ runtime fix (docs/findings.md #26). Before it, Unreal's launcher started the prerequisite installer, which hung in its .NET Framework step. |
+| Besiege | **Runs** | Same tester, a few minutes, DXMT, clean log. Wine's file-browser windows appear: the game calls ShellExecute three times and each starts one. Threads time out on Wine's loader lock when it quits. |
+| 5D Chess With Multiverse Time Travel | **Runs** | Same tester, six minutes on Zink, clean log. |
+| Slay the Spire | **Does not start** | "A Java Exception has occurred" from its launcher; the exception itself has not been captured. A stock Java 8 misbehaves under FEX once its compilers run (docs/findings.md #27), which may be the same thing. |
