@@ -6,7 +6,7 @@
 </h1>
 
 <p align="center">
-  <a href="https://discord.gg/r8unp4hHzw"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://discord.gg/ShNTcxWjKN"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://github.com/Broyojo/hadron/discussions"><img alt="Discussions" src="https://img.shields.io/badge/GitHub-Discussions-24292F?logo=github&logoColor=white"></a>
   <a href="https://github.com/Broyojo/hadron/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Broyojo/hadron?label=release"></a>
 </p>
@@ -51,7 +51,7 @@ command, remove that link too: `sudo rm /usr/local/bin/hadron`.
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it. Questions,
 and which games work for you, go to
 [Discussions](https://github.com/Broyojo/hadron/discussions) or the
-[Discord](https://discord.gg/r8unp4hHzw).
+[Discord](https://discord.gg/ShNTcxWjKN).
 
 To build it yourself instead, see [Building](#building).
 
