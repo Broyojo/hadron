@@ -38,6 +38,33 @@ Two rules shape every fix:
 A change to a graphics driver comes with the conformance result that shows it: `scripts/cts.sh`
 runs the Khronos suites, and [docs/conformance.md](docs/conformance.md) records what passes.
 
+## Working without an Apple Developer account
+
+Playing needs no account: the release is signed. Building is different in one place. 32-bit
+Windows programs need memory below 4GB, and macOS gives that only to a loader signed with an
+entitlement that comes from a developer account
+([docs/apple-developer-setup.md](docs/apple-developer-setup.md)). Everything else you can build
+and change yourself, and run with the loader from a release:
+
+1. Install a release of Hadron and set Steam up with it.
+2. Copy its runtime. On APFS this takes no extra space:
+   `cp -Rc /Applications/Hadron.app/Contents/SharedSupport/runtime ~/hadron-runtime`
+3. Check out the release's tag, so that what you build matches the rest, and build the part you
+   are changing with its script. The scripts install into `dist/`; `scripts/package-loader.sh` is
+   the one step to skip.
+4. Copy what you built over the same paths in `~/hadron-runtime/dist` (and `scripts/` or
+   `config/` for changes there). Leave `dist/lib/wine/aarch64-unix/wine.app` as it is: that is the
+   signed loader, and it accepts libraries it was not signed with.
+5. Run `~/hadron-runtime/scripts/steam-install`. Steam then runs games from the copy;
+   `hadron repair` points it back at the app.
+
+A game's prefix (`steamapps/compatdata/<app id>` in the Steam library) keeps its own copies of
+some libraries from the day it was made, mtld3d's `d3d9.dll` among them. After replacing one of
+those, delete the prefix so that the next launch makes it again, or copy the file into it.
+
+Without a release at hand, `scripts/build-wine.sh --dev` builds a variant that needs no
+entitlement and runs 64-bit programs only ([README](README.md#running-and-debugging)).
+
 ## The upstreams' own rules
 
 Patches are written so they could go upstream, so their projects' rules apply here:
