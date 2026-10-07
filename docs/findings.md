@@ -767,6 +767,53 @@ not see those writes here. Not verified. The next experiment is the same `jjs` t
 `FEX_SMCCHECKS=full`, and with `FEX_DISKCACHE=0`; `scripts/wine-run` passes only `FEX_DISKCACHE`
 on, so run `dist/bin/wine` with its environment by hand.
 
+## Wine: native host mappings stall thread creation on macOS (fixed, #28)
+
+Astroneer froze for 2.7–2.9 seconds on mission completion on an Apple M5 Max with
+48 GiB of RAM, macOS 27.0.1 (26A434). Repeating the mission after restarting the
+game reproduced it with the FEX disk cache enabled. A present probe measured the
+frame gap, and Wine allocation and lock probes located the same interval: the HTTP
+manager created a worker thread whose thread data and emulation stack allocations
+searched for addresses above 4 GiB while holding Wine's global `virtual_mutex`.
+Other threads waited for that lock. Save-file and DXMT shader-cache metadata did
+not change during the stall.
+
+Wine's view tree records Wine allocations, but not all native mappings. The search
+therefore saw a free gap containing a native, inaccessible guard mapping from
+`0x1000000000` to `0x7000000000` (64–448 GiB). Each non-overwriting fixed-map
+attempt correctly failed, but the search advanced by only 64 KiB. The two
+allocations made 7,372,814 and 7,372,815 failed attempts. The stall was in Wine's
+address search, not FEX compilation or a graphics driver.
+
+Wine patch 0025 queries the overlapping native region after a mapping collision
+and skips to its aligned boundary in the search direction. It descends through
+Mach submaps at the candidate address and requests short region information, which
+does not ask for resident-page statistics. The caller still enforces allocation
+bounds, and every subsequent mapping attempt remains non-overwriting. If a query
+fails or the conflicting mapping disappears, the search takes its original single
+step. There are no game checks or fixed host addresses in the allocator change.
+
+`python3 -B tests/mac/test-wine-address-search.py` builds checks from the actual
+Wine helper and runs native ARM64 and FEX-translated x64 Windows reproducers in
+separate prefixes. A test-only injected library reserves native address gaps
+without committing RAM, and the Windows test exhausts Wine's high reservation
+before creating threads. Fourteen native checks cover both search directions,
+64 KiB and 2 MiB alignment, partial overlap, preservation of existing mappings,
+and an unmap between collision and query. Windows checks verify bounded success
+and failure in both directions with 2 MiB alignment. Thread creation went from
+about 0.82 seconds to 0.34–0.53 ms on ARM64, and from 1.68–1.71 seconds to
+0.66–0.94 ms on x64 with the FEX cache enabled. Timings are reported, not used as
+pass/fail thresholds.
+
+All eight patch queues apply and match their source commits. Runtime smoke checks
+passed for ARM64, x64 and i386 programs, Visual C++ runtime DLLs and registry
+entries, and a D3D11 triangle. In the instrumented game retest the player reported
+no lag; a 54-second capture around the mission had no present gap of 100 ms or
+more. The longest observed address search took 0.297 ms, with 173 attempts. This
+confirms the reproduced stall is fixed; other macOS releases, Intel-native builds
+and a broader game set have not been tested. Diagnostic Wine and DXMT probes are
+not part of the patch.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
