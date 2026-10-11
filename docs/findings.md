@@ -964,7 +964,11 @@ Through Steam, on a setup made by the 0.2.0 release: the app was replaced by a b
 change, and the next game (Subnautica) started normally, from a copy it made, with the link moved
 and the app's 2,040 files untouched. The window asked for nothing. Then, with Portal running, the
 app was replaced again; Portal's session stayed on its copy, and Geometry Dash, started beside
-it, ran from the copy of the newer build.
+it, ran from the copy of the newer build. Repair, once macOS allowed the rebuilt app to change
+Steam, recorded the `HOOK-ID` and left the link on the current copy. Those runs were on the
+first form of the rules (a ten-minute rule and a lock folder). On the final one, with the app
+replaced once more, Geometry Dash started from the new build's copy, marked it for its prefix,
+and the two older copies left in the Library were deleted.
 
 A runtime without a `BUILD-ID`, a checkout or a copy somebody is changing, is run in place as
 before. Not covered: the app and the Library on different volumes (the copy is then a real

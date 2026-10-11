@@ -92,12 +92,15 @@ runtime_unmark() {
 }
 
 # The copy another launch that is still alive runs $WINEPREFIX from, if there is one: two
-# launches for one prefix have to be the same Wine, also before either has started it.
+# launches for one prefix have to be the same Wine, also before either has started it. The marks
+# of launches that have ended are removed on the way, so that they do not pile up. Call with the
+# lock held.
 runtime_of_launch() {
     for _mark in "$HADRON_RUNTIMES/.launches"/*.*; do
         [ -f "$_mark" ] || continue
         _pid=${_mark##*.}
-        [ "$_pid" != "$$" ] && kill -0 "$_pid" 2>/dev/null || continue
+        [ "$_pid" != "$$" ] || continue
+        kill -0 "$_pid" 2>/dev/null || { rm -f "$_mark"; continue; }
         _prefix=; IFS= read -r _prefix < "$_mark"
         [ -n "$_prefix" ] && [ "$_prefix" = "${WINEPREFIX:-}" ] || continue
         _name=${_mark##*/}

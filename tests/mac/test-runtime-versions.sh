@@ -145,7 +145,11 @@ check "a launch for another prefix gets the new build" test "$(other "$T/prefix-
 check "which moved the link" test "$(readlink "$link")" = "$HADRON_RUNTIMES/3.1-new"
 check "a later launch for the first prefix, begun in the new copy, goes back to the old one" \
     test "$(WINEPREFIX="$T/prefix-p" sh -c 'ROOT=x; . "$1/scripts/paths.sh"; . "$1/scripts/runtime-versions.sh"; runtime_choose "$2"' sh "$REPO" "$HADRON_RUNTIMES/3.1-new")" = "$old"
-check "the launches that ended left marks, which a clean-up removes" sh -c 'ls "$1/.launches" | grep -qv "\.$2\$"' sh "$HADRON_RUNTIMES" $$
+# Each of those stand-in launches has ended and left its mark; the next launch to choose removes them.
+: > "$HADRON_RUNTIMES/.launches/3.1-new.999999"
+other "$T/prefix-r" >/dev/null
+check "the marks of launches that have ended are removed by the next launch" \
+    test "$(ls "$HADRON_RUNTIMES/.launches" | grep -cv "\.$$\$")" -le 1
 runtime_lock; runtime_prune "$HADRON_RUNTIMES/3.1-new"; runtime_unlock
 check "the old copy, marked by a live launch, is kept" test -d "$old"
 runtime_unmark "$old"; unset WINEPREFIX
