@@ -893,6 +893,46 @@ on Subnautica, with about a hundred threads, the player saw lag exactly while it
 seconds at a time with a 4-second sample every 13 seconds, and all the time with samples back to
 back. Lag reported while sampling does not count.
 
+## Wine: window reordering cancels fullscreen minimization (#30)
+
+Bravely Default Flying Fairy HD Remaster sometimes stayed stuck after Cmd+Tab
+out of fullscreen and back: the window returned with unusable contents and did
+not accept focus. This reproduced on Hadron 0.1.1 and 0.2.0 on an Apple M5
+MacBook Pro with 32 GB of RAM, macOS 27.0.1. The game uses Unity 6 and D3D11
+through DXMT.
+
+Wine requested native minimization and set `WS_MINIMIZE`, but neither
+`windowWillMiniaturize` nor `windowDidMiniaturize` followed. The native window
+later became visible, unminimized and key while Wine still considered it
+minimized, with a zero-sized client, and rejected its focus event. Between the
+request and native initiation, `adjustWindowLevels:` changed the window's level
+and explicitly ordered it front or back. Those ordering calls can cancel the
+pending minimization.
+
+A native AppKit test isolated this conflict without Wine or a game: immediate
+`orderFront:` and `orderBack:` prevented initiation even with style and level
+held constant; matched cases without ordering completed. Calling `orderFront:`
+from `windowWillMiniaturize` allowed completion. In the game, suppressing only
+the automatic ordering while inactive and awaiting initiation completed all 36
+requests. Restoring the unchanged driver reproduced the failure on its fifth
+request.
+
+winemac.drv now tracks a native minimize request until initiation and omits the
+automatic front/back ordering during inactive level adjustment while that request
+is outstanding. It still applies the level change. Tracking starts when the
+native request is issued, including requests deferred until a hidden window is
+shown, and clears on native initiation, completion or restoration, or an explicit
+Win32 restore. Explicit activation, show and restore paths retain their behavior.
+
+Tested without diagnostic instrumentation in an isolated Hadron 0.2.0 runtime:
+Bravely Default completed 18 minimizations and 17 restorations; Portal 2 (Source,
+D3D9 through mtld3d) completed nine and eight. Both sessions ended minimized.
+The player confirmed working Dock transitions in Bravely Default and normal
+gameplay through ordinary and rapid switching in Portal 2. Loaded driver
+identities were verified, and neither session rejected a focus event. Eleven
+Win32 checks also passed for hidden/minimized creation, show, restore,
+hide/reshow after minimization, and cancellation before showing.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

@@ -1,0 +1,174 @@
+From 7e190f713902e65e3ad0b77711146175050dc38b Mon Sep 17 00:00:00 2001
+From: Ivan Karpan <github@ivankarpan.com>
+Date: Sun, 11 Oct 2026 17:56:50 +0100
+Subject: [PATCH] winemac.drv: Preserve minimization during inactive level
+ adjustment.
+
+After a fullscreen window requests native minimization, automatic window
+level adjustment can order it front or back before windowWillMiniaturize.
+Those ordering calls can prevent minimization from starting, leaving Wine
+with WS_MINIMIZE when the native window becomes key again.
+
+Track issued native requests until initiation and omit automatic ordering
+while inactive and awaiting that callback. Keep the level changes and
+explicit activation and show paths. Clear tracking on native callbacks or
+an explicit Win32 restore, and arm deferred requests only when issued.
+
+Native AppKit controls reproduce the ordering conflict. Bravely Default
+fullscreen switching, Portal 2 regression testing and deferred/hide/show/
+restore Win32 checks passed with this change on macOS 27.0.1.
+
+Co-Authored-By: Codex <noreply@openai.com>
+---
+ dlls/winemac.drv/cocoa_app.m    | 35 +++++++++++++++++++--------------
+ dlls/winemac.drv/cocoa_window.h |  2 ++
+ dlls/winemac.drv/cocoa_window.m | 16 +++++++++++++--
+ 3 files changed, 36 insertions(+), 17 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index 4dafa80651..c64d67702f 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -638,23 +638,28 @@ - (void) adjustWindowLevels:(BOOL)active
+             {
+                 [window setLevel:newLevel];
+ 
+-                if (origLevel < newLevel)
++                /* Ordering the window before native minimization starts can
++                 * cancel the request. Adjust its level without ordering it in. */
++                if (active || !window.minimizeAwaitingStart)
+                 {
+-                    // If we increased the level, the window should be toward the
+-                    // back of its new level (but still ahead of the previous
+-                    // windows we did this to).
+-                    if (prev)
+-                        [window orderWindow:NSWindowAbove relativeTo:[prev windowNumber]];
++                    if (origLevel < newLevel)
++                    {
++                        // If we increased the level, the window should be toward the
++                        // back of its new level (but still ahead of the previous
++                        // windows we did this to).
++                        if (prev)
++                            [window orderWindow:NSWindowAbove relativeTo:[prev windowNumber]];
++                        else
++                            [window orderBack:nil];
++                    }
+                     else
+-                        [window orderBack:nil];
+-                }
+-                else
+-                {
+-                    // If we decreased the level, we want the window at the top
+-                    // of its new level. -setLevel: is documented to do that on
+-                    // its own, but that's buggy on Ventura. Since we're looping
+-                    // back-to-front here, -orderFront: will do the right thing.
+-                    [window orderFront:nil];
++                    {
++                        // If we decreased the level, we want the window at the top
++                        // of its new level. -setLevel: is documented to do that on
++                        // its own, but that's buggy on Ventura. Since we're looping
++                        // back-to-front here, -orderFront: will do the right thing.
++                        [window orderFront:nil];
++                    }
+                 }
+             }
+ 
+diff --git a/dlls/winemac.drv/cocoa_window.h b/dlls/winemac.drv/cocoa_window.h
+index 4d573c98b8..af7e16a0e3 100644
+--- a/dlls/winemac.drv/cocoa_window.h
++++ b/dlls/winemac.drv/cocoa_window.h
+@@ -35,6 +35,7 @@ @interface WineWindow : NSPanel <NSWindowDelegate>
+     BOOL maximized;
+     BOOL fullscreen;
+     BOOL pendingMinimize;
++    BOOL minimizeAwaitingStart;
+     BOOL pendingOrderOut;
+     BOOL savedVisibleState;
+     BOOL drawnSinceShown;
+@@ -85,6 +86,7 @@ @interface WineWindow : NSPanel <NSWindowDelegate>
+ 
+ @property (retain, readonly, nonatomic) WineEventQueue* queue;
+ @property (readonly, nonatomic) BOOL disabled;
++@property (readonly, nonatomic) BOOL minimizeAwaitingStart;
+ @property (readonly, nonatomic) BOOL noForeground;
+ @property (readonly, nonatomic) BOOL preventsAppActivation;
+ @property (readonly, nonatomic) BOOL floating;
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index aaac375ca3..111cceac00 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -933,6 +933,7 @@ @implementation WineWindow
+ 
+     @synthesize disabled, noForeground, preventsAppActivation, floating, fullscreen, fakingClose, closing, latentParentWindow, hwnd, queue;
+     @synthesize drawnSinceShown;
++    @synthesize minimizeAwaitingStart;
+     @synthesize shapeChangedSinceLastDraw;
+     @synthesize usePerPixelAlpha;
+     @synthesize himc, commandDone;
+@@ -1098,6 +1099,12 @@ - (void) adjustFullScreenBehavior:(NSWindowCollectionBehavior)behavior
+         }
+     }
+ 
++    - (void) requestNativeMinimize
++    {
++        minimizeAwaitingStart = TRUE;
++        [super miniaturize:nil];
++    }
++
+     - (void) setWindowFeatures:(const struct macdrv_window_features*)wf
+     {
+         static const NSUInteger usedStyles = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
+@@ -1258,6 +1265,8 @@ - (void) setMacDrvState:(const struct macdrv_window_state*)state
+         {
+             macdrv_event_mask discard = event_mask_for_type(WINDOW_DID_UNMINIMIZE);
+ 
++            if (!state->minimized)
++                minimizeAwaitingStart = FALSE;
+             pendingMinimize = FALSE;
+             if (state->minimized && ![self isMiniaturized])
+             {
+@@ -1281,7 +1290,7 @@ - (void) setMacDrvState:(const struct macdrv_window_state*)state
+                     else
+                     {
+                         [self setStyleMask:([self styleMask] | NSWindowStyleMaskMiniaturizable)];
+-                        [super miniaturize:nil];
++                        [self requestNativeMinimize];
+                         discard |= event_mask_for_type(WINDOW_BROUGHT_FORWARD) |
+                                    event_mask_for_type(WINDOW_GOT_FOCUS) |
+                                    event_mask_for_type(WINDOW_LOST_FOCUS);
+@@ -1749,7 +1758,7 @@ - (void) orderBelow:(WineWindow*)prev orAbove:(WineWindow*)next activate:(BOOL)a
+             if (pendingMinimize)
+             {
+                 [self setStyleMask:([self styleMask] | NSWindowStyleMaskMiniaturizable)];
+-                [super miniaturize:nil];
++                [self requestNativeMinimize];
+                 pendingMinimize = FALSE;
+             }
+ 
+@@ -2749,6 +2758,7 @@ - (void)windowDidDeminiaturize:(NSNotification *)notification
+     {
+         WineApplicationController* controller = [WineApplicationController sharedController];
+ 
++        minimizeAwaitingStart = FALSE;
+         if (!ignore_windowDeminiaturize)
+             [self postDidUnminimizeEvent];
+         ignore_windowDeminiaturize = FALSE;
+@@ -2820,6 +2830,7 @@ - (void)windowDidMiniaturize:(NSNotification *)notification
+     {
+         macdrv_event* event;
+ 
++        minimizeAwaitingStart = FALSE;
+         if (fullscreen && [self isOnActiveSpace])
+             [[WineApplicationController sharedController] updateFullscreenWindows];
+ 
+@@ -2940,6 +2951,7 @@ - (void) windowWillExitFullScreen:(NSNotification*)notification
+ 
+     - (void)windowWillMiniaturize:(NSNotification *)notification
+     {
++        minimizeAwaitingStart = FALSE;
+         [self becameIneligibleParentOrChild];
+         [self grabDockIconSnapshotFromWindow:nil force:NO];
+     }
+-- 
+2.56.0
+
