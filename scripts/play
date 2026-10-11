@@ -172,19 +172,30 @@ done
 # Paths may contain spaces (Steam runs this through ~/Library/Application Support), so these go
 # through the argument list too rather than as unquoted expansions below.
 [ -n "$icd" ] && set -- "VK_DRIVER_FILES=$icd" "MESA_KK_EXPERIMENTAL=${MESA_KK_EXPERIMENTAL:-dgc,xfb,sparse}" "$@"
-# OpenGL: Wine's Mac driver uses Zink on KosmicKrisp, Mesa's OpenGL on Vulkan, through EGL. Apple's
-# OpenGL stops at 4.1 with no compatibility profile above 2.1, and is not used.
+# OpenGL normally uses Zink on KosmicKrisp through EGL. For games that work with Apple's
+# OpenGL implementation, HADRON_OPENGL=native selects Wine's existing macOS OpenGL driver.
+# Apple's OpenGL stops at 4.1 and has no compatibility profile above 2.1.
 libpath="$HADRON_LIBPATH"
-if [ -f "$ROOT/dist/mesa-zink/lib/libEGL.1.dylib" ] && [ -n "$icd" ]; then
-    libpath="$ROOT/dist/mesa-zink/lib:$libpath"
-    # Mesa looks for its driver settings (Zink's defaults, per-application workarounds) where it
-    # was installed at build time, a path that only exists on the Mac that built it.
-    set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" \
-           "DRIRC_CONFIGDIR=$ROOT/dist/mesa-zink/share/drirc.d" "$@"
-else
-    echo "OpenGL needs Zink and KosmicKrisp: run scripts/build-vulkan.sh" >&2
-    exit 1
-fi
+case "${HADRON_OPENGL:-zink}" in
+    native)
+        set -- "WINE_MAC_OPENGL=native" "$@"
+        ;;
+    zink)
+        if [ ! -f "$ROOT/dist/mesa-zink/lib/libEGL.1.dylib" ] || [ -z "$icd" ]; then
+            echo "OpenGL needs Zink and KosmicKrisp: run scripts/build-vulkan.sh" >&2
+            exit 1
+        fi
+        libpath="$ROOT/dist/mesa-zink/lib:$libpath"
+        # Mesa looks for its driver settings (Zink's defaults, per-application workarounds) where
+        # it was installed at build time, a path that only exists on the Mac that built it.
+        set -- "WINE_MAC_OPENGL=egl" "MESA_LOADER_DRIVER_OVERRIDE=zink" \
+               "DRIRC_CONFIGDIR=$ROOT/dist/mesa-zink/share/drirc.d" "$@"
+        ;;
+    *)
+        echo "HADRON_OPENGL must be zink or native" >&2
+        exit 2
+        ;;
+esac
 # A shader Metal refuses to compile is a driver bug: KosmicKrisp saves its source here.
 mkdir -p "$HADRON_LOGS/failed-msl"
 set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"

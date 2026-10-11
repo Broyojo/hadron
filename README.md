@@ -182,6 +182,12 @@ Each Steam launch logs to `steamapps/compatdata/<appid>/hadron-run.log` and to
 `build/logs/<appid>-*.log` (`~/Library/Logs/Hadron` for the installed app). Settings are environment variables, given as a game's Steam launch
 options or per app ID in `config/games.conf`; `scripts/play` documents them.
 
+OpenGL games use Zink by default. To try Wine's macOS OpenGL driver for one game, set its
+Steam launch options to `HADRON_OPENGL=native`, or add `<appid> HADRON_OPENGL=native` to
+`~/Library/Application Support/Hadron/games.conf`. Apple's OpenGL supports up to version
+4.1 and does not provide a compatibility profile above 2.1, so games needing newer
+features should keep Zink. Remove the setting to restore the default.
+
 `scripts/build-wine.sh --dev` builds a variant that needs no entitlement, with Windows' fixed
 low addresses moved above 4GB, and `scripts/build-fex.sh --dev` gives it the x86 translator. It
 runs 64-bit programs only, through `scripts/wine-dev`.
