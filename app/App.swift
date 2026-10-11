@@ -28,6 +28,37 @@ final class Model: ObservableObject {
     @Published var newVersion: String?
     @Published var newVersionPage: URL?
     @Published var command = CommandLink.State.linked
+    @Published var games: [SteamGame] = []
+    @Published var selectedGameID = ""
+    @Published var renderer: OpenGLRenderer = .automatic
+    @Published var settingsMessage = ""
+    @Published var settingsFailed = false
+
+    func refreshGames() {
+        games = GameSettings.installedGames()
+        if !games.contains(where: { $0.id == selectedGameID }) {
+            selectedGameID = games.first?.id ?? ""
+        }
+        loadRenderer()
+    }
+
+    func loadRenderer() {
+        renderer = GameSettings.renderer(for: selectedGameID)
+        settingsMessage = ""
+        settingsFailed = false
+    }
+
+    func saveRenderer() {
+        guard !selectedGameID.isEmpty else { return }
+        do {
+            try GameSettings.setRenderer(renderer, for: selectedGameID)
+            settingsMessage = "Saved. This takes effect the next time you start the game."
+            settingsFailed = false
+        } catch {
+            settingsMessage = "Could not save game settings: \(error.localizedDescription)"
+            settingsFailed = true
+        }
+    }
 
     func refresh() {
         Task.detached {
@@ -143,6 +174,32 @@ struct ContentView: View {
             }
             .disabled(model.busy)
 
+            if !model.games.isEmpty {
+                Divider()
+                Text("Game settings").font(.headline)
+                Picker("Steam game", selection: $model.selectedGameID) {
+                    ForEach(model.games) { game in
+                        Text("\(game.name) (\(game.id))").tag(game.id)
+                    }
+                }
+                .onChange(of: model.selectedGameID) { _, _ in model.loadRenderer() }
+                HStack {
+                    Picker("OpenGL", selection: $model.renderer) {
+                        ForEach(OpenGLRenderer.allCases) { choice in
+                            Text(choice.label).tag(choice)
+                        }
+                    }
+                    Button("Save") { model.saveRenderer() }
+                }
+                Text("Only affects OpenGL games. Steam launch options take precedence.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !model.settingsMessage.isEmpty {
+                    Text(model.settingsMessage)
+                        .font(.caption)
+                        .foregroundStyle(model.settingsFailed ? .red : .secondary)
+                }
+            }
+
             if model.busy { ProgressView().controlSize(.small) }
 
             if blockedByMacOS {
@@ -175,6 +232,7 @@ struct ContentView: View {
         .frame(width: 520)
         .onAppear {
             model.refresh()
+            model.refreshGames()
             Updates.check { version, page in
                 model.newVersion = version
                 model.newVersionPage = page
