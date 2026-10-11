@@ -190,6 +190,17 @@ mkdir -p "$HADRON_LOGS/failed-msl"
 set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"
 [ -n "$vkd3d_cache" ] && set -- "VKD3D_SHADER_CACHE_PATH=$vkd3d_cache" "$@"
 
+# Steam's overlay hooks Metal's present calls and the event loop when its library is loaded, so it
+# has to be in the process from the start, as in a Mac game. Loaded later by Steam's client
+# library it draws nothing and stalls the event loop on mouse input (docs/findings.md #29).
+# NotProton's overlay helper goes in with it: the overlay hooks only Metal 3's present calls, and
+# the helper shows it the frames KosmicKrisp presents through a Metal 4 queue.
+if [ -n "${STEAM_DYLD_INSERT_LIBRARIES:-}" ]; then
+    insert="$STEAM_DYLD_INSERT_LIBRARIES"
+    [ -f "$HADRON_OVERLAY_HELPER" ] && insert="$HADRON_OVERLAY_HELPER:$insert"
+    set -- "DYLD_INSERT_LIBRARIES=$insert" "$@"
+fi
+
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     TMPDIR="${TMPDIR:-/tmp}" \
     WINEPREFIX="$PREFIX" \

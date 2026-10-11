@@ -1,0 +1,307 @@
+From 99616d1abb4aa9aeba773102d61ee5feecf53d27 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sun, 11 Oct 2026 00:52:46 -0400
+Subject: [PATCH] winemac.drv: Give the mouse and the keyboard to Steam's
+ overlay while it is open.
+
+lsteamclient sets the event __wine_steamclient_GameOverlayActivated when
+Steam reports that its overlay opened, and resets it when it closed.
+Nothing read it, so a game that does not react to the overlay itself
+kept the keyboard and its hold on the cursor: the cursor stayed locked
+in the middle of the window and the overlay could not be used until the
+game was paused.
+
+A thread in a game started by Steam waits for the event. While it is
+set, key presses, mouse buttons, mouse movement and scrolling are not
+sent to the application; key releases are, and held mouse buttons are
+released, so nothing stays down. The application's clipping rectangle
+is lifted and remembered, ClipCursor and SetCursorPos succeed without
+moving the cursor, and GetCursorPos leaves the position Wine last had.
+When the overlay closes the clipping rectangle is applied again.
+
+The thread only waits, so there is no cost while the overlay is closed;
+while it is open it looks at the event every 20 ms, because nothing can
+wait for an event to be reset.
+---
+ dlls/winemac.drv/dllmain.c     | 30 ++++++++++++++
+ dlls/winemac.drv/event.c       | 25 ++++++++++++
+ dlls/winemac.drv/macdrv.h      |  2 +
+ dlls/winemac.drv/macdrv_main.c | 10 +++++
+ dlls/winemac.drv/mouse.c       | 71 +++++++++++++++++++++++++++++++++-
+ dlls/winemac.drv/unixlib.h     |  7 ++++
+ 6 files changed, 143 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winemac.drv/dllmain.c b/dlls/winemac.drv/dllmain.c
+index bbd528d53b..01cf9213b2 100644
+--- a/dlls/winemac.drv/dllmain.c
++++ b/dlls/winemac.drv/dllmain.c
+@@ -369,6 +369,35 @@ cleanup:
+ }
+ 
+ 
++/* lsteamclient sets this event when Steam's overlay opens and resets it when it closes. */
++static DWORD WINAPI steam_overlay_thread(void *arg)
++{
++    struct overlay_active_params params;
++    HANDLE event = arg;
++
++    while (WaitForSingleObject(event, INFINITE) == WAIT_OBJECT_0)
++    {
++        params.active = TRUE;
++        MACDRV_CALL(overlay_active, &params);
++        /* Nothing can wait for an event to be reset, so this looks while the overlay is open. */
++        while (WaitForSingleObject(event, 0) == WAIT_OBJECT_0) Sleep(20);
++        params.active = FALSE;
++        MACDRV_CALL(overlay_active, &params);
++    }
++    return 0;
++}
++
++/* Only a game started by Steam has an overlay; SteamGameId is what Steam's own libraries go by. */
++static void watch_steam_overlay(void)
++{
++    HANDLE event, thread;
++
++    if (!GetEnvironmentVariableW(L"SteamGameId", NULL, 0)) return;
++    if (!(event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_GameOverlayActivated"))) return;
++    if ((thread = CreateThread(NULL, 0, steam_overlay_thread, event, 0, NULL))) CloseHandle(thread);
++    else CloseHandle(event);
++}
++
+ static BOOL process_attach(void)
+ {
+     struct init_params params;
+@@ -402,6 +431,7 @@ static BOOL process_attach(void)
+ 
+     if (MACDRV_CALL(init, &params)) return FALSE;
+ 
++    watch_steam_overlay();
+     return TRUE;
+ }
+ 
+diff --git a/dlls/winemac.drv/event.c b/dlls/winemac.drv/event.c
+index f7288b8d1b..a31693764f 100644
+--- a/dlls/winemac.drv/event.c
++++ b/dlls/winemac.drv/event.c
+@@ -367,6 +367,29 @@ static void macdrv_query_event(HWND hwnd, const macdrv_event *event)
+ /***********************************************************************
+  *              macdrv_handle_event
+  */
++/***********************************************************************
++ *              input_goes_to_overlay
++ *
++ * Whether an event is input that Steam's overlay has taken from the
++ * application.  Key releases still pass, so that a key held when the
++ * overlay opened does not stay down.
++ */
++static BOOL input_goes_to_overlay(const macdrv_event *event)
++{
++    switch (event->type)
++    {
++    case KEY_PRESS:
++    case MOUSE_BUTTON:
++    case MOUSE_MOVED_RELATIVE:
++    case MOUSE_MOVED_ABSOLUTE:
++    case MOUSE_SCROLL:
++        return macdrv_overlay_is_active();
++    default:
++        return FALSE;
++    }
++}
++
++
+ void macdrv_handle_event(const macdrv_event *event)
+ {
+     HWND hwnd = macdrv_get_window_hwnd(event->window);
+@@ -376,6 +399,8 @@ void macdrv_handle_event(const macdrv_event *event)
+     TRACE("%s for hwnd/window %p/%p\n", dbgstr_event(event->type), hwnd,
+           event->window);
+ 
++    if (input_goes_to_overlay(event)) return;
++
+     prev = thread_data->current_event;
+     thread_data->current_event = event;
+ 
+diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
+index c37b2b993d..67aa1af66c 100644
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -283,6 +283,8 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+ extern void macdrv_mouse_button(HWND hwnd, const macdrv_event *event);
+ extern void macdrv_mouse_moved(HWND hwnd, const macdrv_event *event);
+ extern void macdrv_mouse_scroll(HWND hwnd, const macdrv_event *event);
++extern void macdrv_set_overlay_active(bool active);
++extern bool macdrv_overlay_is_active(void);
+ extern void macdrv_release_capture(HWND hwnd, const macdrv_event *event);
+ 
+ extern void macdrv_compute_keyboard_layout(struct macdrv_thread_data *thread_data);
+diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+index ffe93357c7..a647bc8147 100644
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -607,10 +607,19 @@ static NTSTATUS macdrv_quit_result(void *arg)
+ }
+ 
+ 
++static NTSTATUS macdrv_overlay_active(void *arg)
++{
++    struct overlay_active_params *params = arg;
++    macdrv_set_overlay_active(params->active);
++    return 0;
++}
++
++
+ const unixlib_entry_t __wine_unix_call_funcs[] =
+ {
+     macdrv_init,
+     macdrv_quit_result,
++    macdrv_overlay_active,
+ };
+ 
+ C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+@@ -637,6 +646,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+ {
+     wow64_init,
+     macdrv_quit_result,
++    macdrv_overlay_active,
+ };
+ 
+ C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
+diff --git a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
+index 5963edc12d..8c3c2f6ba7 100644
+--- a/dlls/winemac.drv/mouse.c
++++ b/dlls/winemac.drv/mouse.c
+@@ -31,6 +31,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(cursor);
+ 
+ 
+ static pthread_mutex_t cursor_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
++
++/* Steam's overlay has the mouse and the keyboard while it is open: the application's input stops
++ * and its hold on the cursor is suspended. */
++static pthread_mutex_t overlay_mutex = PTHREAD_MUTEX_INITIALIZER;
++static LONG overlay_active;
++static BOOL cursor_clipped;     /* the application's clipping rectangle, kept while it is suspended */
++static CGRect cursor_clip_rect;
+ static CFMutableDictionaryRef cursor_cache;
+ 
+ 
+@@ -640,6 +647,7 @@ void macdrv_DestroyCursorIcon(HCURSOR cursor)
+ BOOL macdrv_ClipCursor(const RECT *clip, BOOL reset)
+ {
+     CGRect rect;
++    BOOL ret;
+ 
+     TRACE("%s %u\n", wine_dbgstr_rect(clip), reset);
+ 
+@@ -654,7 +662,59 @@ BOOL macdrv_ClipCursor(const RECT *clip, BOOL reset)
+     /* FIXME: This needs to be done not just in this process but in all of the
+        ones for this WINEPREFIX.  Broadcast a message to do that. */
+ 
+-    return macdrv_clip_cursor(rect);
++    pthread_mutex_lock(&overlay_mutex);
++    cursor_clipped = !CGRectIsInfinite(rect);
++    cursor_clip_rect = rect;
++    ret = overlay_active || macdrv_clip_cursor(rect);
++    pthread_mutex_unlock(&overlay_mutex);
++    return ret;
++}
++
++
++/***********************************************************************
++ *              macdrv_overlay_is_active
++ */
++bool macdrv_overlay_is_active(void)
++{
++    return ReadNoFence(&overlay_active) != 0;
++}
++
++
++/***********************************************************************
++ *              macdrv_set_overlay_active
++ *
++ * Steam's overlay opened or closed.  While it is open the cursor is free
++ * and the application keeps the position it last knew; its clipping
++ * rectangle comes back when the overlay closes.
++ */
++void macdrv_set_overlay_active(bool active)
++{
++    static const struct { WORD vkey; UINT up; DWORD data; } buttons[] =
++    {
++        { VK_LBUTTON,  MOUSEEVENTF_LEFTUP,   0 },
++        { VK_RBUTTON,  MOUSEEVENTF_RIGHTUP,  0 },
++        { VK_MBUTTON,  MOUSEEVENTF_MIDDLEUP, 0 },
++        { VK_XBUTTON1, MOUSEEVENTF_XUP,      XBUTTON1 },
++        { VK_XBUTTON2, MOUSEEVENTF_XUP,      XBUTTON2 },
++    };
++    unsigned int i;
++
++    TRACE("active %d\n", active);
++
++    pthread_mutex_lock(&overlay_mutex);
++    if (!overlay_active == active)
++    {
++        WriteNoFence(&overlay_active, active);
++        if (cursor_clipped) macdrv_clip_cursor(active ? CGRectInfinite : cursor_clip_rect);
++    }
++    pthread_mutex_unlock(&overlay_mutex);
++
++    /* Button releases stop with the rest of the mouse's input, so nothing may stay held. */
++    for (i = 0; active && i < ARRAY_SIZE(buttons); i++)
++    {
++        if (NtUserGetAsyncKeyState(buttons[i].vkey) & 0x8000)
++            send_mouse_input(NULL, NULL, buttons[i].up, 0, 0, buttons[i].data, FALSE, NtGetTickCount());
++    }
+ }
+ 
+ 
+@@ -666,6 +726,9 @@ BOOL macdrv_GetCursorPos(LPPOINT pos)
+     CGPoint pt;
+     BOOL ret;
+ 
++    /* The cursor is the overlay's: the application sees it where it last put or saw it. */
++    if (macdrv_overlay_is_active()) return TRUE;
++
+     ret = macdrv_get_cursor_position(&pt);
+     if (ret)
+     {
+@@ -814,7 +877,11 @@ done:
+  */
+ BOOL macdrv_SetCursorPos(INT x, INT y)
+ {
+-    BOOL ret = macdrv_set_cursor_position(CGPointMake(x, y));
++    BOOL ret;
++
++    if (macdrv_overlay_is_active()) return TRUE;
++
++    ret = macdrv_set_cursor_position(CGPointMake(x, y));
+     if (ret)
+         TRACE("warped to %d,%d\n", x, y);
+     else
+diff --git a/dlls/winemac.drv/unixlib.h b/dlls/winemac.drv/unixlib.h
+index dc22da02d2..f1a7494d29 100644
+--- a/dlls/winemac.drv/unixlib.h
++++ b/dlls/winemac.drv/unixlib.h
+@@ -23,6 +23,7 @@
+ {
+     unix_init,
+     unix_quit_result,
++    unix_overlay_active,
+     unix_funcs_count
+ };
+ 
+@@ -49,6 +50,12 @@
+     int result;
+ };
+ 
++/* macdrv_overlay_active params */
++struct overlay_active_params
++{
++    int active;
++};
++
+ /* macdrv_app_icon result */
+ struct app_icon_entry
+ {
+-- 
+2.54.0 (Apple Git-157)
+

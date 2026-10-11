@@ -814,6 +814,73 @@ confirms the reproduced stall is fixed; other macOS releases, Intel-native build
 and a broader game set have not been tested. Diagnostic Wine and DXMT probes are
 not part of the patch.
 
+## Steam's overlay was loaded too late: no overlay, and the camera lagged (fixed, #29)
+
+Subnautica's camera became laggy while the mouse moved, on an M2 Pro. Samples of the game showed
+the process's Cocoa main thread asleep in `usleep`, called from `gameoverlayrenderer.dylib`'s hook
+on `-[NSApplication nextEventMatchingMask:untilDate:inMode:dequeue:]`, for 24 to 45% of the time
+while the camera moved and 0 to 4% while it was still. The game's main thread spent 8 to 15% of
+its time in `NtUserGetCursorPos`, which winemac answers with a synchronous call to that thread.
+Shift+Tab did nothing, and Steam never started its `gameoverlayui` helper for the game.
+
+Steam for Mac gives a game `STEAM_DYLD_INSERT_LIBRARIES`, naming `steamloader.dylib` and
+`gameoverlayrenderer.dylib`, and a Mac game has them in its process from the start. `scripts/play`
+starts Wine with a clean environment and passed the variable on only under that name, so nothing
+loaded them at start; Valve's `steamclient.dylib`, which lsteamclient loads, opened them later.
+The overlay's log (`STEAM_OVERLAY_LOGGING=1`, in `/tmp/gameoverlayrenderer.<pid>.log`) then held
+the attach header and nothing else: no "One-time initialization", no Metal hooks. Loaded that
+late it only got in the way of the event loop.
+
+`scripts/play` now also sets `DYLD_INSERT_LIBRARIES` to the same libraries, so every process of
+the game has them from the start. The overlay then hooks `presentDrawable:` and its variants on
+`_MTLCommandBuffer` and `commit` on the driver's command buffer, Steam starts `gameoverlayui`,
+and the hot-key opens the overlay. In eighteen samples of Subnautica taken after the change the
+Cocoa main thread never slept in the overlay, and the player reported no lag.
+
+The overlay hooks only Metal 3's present calls. DXMT and mtld3d present with those. KosmicKrisp
+presents through a Metal 4 queue (`waitForDrawable:`, `signalDrawable:`, `[drawable present]`),
+so behind Zink, vkd3d-proton or a Vulkan game the overlay hooked and then never saw a frame:
+`tests/win/gltri.c`, a legacy OpenGL triangle, shows it. NotProton's overlay helper
+(`overlay-shim/overlay_shim.m`, built by `scripts/build-steam-play.sh`) is loaded in front of
+the overlay for that. It presents such a drawable from a Metal 3 command buffer that waits on an
+event the Metal 4 queue signals, so the overlay's hooks run, and it builds the overlay's pipelines
+for surface formats the overlay has none for. With it the same test reports a screen size in the
+overlay's log and `gameoverlayui` connects.
+
+Checked by the player with the helper loaded: Subnautica (Direct3D 11, DXMT), Portal 2
+(Direct3D 9, mtld3d) and Geometry Dash (OpenGL, Zink) show the overlay on Shift+Tab, and each
+game's overlay log has the screen size and the hot-key.
+
+The overlay opened, but a game that does not react to it kept the mouse and the keyboard. Portal 2
+pauses and lets go of the cursor when Steam tells it the overlay is open; Subnautica and Geometry
+Dash carried on, with the cursor locked in the middle of the window, and the overlay could only
+be used after pausing the game. lsteamclient sets the event
+`__wine_steamclient_GameOverlayActivated` while the overlay is open, and nothing in Hadron's Wine
+read it. Wine patch 0026 makes winemac.drv act on it. A thread in a game started by Steam waits
+for the event, so nothing is polled while the overlay is closed. While it is set, key presses,
+mouse buttons, movement and scrolling are not sent to the game; key releases are, and held mouse
+buttons are released, so nothing stays down. The game's clipping rectangle is lifted and
+remembered, `ClipCursor` and `SetCursorPos` succeed without moving the cursor, and `GetCursorPos`
+leaves the position Wine last had, so a game that re-centres the cursor every frame sees no
+movement. The rectangle is applied again when the overlay closes. Proton's X11 driver drops the
+same input on the same event and leaves the cursor to the overlay, which grabs the pointer there.
+The player confirmed a free cursor on Shift+Tab without pausing.
+
+Not done, not measured:
+
+- The helper's cost. It changes how KosmicKrisp's frames reach the screen and hooks
+  `setRenderPipelineState:` on every path. The triangle tests run at the same rate with and
+  without it; no game has been measured.
+- Vulkan and Direct3D 12 games, which take the same path as the OpenGL test, and whether Steam
+  leaves the variable out when a game's overlay is switched off in Steam.
+- `tests/win/d3d9tri.c` cannot show the overlay on mtld3d: its presenter thread stays idle in
+  that test, so only a game shows it.
+
+`sample` is not free here. It stops every thread of the target a thousand times a second, and
+on Subnautica, with about a hundred threads, the player saw lag exactly while it ran: for five
+seconds at a time with a 4-second sample every 13 seconds, and all the time with samples back to
+back. Lag reported while sampling does not count.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

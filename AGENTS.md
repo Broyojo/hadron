@@ -35,9 +35,11 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
 - **A failure that comes and goes is a race until shown otherwise**, not flakiness. "It passed N
   times" proves little when the failure comes in bursts; inject a delay at the suspected point,
   or run the old and new build side by side at the same time.
-- **Measure before optimising.** `sample <pid>` shows where the native side spends its time and
-  does not disturb a game much; `vmmap` stops one for minutes. mtld3d has an instrumented build
-  (`MTLD3D_PERF=1 scripts/build-mtld3d.sh --no-install`) that reports every two seconds into
+- **Measure before optimising.** `sample <pid>` shows where the native side spends its time, and
+  the player feels it: it stops every thread a thousand times a second, which made Subnautica
+  (about 100 threads) unplayable for as long as it ran. Take a few seconds of it, say when, and do
+  not count lag reported during it. `vmmap` stops a game for minutes. mtld3d has an instrumented
+  build (`MTLD3D_PERF=1 scripts/build-mtld3d.sh --no-install`) that reports every two seconds into
   `<game folder>/mtld3d-logs/`. [docs/findings.md](docs/findings.md) #25 is a worked example.
 
 ## Running games without hurting the machine
