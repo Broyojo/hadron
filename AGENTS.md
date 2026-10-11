@@ -63,7 +63,7 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
   the old one: a running shell reads its script by offset. An installed Hadron.app is different:
   games run from a copy of its runtime in `~/Library/Application Support/Hadron/runtimes/`, a
   running game keeps its copy, and the next game started gets the copy of whatever build the app
-  holds then (`scripts/runtime-versions.sh`, findings #30). Replacing the app is safe at any time;
+  holds then (`scripts/runtime-versions.sh`, findings #31). Replacing the app is safe at any time;
   changing a copy in place is not.
 - **An agent cannot see the game.** Ask the person for what is on screen, how it feels and how
   it sounds, and do not take screenshots of their screen. Everything else (launching, sampling,
