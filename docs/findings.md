@@ -848,8 +848,14 @@ for surface formats the overlay has none for. With it the same test reports a sc
 overlay's log and `gameoverlayui` connects.
 
 Checked by the player with the helper loaded: Subnautica (Direct3D 11, DXMT), Portal 2
-(Direct3D 9, mtld3d) and Geometry Dash (OpenGL, Zink) show the overlay on Shift+Tab, and each
-game's overlay log has the screen size and the hot-key.
+(Direct3D 9, mtld3d), Teardown (Direct3D 12, vkd3d-proton) and Geometry Dash (OpenGL, Zink) show
+the overlay on Shift+Tab, and each game's overlay log has the screen size and the hot-key.
+
+The overlay takes the game's id from `SteamOverlayGameId`, which Steam sets and `scripts/play`
+has to pass on. The test copies of the runtime did; the first build of 0.2.0 did not, and Steam
+started `gameoverlayui` with game id 0 (`/tmp/gameoverlay_ui.txt`, "Got gameid on commandline").
+The overlay still opened. `d3d11tri` through `scripts/play` gives id 0 without the variable and
+the right id with it.
 
 The overlay opened, but a game that does not react to it kept the mouse and the keyboard. Portal 2
 pauses and lets go of the cursor when Steam tells it the overlay is open; Subnautica and Geometry
@@ -871,8 +877,8 @@ Not done, not measured:
 - The helper's cost. It changes how KosmicKrisp's frames reach the screen and hooks
   `setRenderPipelineState:` on every path. The triangle tests run at the same rate with and
   without it; no game has been measured.
-- Vulkan and Direct3D 12 games, which take the same path as the OpenGL test, and whether Steam
-  leaves the variable out when a game's overlay is switched off in Steam.
+- A game that uses Vulkan directly, which takes the same path as the OpenGL test, and whether
+  Steam leaves the variable out when a game's overlay is switched off in Steam.
 - `tests/win/d3d9tri.c` cannot show the overlay on mtld3d: its presenter thread stays idle in
   that test, so only a game shows it.
 
