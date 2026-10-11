@@ -3,6 +3,7 @@
 # with patches/notproton) and the Valve Windows client files the Steam bridge stages.
 #
 #   build/notproton/notproton.dylib   injected into Mac Steam by scripts/steam-install
+#   build/notproton/overlay-shim.dylib   loaded into a game next to Steam's overlay by scripts/play
 #   build/valve/bridge/               Valve's steamclient DLLs and legacycompat tools, fetched
 #                                     from Valve's CDN and hash-checked (never redistributed)
 source "$(dirname "$0")/env.sh"
@@ -31,7 +32,13 @@ PATH="/usr/bin:$PATH" make -C "$NP" out/notproton.dylib >/dev/null
 mkdir -p "$BUILD/notproton"
 cp "$NP/out/notproton.dylib" "$BUILD/notproton/notproton.dylib"
 
+log "building the overlay helper"
+PATH="/usr/bin:$PATH" make -C "$NP" overlay-shim >/dev/null
+# A running game has this file mapped, so it is replaced, never written in place.
+cp "$NP/out/overlay-shim.dylib" "$BUILD/notproton/overlay-shim.dylib.new"
+mv -f "$BUILD/notproton/overlay-shim.dylib.new" "$BUILD/notproton/overlay-shim.dylib"
+
 log "fetching Valve's Windows client files"
 BRIDGE_DIR="$BUILD/valve/bridge" WORK="$BUILD/valve/fetch" sh "$NP/bridge/fetch-valve.sh" --install >/dev/null
 
-log "done: $BUILD/notproton/notproton.dylib, $BUILD/valve/bridge"
+log "done: $BUILD/notproton, $BUILD/valve/bridge"

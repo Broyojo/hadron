@@ -42,8 +42,8 @@ command around a self-contained runtime; a signed, notarized 0.1.0.
 - Ultimate Custom Night's frame-time dips in nights (findings.md #18), Portal's quit-time assert,
   and a clean mtld3d failure when a 32-bit process runs out of address space (it crashed on a
   null pointer in `LeaseCompletion::consume` with 79 MB left).
-- Steam's overlay; replacing NotProton's "CrossOver options" panel with Hadron's own options; a
-  Steam build the hook signatures do not cover should be reported, not fail silently.
+- Replacing NotProton's "CrossOver options" panel with Hadron's own options; a Steam build the
+  hook signatures do not cover should be reported, not fail silently.
 
 ## Later
 
