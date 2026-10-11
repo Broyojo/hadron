@@ -11,6 +11,14 @@ struct HadronApp: App {
             ContentView()
         }
         .windowResizability(.contentSize)
+        #if SPARKLE
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { SparkleUpdates.shared.check() }
+                    .disabled(!SparkleUpdates.isAvailable)
+            }
+        }
+        #endif
     }
 }
 
@@ -175,6 +183,13 @@ struct ContentView: View {
         .frame(width: 520)
         .onAppear {
             model.refresh()
+            // A released app updates itself; any other build only says that there is a newer one.
+            #if SPARKLE
+            if SparkleUpdates.isAvailable {
+                SparkleUpdates.shared.start()
+                return
+            }
+            #endif
             Updates.check { version, page in
                 model.newVersion = version
                 model.newVersionPage = page

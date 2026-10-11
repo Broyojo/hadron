@@ -14,6 +14,8 @@ func runCommand(_ arguments: [String]) -> Int32 {
         return status.state == "installed" ? 0 : 1
     case "report":
         return Runtime.run("report", Array(arguments.dropFirst()), line: print)
+    case "update":
+        return update()
     case "version", "--version":
         Swift.print("Hadron \(Runtime.version)")
         return 0
@@ -26,6 +28,16 @@ func runCommand(_ arguments: [String]) -> Int32 {
     }
 }
 
+/// `hadron update`. A build that was not made for release has no updater and is told where the
+/// releases are.
+private func update() -> Int32 {
+    #if SPARKLE
+    if let status = TerminalUpdate.run() { return status }
+    #endif
+    Swift.print("This build of Hadron does not update itself. The latest release: https://github.com/Broyojo/hadron/releases/latest")
+    return 1
+}
+
 private let usage = """
 usage: hadron <command>
 
@@ -34,6 +46,7 @@ usage: hadron <command>
   uninstall   take Hadron out of Steam again
   status      say whether Steam is set up
   report      save a report file for a GitHub issue (optionally: hadron report <file.zip>)
+  update      install the latest version of Hadron, if this is not it
   version     print Hadron's version
 
 Without a command, Hadron opens its window.

@@ -14,6 +14,8 @@ cask "hadron" do
   depends_on arch: :arm64
   depends_on macos: :golden_gate
 
+  auto_updates true
+
   app "Hadron.app"
   # The same program is the `hadron` command: setup, repair, uninstall, status, report, version.
   binary "#{appdir}/Hadron.app/Contents/MacOS/Hadron", target: "hadron"
