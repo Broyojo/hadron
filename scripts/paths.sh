@@ -7,10 +7,12 @@ if [ -d "$ROOT/build" ]; then
     HADRON_LOGS="$ROOT/build/logs"
     HADRON_VALVE="$ROOT/build/valve/bridge"
     HADRON_PREFIX="$ROOT/prefix/release"
+    HADRON_OVERLAY_HELPER="$ROOT/build/notproton/overlay-shim.dylib"
 else
     HADRON_LOGS="$HOME/Library/Logs/Hadron"
     HADRON_VALVE="$HOME/Library/Application Support/Hadron/valve/bridge"
     HADRON_PREFIX="$HOME/Library/Application Support/Hadron/prefix"
+    HADRON_OVERLAY_HELPER="$ROOT/steam/overlay-shim.dylib"
 fi
 # The libraries Wine opens by name (FreeType, GnuTLS, SDL, the Vulkan loader): the runtime's own
 # copies when it carries them, Homebrew's in a checkout.
