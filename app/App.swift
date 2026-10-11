@@ -191,13 +191,14 @@ struct ContentView: View {
                     }
                     Button("Save") { model.saveRenderer() }
                 }
-                Text("Only affects OpenGL games. Steam launch options take precedence.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if !model.settingsMessage.isEmpty {
-                    Text(model.settingsMessage)
-                        .font(.caption)
-                        .foregroundStyle(model.settingsFailed ? .red : .secondary)
-                }
+                Text(model.settingsMessage.isEmpty
+                     ? "Only affects OpenGL games. Steam launch options take precedence."
+                     : model.settingsMessage)
+                    .font(.caption)
+                    .foregroundStyle(model.settingsFailed ? .red : .secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(model.settingsMessage)
             }
 
             if model.busy { ProgressView().controlSize(.small) }
