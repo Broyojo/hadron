@@ -940,7 +940,10 @@ source gave another file, and every signature changes them again.
 
 A setup made by 0.2.0 or older, where the link names the app, moves over at the first launch
 after the app is updated: a launch that begins in a folder that is not a copy takes that folder
-as the installed app. It has no recorded `HOOK-ID`, so the window asks for Repair once.
+as the installed app. Such a setup has no recorded `HOOK-ID`, only the checksum of the library it
+put into Steam. `packaging/hook-history` lists those of 0.1.0, 0.1.1 and 0.2.0, read from the
+published disk images; all three were built from the NotProton revision, patches and Dobby commit
+that the current `HOOK-ID` stands for, so none of them is asked to set Steam up again.
 
 `tests/mac/test-runtime-versions.sh` checks the rules on throwaway folders (39 checks, among
 them: a link, a file, a folder without a `BUILD-ID` and a copy in use are kept; the app a link
@@ -949,6 +952,12 @@ first build's copy, the app was replaced at the same path, a second game started
 build's copy while the first went on from its own, a second program in the first game's prefix
 joined its session, and the first copy was deleted after its game ended and its ten minutes
 were over.
+
+Through Steam, on a setup made by the 0.2.0 release: the app was replaced by a build of this
+change, and the next game (Subnautica) started normally, from a copy it made, with the link moved
+and the app's 2,040 files untouched. The window asked for nothing. Then, with Portal running, the
+app was replaced again; Portal's session stayed on its copy, and Geometry Dash, started beside
+it, ran from the copy of the newer build.
 
 A runtime without a `BUILD-ID`, a checkout or a copy somebody is changing, is run in place as
 before. Not covered: the app and the Library on different volumes (the copy is then a real

@@ -22,6 +22,13 @@ from=$(sed -n 1p "$record" 2>/dev/null || true)
 copy=$(sed -n 2p "$record" 2>/dev/null || true)
 hook=$(sed -n 3p "$record" 2>/dev/null || true)
 
+same_hook() {
+    this=$(sed -n 1p "$ROOT/steam/HOOK-ID" 2>/dev/null)
+    [ -n "$hook" ] && { [ "$hook" = "$this" ]; return; }
+    [ "$from" = "$(/sbin/md5 -q "$LIB" 2>/dev/null)" ] && return 0
+    [ -n "$this" ] && [ -n "$from" ] && grep -q "^$this $from " "$ROOT/steam/HOOK-HISTORY" 2>/dev/null
+}
+
 if [ ! -d "$APP" ]; then
     printf 'no-steam\nSteam is not installed in /Applications.\n'; exit 0
 fi
@@ -52,15 +59,17 @@ elif [ -z "$build" ]; then
     else
         printf 'installed\nSteam Play is set up (Hadron %s).\n' "$HADRON_VERSION"
     fi
-# An installed app. Steam's part needs setting up again only when this build changed it (HOOK-ID,
-# or the very library when the setup predates that); games move to this build's runtime by
+# An installed app. Steam's part needs setting up again only when this build changed it: when
+# what it was built from (HOOK-ID) is not what the setup recorded. A setup made before that was
+# recorded knows only its library's checksum, which is this build's own or one of an earlier
+# release built from the same (steam/HOOK-HISTORY). Games move to this build's runtime by
 # themselves, the next one that is started (scripts/runtime-versions.sh).
-elif [ "$hook" != "$(sed -n 1p "$ROOT/steam/HOOK-ID" 2>/dev/null)" ] && [ "$from" != "$(/sbin/md5 -q "$LIB" 2>/dev/null)" ]; then
-    printf 'outdated\nThis version of Hadron changes its part in Steam. Repair restarts Steam to finish the update.\n'
+elif ! same_hook; then
+    printf 'outdated\nHadron was updated. Click Repair to finish; it closes Steam.\n'
 elif [ "$(sed -n 1p "$HADRON_SUPPORT/source" 2>/dev/null)" != "$ROOT" ] && [ "$linked" != "$ROOT" ]; then
     printf 'outdated\nSteam is set up for another copy of Hadron. Repair points it at this one.\n'
 elif [ "$(runtime_id "$linked")" != "$build" ]; then
-    printf 'installed\nSteam Play is set up. The next game you start runs on Hadron %s.\n' "$HADRON_VERSION"
+    printf 'installed\nSteam Play is set up. The next game you start uses this version.\n'
 else
     printf 'installed\nSteam Play is set up (Hadron %s).\n' "$HADRON_VERSION"
 fi

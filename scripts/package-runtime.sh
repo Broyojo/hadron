@@ -97,6 +97,8 @@ cp -R "$SRC/notproton/signatures" "$OUT/steam/signatures"
     git -C "$SRC/notproton/vendor/dobby" rev-parse HEAD
     [[ -z "$(git -C "$SRC/notproton" status --porcelain -- dylib signatures Makefile)" ]] || date +%s
 } | /sbin/md5 -q > "$OUT/steam/HOOK-ID"
+# The releases whose setups predate that record (packaging/hook-history).
+grep -v '^#' "$ROOT/packaging/hook-history" > "$OUT/steam/HOOK-HISTORY"
 # What fetches Valve's Windows client files on the user's Mac: they are not ours to ship.
 cp "$SRC/notproton/bridge/fetch-valve.sh" "$SRC/notproton/app/Sources/NotProtonApp/Resources/valve-packages.manifest" "$OUT/steam/"
 # The packaged scripts run on Macs without Apple's developer tools, where otool, python3 and the
