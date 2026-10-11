@@ -8,7 +8,11 @@
 # Steam bridge files (Valve's Windows steamclient DLLs, which Wine redirects to lsteamclient) are
 # staged into the prefix's Steam directory, and the game runs through scripts/play, so it gets
 # everything a manual launch does: mtld3d, vsync, the watchdog, hadron-steam.exe.
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+#
+# Steam starts this through the link ~/Library/Application Support/Hadron/runtime. A game runs
+# from the real folder behind it, so that the link can move to a newer copy of the runtime
+# while the game runs (scripts/runtime-versions.sh).
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 verb="$1"; shift
 
 case "$verb" in
@@ -17,6 +21,32 @@ case "$verb" in
     *) echo "steam-run: unsupported verb '$verb'" >&2; exit 1 ;;
 esac
 [ -n "$STEAM_COMPAT_DATA_PATH" ] || { echo "steam-run: STEAM_COMPAT_DATA_PATH is not set" >&2; exit 1; }
+export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
+. "$ROOT/scripts/paths.sh"
+. "$ROOT/scripts/runtime-versions.sh"
+
+# Which copy of the runtime this launch runs from (scripts/runtime-versions.sh). The one it began
+# in is marked as in use at once. Then it may be another: the one a launch or a Wine session
+# already running in the game's prefix uses, since what starts now joins it, or the build in the
+# installed app, copied here if this is the first launch since the app was updated. That copy's
+# own steam-run takes over, once.
+case "$ROOT" in
+    "$HADRON_RUNTIMES"/*) runtime_mark "$ROOT" ;;
+esac
+if [ -z "${HADRON_RUNTIME_CHOSEN:-}" ] && [ -n "$(runtime_id "$ROOT")" ]; then
+    export HADRON_RUNTIME_CHOSEN=1
+    chosen=$(runtime_choose "$ROOT")
+    [ -z "$chosen" ] || exec "$chosen/scripts/steam-run" "$verb" "$@"
+fi
+# If there are other copies, the ones nothing needs any more go, without holding the launch up.
+case "$ROOT" in
+    "$HADRON_RUNTIMES"/*)
+        for other in "$HADRON_RUNTIMES"/*; do
+            [ "$other" != "$ROOT" ] && [ -d "$other" ] || continue
+            ( runtime_lock && { runtime_prune "$(readlink "$HADRON_SUPPORT/runtime")"; runtime_unlock; } ) >/dev/null 2>&1 &
+            break
+        done ;;
+esac
 
 # Settings given as NAME=value launch options (a game's Properties, or the Compatibility page) arrive
 # in argv: export them, and keep the rest as the command.
@@ -45,7 +75,7 @@ apply_profile() {  # <file>
         done
     done < "$1"
 }
-apply_profile "$HOME/Library/Application Support/Hadron/games.conf"
+apply_profile "$HADRON_SUPPORT/games.conf"
 apply_profile "$ROOT/config/games.conf"
 
 log="$STEAM_COMPAT_DATA_PATH/hadron-run.log"
@@ -56,13 +86,13 @@ mkdir -p "$STEAM_COMPAT_DATA_PATH"
     env | grep -E '^(Steam|STEAM_)' | sort
 } >> "$log" 2>&1
 
+# The prefix is the one in Steam's folder for the game, whatever a launch option says.
 export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
 # Proton's Windows user name. Steam's Cloud rules map Windows paths into users/steamuser, so the
 # profile has to be that one; Wine names it after $USER.
 real_user="$USER"
 export USER=steamuser
 # As in scripts/play: where Wine finds FreeType and friends.
-. "$ROOT/scripts/paths.sh"
 export DYLD_FALLBACK_LIBRARY_PATH="$HADRON_LIBPATH"
 wine="$ROOT/dist/bin/wine"
 

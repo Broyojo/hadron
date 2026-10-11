@@ -56,10 +56,14 @@ window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your p
 **Updating.** Hadron updates itself. When you open its window and a newer version exists, it
 shows what is new and asks; **Hadron, Check for Updates…** looks at once, and `hadron update`
 does the same from a terminal. The download is checked against a signature before anything is
-installed, nothing is installed unasked, and Hadron is not replaced while a game is running.
-After an update the window offers **Repair**, which brings Steam up to date with the new version.
-With Homebrew, `brew upgrade --cask hadron` also works; a plain `brew upgrade` leaves Hadron to
-update itself.
+installed, and nothing is installed unasked. With Homebrew, `brew upgrade --cask hadron` also
+works; a plain `brew upgrade` leaves Hadron to update itself.
+
+Updating is safe while a game is running: games run from a copy of Hadron's runtime kept in your
+Library, so the running game is left as it is, and the next game you start uses the new version.
+Hadron's window asks for **Repair** only when a version changes the part of Hadron that sits
+inside Steam.
+
 
 To remove Hadron, take it out of Steam first (Uninstall in the window, or `hadron uninstall`),
 then delete the app or run `brew uninstall --cask hadron`. If you had the window add the `hadron`

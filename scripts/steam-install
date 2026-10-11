@@ -1,7 +1,8 @@
 #!/bin/sh
 # Install Hadron's Steam Play integration into Mac Steam (built by scripts/build-steam-play.sh):
-#   - ~/Library/Application Support/Hadron/runtime -> this checkout (Steam's tool runs
-#     scripts/steam-run from there);
+#   - ~/Library/Application Support/Hadron/runtime, the link Steam's tool runs scripts/steam-run
+#     through: to a copy of this runtime when it is an installed app's (scripts/runtime-versions.sh),
+#     to the checkout itself when it is one;
 #   - NotProton's hook signatures into ~/Library/Application Support/notproton/signatures;
 #   - the Steam client library into /Applications/Steam.app, loaded through the launcher's
 #     LSEnvironment, and the launcher re-signed ad hoc (Valve's signature is replaced; the real
@@ -20,7 +21,8 @@ else
     LIB="$ROOT/steam/notproton.dylib"
     SIGNATURES="$ROOT/steam/signatures"
 fi
-SUPPORT="$HOME/Library/Application Support/Hadron"
+. "$ROOT/scripts/runtime-versions.sh"
+SUPPORT="$HADRON_SUPPORT"
 BACKUP="$SUPPORT/Steam-Info.plist.before-hadron"
 INSERT="$APP/Contents/MacOS/notproton.dylib"
 
@@ -51,7 +53,24 @@ fi
 rm -f "$probe"
 
 mkdir -p "$SUPPORT"
-ln -sfn "$ROOT" "$SUPPORT/runtime"
+if [ -n "$(runtime_id "$ROOT")" ]; then
+    # An installed app: games run from a copy of its runtime, and this app is where newer copies
+    # come from when it is updated.
+    runtime_lock || { echo "another launch is busy with Hadron's runtime; try again" >&2; exit 1; }
+    if copy=$(runtime_copy "$ROOT") && runtime_point "$copy"; then
+        printf '%s\n' "$ROOT" > "$SUPPORT/source"
+        runtime_prune "$copy"
+        runtime_unlock
+    else
+        runtime_unlock
+        echo "cannot copy the runtime to $HADRON_RUNTIMES" >&2
+        exit 1
+    fi
+else
+    # A checkout is run in place, as it is on disk.
+    rm -f "$SUPPORT/source"
+    runtime_point "$ROOT"
+fi
 mkdir -p "$HOME/Library/Application Support/notproton/signatures/macos.arm64"
 cp -f "$SIGNATURES/macos.arm64/"*.json "$HOME/Library/Application Support/notproton/signatures/macos.arm64/"
 
@@ -81,7 +100,9 @@ codesign -v "$APP"
 # Which library Steam now has, for scripts/steam-status: the runtime's library it came from, and
 # the copy in Steam as it is after signing (which changes its bytes). Comparing the two libraries
 # themselves would take developer tools.
-printf '%s\n%s\n' "$(/sbin/md5 -q "$LIB")" "$(/sbin/md5 -q "$INSERT")" > "$SUPPORT/steam-library"
+# The third line is what the library and its signatures were built from (HOOK-ID, from
+# scripts/package-runtime.sh): a later build of the same is no reason to set Steam up again.
+printf '%s\n%s\n%s\n' "$(/sbin/md5 -q "$LIB")" "$(/sbin/md5 -q "$INSERT")" "$(sed -n 1p "$ROOT/steam/HOOK-ID" 2>/dev/null)" > "$SUPPORT/steam-library"
 # Steam's shortcuts for the games already installed get the games' own icons.
 "$(dirname "$0")/shortcut-icon" || true
 echo "installed; start Steam as usual (Settings -> Compatibility shows Steam Play)"

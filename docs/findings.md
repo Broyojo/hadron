@@ -893,6 +893,128 @@ on Subnautica, with about a hundred threads, the player saw lag exactly while it
 seconds at a time with a 4-second sample every 13 seconds, and all the time with samples back to
 back. Lag reported while sampling does not count.
 
+## Wine: window reordering cancels fullscreen minimization (#30)
+
+Bravely Default Flying Fairy HD Remaster sometimes stayed stuck after Cmd+Tab
+out of fullscreen and back: the window returned with unusable contents and did
+not accept focus. This reproduced on Hadron 0.1.1 and 0.2.0 on an Apple M5
+MacBook Pro with 32 GB of RAM, macOS 27.0.1. The game uses Unity 6 and D3D11
+through DXMT.
+
+Wine requested native minimization and set `WS_MINIMIZE`, but neither
+`windowWillMiniaturize` nor `windowDidMiniaturize` followed. The native window
+later became visible, unminimized and key while Wine still considered it
+minimized, with a zero-sized client, and rejected its focus event. Between the
+request and native initiation, `adjustWindowLevels:` changed the window's level
+and explicitly ordered it front or back. Those ordering calls can cancel the
+pending minimization.
+
+A native AppKit test isolated this conflict without Wine or a game: immediate
+`orderFront:` and `orderBack:` prevented initiation even with style and level
+held constant; matched cases without ordering completed. Calling `orderFront:`
+from `windowWillMiniaturize` allowed completion. In the game, suppressing only
+the automatic ordering while inactive and awaiting initiation completed all 36
+requests. Restoring the unchanged driver reproduced the failure on its fifth
+request.
+
+winemac.drv now tracks a native minimize request until initiation and omits the
+automatic front/back ordering during inactive level adjustment while that request
+is outstanding. It still applies the level change. Tracking starts when the
+native request is issued, including requests deferred until a hidden window is
+shown, and clears on native initiation, completion or restoration, or an explicit
+Win32 restore. Explicit activation, show and restore paths retain their behavior.
+
+Tested without diagnostic instrumentation in an isolated Hadron 0.2.0 runtime:
+Bravely Default completed 18 minimizations and 17 restorations; Portal 2 (Source,
+D3D9 through mtld3d) completed nine and eight. Both sessions ended minimized.
+The player confirmed working Dock transitions in Bravely Default and normal
+gameplay through ordinary and rapid switching in Portal 2. Loaded driver
+identities were verified, and neither session rejected a focus event. Eleven
+Win32 checks also passed for hidden/minimized creation, show, restore,
+hide/reshow after minimization, and cancellation before showing.
+
+## Games ran from inside the app, so an update could change a running game (fixed, #31)
+
+Hadron.app carries the runtime, and Steam's tool started games straight from it:
+`~/Library/Application Support/Hadron/runtime` was a link to
+`Hadron.app/Contents/SharedSupport/runtime`. Whatever replaces the app replaces the runtime under
+any game that is running: `brew upgrade`, a new app dragged over the old one, and an updater
+inside the app. The game keeps the libraries it has loaded and gets the new build's for
+everything it loads afterwards.
+
+It showed while adding an updater (Sparkle). A check for a running game before the update is not
+enough, and there is no place for a second one: started from a terminal, with the app's window
+closed, Sparkle goes from unpacking to installing without asking again. With a test program
+started just after `hadron update`, the app was replaced while the program ran. A guard in the
+updater also does nothing for the other two ways an app is replaced.
+
+Now a game does not run from the app. Each build of the runtime has a name
+(`BUILD-ID`, written by `scripts/package-runtime.sh`; two builds of one version differ), and is
+copied once to `~/Library/Application Support/Hadron/runtimes/<build id>/`. On one APFS volume
+the copy is a clone: 0.32 s and no space of its own for the 2,037 files and 1.1 GB of 0.2.0's
+runtime. The link Steam's tool starts names the copy new games use. `scripts/steam-run` takes
+its real path, so a running game is told nothing through the link, and before anything else
+decides which copy the launch runs from (`scripts/runtime-versions.sh`):
+
+- a launch that is alive for the game's prefix, or a Wine session running in it, keeps its
+  copy, and what starts there joins it. A launch marks its copy with a file named after the copy
+  and its process ID, holding the prefix; Steam's tool lives as long as its game. A session
+  whose launch is gone is found by its wineserver, which works in
+  `/tmp/.wine-<uid>/server-<device>-<inode>` of the prefix, and `lsof` names the runtime its
+  program is in;
+- otherwise the build in the installed app, whose runtime folder `scripts/steam-install` wrote
+  to `source`. If no copy of it exists yet, this is the first launch since the app was updated:
+  the copy is made, the link is renamed over the old one, and the copy's own `steam-run` takes
+  over. Comparing the two names costs about 4 ms a launch;
+- an app that cannot be read changes nothing.
+
+A copy is deleted by a later launch, when it is not the one the link names, no launch that
+marked it is alive and no process has files of it mapped. When the processes cannot be looked
+at, a copy counts as in use: kept too long it costs space, deleted too soon it costs a game.
+Only a folder in `runtimes/` that carries a `BUILD-ID` is ever deleted, never through a link,
+and the link itself is only ever replaced by a link. One launch at a time chooses, copies and
+deletes, under the system's own file lock (`lockf` on an open file), which cannot outlive its
+holder. The memory watchdog and `scripts/stop` count the processes of every copy.
+
+So a running game never changes, and the next game started runs on the new build, with both
+running side by side if need be. Setting Steam up again is asked for only when a build changes
+Steam's own part: `steam/HOOK-ID` is made from the sources of the library in Steam, the hooking
+library it links and the hook signatures, and `scripts/steam-status` compares it with what
+`scripts/steam-install` recorded. The library's bytes cannot serve: a clean rebuild of the same
+source gave another file, and every signature changes them again.
+
+A setup made by 0.2.0 or older, where the link names the app, moves over at the first launch
+after the app is updated: a launch that begins in a folder that is not a copy takes that folder
+as the installed app. Such a setup has no recorded `HOOK-ID`, only the checksum of the library it
+put into Steam. `packaging/hook-history` lists those of 0.1.0, 0.1.1 and 0.2.0, read from the
+published disk images; all three were built from the NotProton revision, patches and Dobby commit
+that the current `HOOK-ID` stands for, so none of them is asked to set Steam up again.
+
+`tests/mac/test-runtime-versions.sh` checks the rules on throwaway folders (52 checks, among
+them: a link, a file, a folder without a `BUILD-ID`, a copy a process runs from and a copy a
+live launch marked are kept; with `lsof` or `ps` failing nothing is deleted; the app a link names
+is untouched; a second launch for a prefix stays with the first; the lock is free the moment its
+holder is killed). With the real runtime and a Direct3D 11 test program, 25 checks: a game ran
+from the first build's copy, the app was replaced at the same path, a second game started from
+the new build's copy while the first went on from its own, a second program in the first game's
+prefix ran from the first copy, a clean-up while the first game ran kept its copy, and one after
+it had ended deleted it.
+
+Through Steam, on a setup made by the 0.2.0 release: the app was replaced by a build of this
+change, and the next game (Subnautica) started normally, from a copy it made, with the link moved
+and the app's 2,040 files untouched. The window asked for nothing. Then, with Portal running, the
+app was replaced again; Portal's session stayed on its copy, and Geometry Dash, started beside
+it, ran from the copy of the newer build. Repair, once macOS allowed the rebuilt app to change
+Steam, recorded the `HOOK-ID` and left the link on the current copy. Those runs were on the
+first form of the rules (a ten-minute rule and a lock folder). On the final one, with the app
+replaced once more, Geometry Dash started from the new build's copy, marked it for its prefix,
+and the two older copies left in the Library were deleted.
+
+A runtime without a `BUILD-ID`, a checkout or a copy somebody is changing, is run in place as
+before. Not covered: the app and the Library on different volumes (the copy is then a real
+one, 1.1 GB each time); two different builds started in one prefix at the same instant; and the
+old copy's space, which is held until a launch after its last game has ended.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

@@ -37,12 +37,6 @@ final class TerminalUpdate: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         status = 1
     }
 
-    // The updater's questions to its delegate.
-
-    func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
-        try SparkleUpdates.refuseWhileGameRuns()
-    }
-
     /// The window is for whoever opens it; an update asked for in a terminal ends there.
     func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool { false }
 
@@ -121,8 +115,13 @@ final class TerminalUpdate: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         say(applicationTerminated ? "Installing…" : "Hadron's window is open: close it, and the update is installed.")
     }
 
+    /// The new app says how Steam stands with it: usually that the next game uses it, sometimes
+    /// that Steam's own part changed.
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
-        say("Hadron \(version) is installed. Bring Steam up to date with it: hadron repair")
+        say("Hadron \(version) is installed.")
+        let status = Runtime.status()
+        if !status.message.isEmpty { say(status.message) }
+        if status.state == "outdated" || status.state == "broken" { say("From a terminal: hadron repair") }
         acknowledgement()
         finished = true
     }
