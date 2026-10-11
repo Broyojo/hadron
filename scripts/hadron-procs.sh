@@ -15,6 +15,11 @@ hadron_candidates() {
 # installed app, games run from a copy of the runtime, and "this runtime" is the copy the script
 # was started from (scripts/runtime-versions.sh).
 HADRON_REAL_ROOT="$(cd "$ROOT" && pwd -P)"
+# Two builds can be running side by side, each from its copy: the memory watchdog and
+# scripts/stop mean all of them, so for a copy "this runtime" is the folder the copies are in.
+case "$HADRON_REAL_ROOT" in
+    */runtimes/*) [ ! -f "$HADRON_REAL_ROOT/BUILD-ID" ] || HADRON_REAL_ROOT="${HADRON_REAL_ROOT%/*}" ;;
+esac
 
 # Whether process $1 belongs to this checkout.
 is_hadron_process() {

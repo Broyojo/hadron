@@ -59,7 +59,6 @@ if [ -n "$(runtime_id "$ROOT")" ]; then
     runtime_lock || { echo "another launch is busy with Hadron's runtime; try again" >&2; exit 1; }
     if copy=$(runtime_copy "$ROOT") && runtime_point "$copy"; then
         printf '%s\n' "$ROOT" > "$SUPPORT/source"
-        touch "$copy/.used"
         runtime_prune "$copy"
         runtime_unlock
     else

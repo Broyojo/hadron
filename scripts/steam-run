@@ -25,24 +25,28 @@ export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
 . "$ROOT/scripts/paths.sh"
 . "$ROOT/scripts/runtime-versions.sh"
 
-# Which copy of the runtime this launch runs from. A Wine session already running in the game's
-# prefix keeps its own: what starts now joins it. Otherwise it is the build in the installed app,
-# copied here if this is the first launch since the app was updated. The copy's own steam-run
-# takes over, once.
+# Which copy of the runtime this launch runs from (scripts/runtime-versions.sh). The one it began
+# in is marked as in use at once. Then it may be another: the one a launch or a Wine session
+# already running in the game's prefix uses, since what starts now joins it, or the build in the
+# installed app, copied here if this is the first launch since the app was updated. That copy's
+# own steam-run takes over, once.
+case "$ROOT" in
+    "$HADRON_RUNTIMES"/*) runtime_mark "$ROOT" ;;
+esac
 if [ -z "${HADRON_RUNTIME_CHOSEN:-}" ] && [ -n "$(runtime_id "$ROOT")" ]; then
     export HADRON_RUNTIME_CHOSEN=1
-    chosen=$(runtime_of_session)
-    [ -n "$chosen" ] || chosen=$(runtime_latest "$ROOT")
-    if [ -n "$chosen" ] && [ "$chosen" != "$ROOT" ] && [ -x "$chosen/scripts/steam-run" ]; then
-        exec "$chosen/scripts/steam-run" "$verb" "$@"
-    fi
+    chosen=$(runtime_choose "$ROOT")
+    [ -z "$chosen" ] || exec "$chosen/scripts/steam-run" "$verb" "$@"
 fi
-# This copy is in use from here on, before any Wine process shows it; then the ones nothing
-# needs any more go, without holding the launch up.
-if [ -n "$(runtime_id "$ROOT")" ]; then
-    touch "$ROOT/.used" 2>/dev/null
-    ( runtime_lock && { runtime_prune "$(readlink "$HADRON_SUPPORT/runtime")"; runtime_unlock; } ) >/dev/null 2>&1 &
-fi
+# If there are other copies, the ones nothing needs any more go, without holding the launch up.
+case "$ROOT" in
+    "$HADRON_RUNTIMES"/*)
+        for other in "$HADRON_RUNTIMES"/*; do
+            [ "$other" != "$ROOT" ] && [ -d "$other" ] || continue
+            ( runtime_lock && { runtime_prune "$(readlink "$HADRON_SUPPORT/runtime")"; runtime_unlock; } ) >/dev/null 2>&1 &
+            break
+        done ;;
+esac
 
 # Settings given as NAME=value launch options (a game's Properties, or the Compatibility page) arrive
 # in argv: export them, and keep the rest as the command.
@@ -82,6 +86,8 @@ mkdir -p "$STEAM_COMPAT_DATA_PATH"
     env | grep -E '^(Steam|STEAM_)' | sort
 } >> "$log" 2>&1
 
+# The prefix is the one in Steam's folder for the game, whatever a launch option says.
+export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
 # Proton's Windows user name. Steam's Cloud rules map Windows paths into users/steamuser, so the
 # profile has to be that one; Wine names it after $USER.
 real_user="$USER"

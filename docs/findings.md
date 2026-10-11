@@ -916,20 +916,25 @@ runtime. The link Steam's tool starts names the copy new games use. `scripts/ste
 its real path, so a running game is told nothing through the link, and before anything else
 decides which copy the launch runs from (`scripts/runtime-versions.sh`):
 
-- a Wine session already running in the game's prefix keeps its copy, and what starts there
-  joins it. The session's wineserver works in `/tmp/.wine-<uid>/server-<device>-<inode>` of the
-  prefix, and `lsof` names the runtime its program is in;
+- a launch that is alive for the game's prefix, or a Wine session running in it, keeps its
+  copy, and what starts there joins it. A launch marks its copy with a file named after the copy
+  and its process ID, holding the prefix; Steam's tool lives as long as its game. A session
+  whose launch is gone is found by its wineserver, which works in
+  `/tmp/.wine-<uid>/server-<device>-<inode>` of the prefix, and `lsof` names the runtime its
+  program is in;
 - otherwise the build in the installed app, whose runtime folder `scripts/steam-install` wrote
   to `source`. If no copy of it exists yet, this is the first launch since the app was updated:
   the copy is made, the link is renamed over the old one, and the copy's own `steam-run` takes
   over. Comparing the two names costs about 4 ms a launch;
 - an app that cannot be read changes nothing.
 
-A copy is deleted by a later launch, when it is not the one the link names, no process has
-files of it mapped and no launch chose it in the last ten minutes (a launch marks its copy
-before any Wine process shows it). Only a folder in `runtimes/` that carries a `BUILD-ID` is
-ever deleted, never through a link, and the link itself is only ever replaced by a link. A lock
-folder holding its owner's process ID keeps two launches from doing this at once.
+A copy is deleted by a later launch, when it is not the one the link names, no launch that
+marked it is alive and no process has files of it mapped. When the processes cannot be looked
+at, a copy counts as in use: kept too long it costs space, deleted too soon it costs a game.
+Only a folder in `runtimes/` that carries a `BUILD-ID` is ever deleted, never through a link,
+and the link itself is only ever replaced by a link. One launch at a time chooses, copies and
+deletes, under the system's own file lock (`lockf` on an open file), which cannot outlive its
+holder. The memory watchdog and `scripts/stop` count the processes of every copy.
 
 So a running game never changes, and the next game started runs on the new build, with both
 running side by side if need be. Setting Steam up again is asked for only when a build changes
@@ -945,13 +950,15 @@ put into Steam. `packaging/hook-history` lists those of 0.1.0, 0.1.1 and 0.2.0, 
 published disk images; all three were built from the NotProton revision, patches and Dobby commit
 that the current `HOOK-ID` stands for, so none of them is asked to set Steam up again.
 
-`tests/mac/test-runtime-versions.sh` checks the rules on throwaway folders (39 checks, among
-them: a link, a file, a folder without a `BUILD-ID` and a copy in use are kept; the app a link
-names is untouched). With the real runtime and a Direct3D 11 test program: a game ran from the
-first build's copy, the app was replaced at the same path, a second game started from the new
-build's copy while the first went on from its own, a second program in the first game's prefix
-joined its session, and the first copy was deleted after its game ended and its ten minutes
-were over.
+`tests/mac/test-runtime-versions.sh` checks the rules on throwaway folders (52 checks, among
+them: a link, a file, a folder without a `BUILD-ID`, a copy a process runs from and a copy a
+live launch marked are kept; with `lsof` or `ps` failing nothing is deleted; the app a link names
+is untouched; a second launch for a prefix stays with the first; the lock is free the moment its
+holder is killed). With the real runtime and a Direct3D 11 test program, 25 checks: a game ran
+from the first build's copy, the app was replaced at the same path, a second game started from
+the new build's copy while the first went on from its own, a second program in the first game's
+prefix ran from the first copy, a clean-up while the first game ran kept its copy, and one after
+it had ended deleted it.
 
 Through Steam, on a setup made by the 0.2.0 release: the app was replaced by a build of this
 change, and the next game (Subnautica) started normally, from a copy it made, with the link moved

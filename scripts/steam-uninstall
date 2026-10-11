@@ -41,10 +41,9 @@ rm -f "$INSERT" "$APP/Contents/Info.plist.before-hadron" "$BACKUP" "$HADRON_SUPP
 [ ! -L "$HADRON_SUPPORT/runtime" ] || rm -f "$HADRON_SUPPORT/runtime"
 rm -f "$HADRON_SUPPORT/source"
 if [ -d "$HADRON_RUNTIMES" ] && runtime_lock; then
-    find "$HADRON_RUNTIMES" -maxdepth 2 -name .used -delete 2>/dev/null
     runtime_prune ""
     runtime_unlock
-    rmdir "$HADRON_RUNTIMES" 2>/dev/null || true
+    rmdir "$HADRON_RUNTIMES/.launches" "$HADRON_RUNTIMES" 2>/dev/null || true
 fi
 codesign -f -s - "$APP/Contents/MacOS/steam_osx"
 codesign -f -s - "$APP"

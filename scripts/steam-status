@@ -46,9 +46,12 @@ if [ "$setting" != "$INSERT" ] || [ ! -f "$INSERT" ]; then
 fi
 linked=$(readlink "$HADRON_SUPPORT/runtime" 2>/dev/null || true)
 build=$(runtime_id "$ROOT")
+# Steam's tool starts scripts/steam-run through the link and has no other way to it.
+if [ ! -x "$HADRON_SUPPORT/runtime/scripts/steam-run" ]; then
+    printf 'broken\nSteam cannot find Hadron: the link to its runtime is missing. Repair puts it back.\n'
 # The copy in Steam has to be the one that was recorded (another Hadron, or anything else, may have
 # replaced it since).
-if [ "$copy" != "$(/sbin/md5 -q "$INSERT" 2>/dev/null)" ]; then
+elif [ "$copy" != "$(/sbin/md5 -q "$INSERT" 2>/dev/null)" ]; then
     printf 'outdated\nSteam is set up for another version of Hadron. Repair brings it up to date.\n'
 elif [ -z "$build" ]; then
     # A checkout: Steam's library has to have come from this checkout's, and the link names it.
