@@ -26,8 +26,11 @@ command around a self-contained runtime; a signed, notarized 0.1.0.
    waits between the engine's threads ([findings #25](findings.md)).
 5. **Game controllers.** Wine's controller service starts in the packaged runtime; no controller
    has been tried in a game.
-6. **Updates.** The window says when a newer release exists. Installing it in place (Sparkle), and
-   the official Homebrew cask in place of the project's own tap.
+6. **Updates.** A released app updates itself with Sparkle, from its window and with
+   `hadron update`. It looks only while the window is open, so somebody who never opens Hadron
+   again stays on an old version: saved reports carry the version, which will show whether that
+   needs a notice when a game is started. Smaller downloads (Sparkle's delta updates), and the
+   official Homebrew cask in place of the project's own tap.
 7. **Steam updates.** Notice when a Steam update removes the setup and say so, instead of
    Windows games quietly losing their Install button until Hadron is opened.
 8. **Direct3D 9 to 11 against a ground truth.** The Khronos suites say nothing about mtld3d and

@@ -1,0 +1,5 @@
+# The public half of the key Hadron's updates are signed with (EdDSA, made by Sparkle's
+# generate_keys). scripts/build-app.sh --updates puts it into the app, which then installs only
+# an update whose signature it confirms. The private half is in the maintainer's keychain and is
+# never in this repository; an update signed with any other key is refused by every released app.
+vxAXXJfUweQnHTKsp51aCyaYQY8Lm7zG4qKr63G7d/I=

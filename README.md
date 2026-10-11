@@ -53,6 +53,14 @@ Everything the window does is also a command: `hadron setup`, `hadron uninstall`
 (`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's
 window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
 
+**Updating.** Hadron updates itself. When you open its window and a newer version exists, it
+shows what is new and asks; **Hadron, Check for Updates…** looks at once, and `hadron update`
+does the same from a terminal. The download is checked against a signature before anything is
+installed, nothing is installed unasked, and Hadron is not replaced while a game is running.
+After an update the window offers **Repair**, which brings Steam up to date with the new version.
+With Homebrew, `brew upgrade --cask hadron` also works; a plain `brew upgrade` leaves Hadron to
+update itself.
+
 To remove Hadron, take it out of Steam first (Uninstall in the window, or `hadron uninstall`),
 then delete the app or run `brew uninstall --cask hadron`. If you had the window add the `hadron`
 command, remove that link too: `sudo rm /usr/local/bin/hadron`.
@@ -79,8 +87,10 @@ To build it yourself instead, see [Building](#building).
 - **First launches are slow.** A game's first start sets up its Windows environment and
   compiles its shaders, and the first start after a Hadron update compiles them again.
 - **Nothing about you is sent anywhere.** There is no telemetry. The one request Hadron makes
-  on its own is to GitHub, when you open its window, to see whether a newer version exists. If
-  something breaks, Hadron can save a report file for you to attach to an issue yourself.
+  on its own is to GitHub, while its window is open, for the latest release's update feed. It
+  names the version of Hadron that is asking and, as a browser would, your language; nothing
+  else about you or your Mac. If something breaks, Hadron can save a report file for you to
+  attach to an issue yourself.
 
 ## How it works
 
