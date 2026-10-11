@@ -191,13 +191,17 @@ set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"
 [ -n "$vkd3d_cache" ] && set -- "VKD3D_SHADER_CACHE_PATH=$vkd3d_cache" "$@"
 
 # Steam's overlay hooks Metal's present calls and the event loop when its library is loaded, so it
-# has to be in the process from the start, as in a Mac game. Loaded later by Steam's client
-# library it draws nothing and stalls the event loop on mouse input (docs/findings.md #29).
+# has to be in the process from the start, as in a Mac game. Opened later by lsteamclient it
+# draws nothing and stalls the event loop on mouse input (docs/findings.md #29).
 # NotProton's overlay helper goes in with it: the overlay hooks only Metal 3's present calls, and
-# the helper shows it the frames KosmicKrisp presents through a Metal 4 queue.
+# the helper shows it the frames KosmicKrisp presents through a Metal 4 queue. lsteamclient
+# looks for the helper under NOTPROTON_OVERLAY_SHIM and leaves the overlay alone when it is in.
 if [ -n "${STEAM_DYLD_INSERT_LIBRARIES:-}" ]; then
     insert="$STEAM_DYLD_INSERT_LIBRARIES"
-    [ -f "$HADRON_OVERLAY_HELPER" ] && insert="$HADRON_OVERLAY_HELPER:$insert"
+    if [ -f "$HADRON_OVERLAY_HELPER" ]; then
+        insert="$HADRON_OVERLAY_HELPER:$insert"
+        set -- "NOTPROTON_OVERLAY_SHIM=$HADRON_OVERLAY_HELPER" "$@"
+    fi
     set -- "DYLD_INSERT_LIBRARIES=$insert" "$@"
 fi
 
@@ -221,4 +225,6 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     ${HADRON_PRECISE_SCROLLING:+HADRON_PRECISE_SCROLLING=$HADRON_PRECISE_SCROLLING} \
     ${FEX_BLOCKJITNAMING:+FEX_BLOCKJITNAMING=$FEX_BLOCKJITNAMING} \
     STEAM_DYLD_INSERT_LIBRARIES="$STEAM_DYLD_INSERT_LIBRARIES" \
+    ${SteamOverlayGameId:+SteamOverlayGameId=$SteamOverlayGameId} \
+    ${SteamClientLaunch:+SteamClientLaunch=$SteamClientLaunch} ${SteamEnv:+SteamEnv=$SteamEnv} \
     "$@"
