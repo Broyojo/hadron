@@ -35,6 +35,11 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
 - **A failure that comes and goes is a race until shown otherwise**, not flakiness. "It passed N
   times" proves little when the failure comes in bursts; inject a delay at the suspected point,
   or run the old and new build side by side at the same time.
+- **Test what will ship.** A fix found by editing a copy of the runtime is not the fix that gets
+  committed until the two are compared: diff the copy's scripts against the branch's before opening
+  the pull request, and say which runs were made with which. Before a release is published, start a
+  game from the release build itself and read its logs against the tested run. 0.2.0's first build
+  lacked four variables the tested copy passed to the game (findings #29).
 - **Measure before optimising.** `sample <pid>` shows where the native side spends its time, and
   the player feels it: it stops every thread a thousand times a second, which made Subnautica
   (about 100 threads) unplayable for as long as it ran. Take a few seconds of it, say when, and do

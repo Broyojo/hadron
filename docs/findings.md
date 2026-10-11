@@ -826,7 +826,8 @@ Shift+Tab did nothing, and Steam never started its `gameoverlayui` helper for th
 Steam for Mac gives a game `STEAM_DYLD_INSERT_LIBRARIES`, naming `steamloader.dylib` and
 `gameoverlayrenderer.dylib`, and a Mac game has them in its process from the start. `scripts/play`
 starts Wine with a clean environment and passed the variable on only under that name, so nothing
-loaded them at start; Valve's `steamclient.dylib`, which lsteamclient loads, opened them later.
+loaded them at start; lsteamclient's Unix side opened them by hand when the game loaded it
+(`load_overlay_libraries`, NotProton's fallback for a loader whose inserted libraries dyld drops).
 The overlay's log (`STEAM_OVERLAY_LOGGING=1`, in `/tmp/gameoverlayrenderer.<pid>.log`) then held
 the attach header and nothing else: no "One-time initialization", no Metal hooks. Loaded that
 late it only got in the way of the event loop.
@@ -851,11 +852,16 @@ Checked by the player with the helper loaded: Subnautica (Direct3D 11, DXMT), Po
 (Direct3D 9, mtld3d), Teardown (Direct3D 12, vkd3d-proton) and Geometry Dash (OpenGL, Zink) show
 the overlay on Shift+Tab, and each game's overlay log has the screen size and the hot-key.
 
-The overlay takes the game's id from `SteamOverlayGameId`, which Steam sets and `scripts/play`
-has to pass on. The test copies of the runtime did; the first build of 0.2.0 did not, and Steam
-started `gameoverlayui` with game id 0 (`/tmp/gameoverlay_ui.txt`, "Got gameid on commandline").
-The overlay still opened. `d3d11tri` through `scripts/play` gives id 0 without the variable and
-the right id with it.
+The launch script is what gives Steam's libraries their environment, and four variables matter
+to the overlay. The test copies of the runtime passed all four; the launch script merged with the
+first build of 0.2.0 passed none, which a comparison of the copy the player had tested with that
+build showed. `SteamOverlayGameId` is where the overlay takes the game's id from: without it Steam
+started `gameoverlayui` with game id 0 (`/tmp/gameoverlay_ui.txt`, "Got gameid on commandline"),
+though the overlay still opened, and `d3d11tri` through `scripts/play` gives id 0 without the
+variable and the right id with it. `SteamClientLaunch` and `SteamEnv` are read by Valve's
+`steamclient.dylib`; what they change was not looked into, they are passed because Steam sets
+them and the tested runs had them. `NOTPROTON_OVERLAY_SHIM` names the helper for lsteamclient,
+which then finds it already inserted and does not open the overlay's libraries a second time.
 
 The overlay opened, but a game that does not react to it kept the mouse and the keyboard. Portal 2
 pauses and lets go of the cursor when Steam tells it the overlay is open; Subnautica and Geometry
