@@ -1,0 +1,3 @@
+# Who has to approve a change before it can be merged. The repository's rule for main asks for
+# a code owner's review of every pull request; the maintainer's own are exempt from it.
+* @Broyojo
