@@ -893,6 +893,68 @@ on Subnautica, with about a hundred threads, the player saw lag exactly while it
 seconds at a time with a 4-second sample every 13 seconds, and all the time with samples back to
 back. Lag reported while sampling does not count.
 
+## Games ran from inside the app, so an update could change a running game (fixed, #30)
+
+Hadron.app carries the runtime, and Steam's tool started games straight from it:
+`~/Library/Application Support/Hadron/runtime` was a link to
+`Hadron.app/Contents/SharedSupport/runtime`. Whatever replaces the app replaces the runtime under
+any game that is running: `brew upgrade`, a new app dragged over the old one, and an updater
+inside the app. The game keeps the libraries it has loaded and gets the new build's for
+everything it loads afterwards.
+
+It showed while adding an updater (Sparkle). A check for a running game before the update is not
+enough, and there is no place for a second one: started from a terminal, with the app's window
+closed, Sparkle goes from unpacking to installing without asking again. With a test program
+started just after `hadron update`, the app was replaced while the program ran. A guard in the
+updater also does nothing for the other two ways an app is replaced.
+
+Now a game does not run from the app. Each build of the runtime has a name
+(`BUILD-ID`, written by `scripts/package-runtime.sh`; two builds of one version differ), and is
+copied once to `~/Library/Application Support/Hadron/runtimes/<build id>/`. On one APFS volume
+the copy is a clone: 0.32 s and no space of its own for the 2,037 files and 1.1 GB of 0.2.0's
+runtime. The link Steam's tool starts names the copy new games use. `scripts/steam-run` takes
+its real path, so a running game is told nothing through the link, and before anything else
+decides which copy the launch runs from (`scripts/runtime-versions.sh`):
+
+- a Wine session already running in the game's prefix keeps its copy, and what starts there
+  joins it. The session's wineserver works in `/tmp/.wine-<uid>/server-<device>-<inode>` of the
+  prefix, and `lsof` names the runtime its program is in;
+- otherwise the build in the installed app, whose runtime folder `scripts/steam-install` wrote
+  to `source`. If no copy of it exists yet, this is the first launch since the app was updated:
+  the copy is made, the link is renamed over the old one, and the copy's own `steam-run` takes
+  over. Comparing the two names costs about 4 ms a launch;
+- an app that cannot be read changes nothing.
+
+A copy is deleted by a later launch, when it is not the one the link names, no process has
+files of it mapped and no launch chose it in the last ten minutes (a launch marks its copy
+before any Wine process shows it). Only a folder in `runtimes/` that carries a `BUILD-ID` is
+ever deleted, never through a link, and the link itself is only ever replaced by a link. A lock
+folder holding its owner's process ID keeps two launches from doing this at once.
+
+So a running game never changes, and the next game started runs on the new build, with both
+running side by side if need be. Setting Steam up again is asked for only when a build changes
+Steam's own part: `steam/HOOK-ID` is made from the sources of the library in Steam, the hooking
+library it links and the hook signatures, and `scripts/steam-status` compares it with what
+`scripts/steam-install` recorded. The library's bytes cannot serve: a clean rebuild of the same
+source gave another file, and every signature changes them again.
+
+A setup made by 0.2.0 or older, where the link names the app, moves over at the first launch
+after the app is updated: a launch that begins in a folder that is not a copy takes that folder
+as the installed app. It has no recorded `HOOK-ID`, so the window asks for Repair once.
+
+`tests/mac/test-runtime-versions.sh` checks the rules on throwaway folders (39 checks, among
+them: a link, a file, a folder without a `BUILD-ID` and a copy in use are kept; the app a link
+names is untouched). With the real runtime and a Direct3D 11 test program: a game ran from the
+first build's copy, the app was replaced at the same path, a second game started from the new
+build's copy while the first went on from its own, a second program in the first game's prefix
+joined its session, and the first copy was deleted after its game ended and its ten minutes
+were over.
+
+A runtime without a `BUILD-ID`, a checkout or a copy somebody is changing, is run in place as
+before. Not covered: the app and the Library on different volumes (the copy is then a real
+one, 1.1 GB each time); two different builds started in one prefix at the same instant; and the
+old copy's space, which is held until a launch after its last game has ended.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

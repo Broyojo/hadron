@@ -57,10 +57,14 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
 - **Do not kill a Wine process you did not start.** One wineserver serves every process of its
   prefix; killing the wrong one hangs someone's game for good. Read the process's prefix with
   `ps eww <pid>` (`WINEPREFIX`, `STEAM_COMPAT_DATA_PATH`) before you act.
-- **The runtime Steam uses is live.** In a checkout, Steam runs `scripts/` and `dist/` as they
-  are on disk, on whatever branch is checked out. While a game runs, do not install into
-  `dist/`, do not switch branches, and change a launch script only by writing a new file and
-  renaming it over the old one: a running shell reads its script by offset.
+- **The runtime Steam uses is live.** In a checkout, Steam runs `scripts/` and `dist/` as they are
+  on disk, on whatever branch is checked out. While a game runs, do not install into `dist/`, do
+  not switch branches, and change a launch script only by writing a new file and renaming it over
+  the old one: a running shell reads its script by offset. An installed Hadron.app is different:
+  games run from a copy of its runtime in `~/Library/Application Support/Hadron/runtimes/`, a
+  running game keeps its copy, and the next game started gets the copy of whatever build the app
+  holds then (`scripts/runtime-versions.sh`, findings #30). Replacing the app is safe at any time;
+  changing a copy in place is not.
 - **An agent cannot see the game.** Ask the person for what is on screen, how it feels and how
   it sounds, and do not take screenshots of their screen. Everything else (launching, sampling,
   reading logs, stopping) an agent can do itself.
@@ -75,10 +79,11 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
   environment: a variable reaches the game only if `scripts/play` passes it on. From Steam they
   are a game's launch options as plain `NAME=value` words. Steam on the Mac does not run launch
   options through a shell, so `NAME=value %command%` fails with an OS error.
-- **Another runtime for one test.** Copy the runtime, change the copy, and point
-  `~/Library/Application Support/Hadron/runtime` at it (CONTRIBUTING.md, "Working without an
-  Apple Developer account"). A game's prefix keeps copies of some libraries from when it was
-  made, and its saves: copy a changed library into it, do not delete it.
+- **Another runtime for one test.** Copy the runtime, delete the copy's `BUILD-ID` so that it is
+  run in place and not copied again, change the copy, and point `~/Library/Application
+  Support/Hadron/runtime` at it (CONTRIBUTING.md, "Working without an Apple Developer account"). A
+  game's prefix keeps copies of some libraries from when it was made, and its saves: copy a changed
+  library into it, do not delete it.
 - **What is known.** [docs/findings.md](docs/findings.md) is the numbered log of what was
   measured and fixed, with the open problems marked; [docs/test-games.md](docs/test-games.md)
   says how each game fares; [docs/roadmap.md](docs/roadmap.md) is the order of work. Read the

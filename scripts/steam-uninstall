@@ -3,7 +3,10 @@
 # re-sign ad hoc. Reinstalling Steam from Valve also restores Valve's own signature.
 set -eu
 APP=/Applications/Steam.app
-BACKUP="$HOME/Library/Application Support/Hadron/Steam-Info.plist.before-hadron"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/paths.sh"
+. "$ROOT/scripts/runtime-versions.sh"
+BACKUP="$HADRON_SUPPORT/Steam-Info.plist.before-hadron"
 
 # As in scripts/steam-install: find out that macOS allows the change before touching anything.
 probe="$APP/Contents/MacOS/.hadron-probe.$$"
@@ -32,7 +35,17 @@ if [ "$current" = "$INSERT" ]; then
 elif [ -n "$current" ]; then
     echo "Steam loads another library ($current); leaving it" >&2
 fi
-rm -f "$INSERT" "$APP/Contents/Info.plist.before-hadron" "$BACKUP" "$HOME/Library/Application Support/Hadron/steam-library"
+rm -f "$INSERT" "$APP/Contents/Info.plist.before-hadron" "$BACKUP" "$HADRON_SUPPORT/steam-library"
+# The link Steam's tool started, and the copies of the runtime games ran from: all but one a
+# game is still running from, which goes when Hadron is set up again or its folder is removed.
+[ ! -L "$HADRON_SUPPORT/runtime" ] || rm -f "$HADRON_SUPPORT/runtime"
+rm -f "$HADRON_SUPPORT/source"
+if [ -d "$HADRON_RUNTIMES" ] && runtime_lock; then
+    find "$HADRON_RUNTIMES" -maxdepth 2 -name .used -delete 2>/dev/null
+    runtime_prune ""
+    runtime_unlock
+    rmdir "$HADRON_RUNTIMES" 2>/dev/null || true
+fi
 codesign -f -s - "$APP/Contents/MacOS/steam_osx"
 codesign -f -s - "$APP"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"

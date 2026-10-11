@@ -26,7 +26,11 @@ jobs:
           done
           bash -n scripts/env.sh || status=1
           sh -n scripts/paths.sh || status=1
+          sh -n scripts/hadron-procs.sh || status=1
+          sh -n scripts/runtime-versions.sh || status=1
           exit $status
+      - name: Which copy of the runtime a game gets, and what is deleted
+        run: tests/mac/test-runtime-versions.sh
       - name: The icon tool compiles
         run: |
           xcrun clang -O2 -Wall -Wextra -Werror -o "$RUNNER_TEMP/hadron-icon" launcher/hadron-icon.c \
