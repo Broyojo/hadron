@@ -82,12 +82,23 @@ for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ win
 done
 
 mkdir -p "$OUT/scripts" "$OUT/steam" "$OUT/licenses" "$EXT"
-for script in hadron-procs.sh mtld3d-prefix paths.sh play report shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
+for script in hadron-procs.sh mtld3d-prefix paths.sh play report runtime-versions.sh shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"
 cp "$BUILD/notproton/notproton.dylib" "$BUILD/notproton/overlay-shim.dylib" "$OUT/steam/"
 cp -R "$SRC/notproton/signatures" "$OUT/steam/signatures"
+# What Steam's part of Hadron was built from: the library's sources, the hooking library it
+# links and the hook signatures. scripts/steam-status asks for Steam to be set up again only when
+# this differs from what scripts/steam-install put there; the library's bytes differ with every
+# build and every signature. Uncommitted changes make it a build like no other.
+{
+    git -C "$SRC/notproton" rev-parse HEAD:dylib HEAD:signatures HEAD:Makefile
+    git -C "$SRC/notproton/vendor/dobby" rev-parse HEAD
+    [[ -z "$(git -C "$SRC/notproton" status --porcelain -- dylib signatures Makefile)" ]] || date +%s
+} | /sbin/md5 -q > "$OUT/steam/HOOK-ID"
+# The releases whose setups predate that record (packaging/hook-history).
+grep -v '^#' "$ROOT/packaging/hook-history" > "$OUT/steam/HOOK-HISTORY"
 # What fetches Valve's Windows client files on the user's Mac: they are not ours to ship.
 cp "$SRC/notproton/bridge/fetch-valve.sh" "$SRC/notproton/app/Sources/NotProtonApp/Resources/valve-packages.manifest" "$OUT/steam/"
 # The packaged scripts run on Macs without Apple's developer tools, where otool, python3 and the
@@ -105,6 +116,9 @@ done
 version=$(cat "$ROOT/VERSION")
 [[ "$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)" == "v$version" ]] || version+="-dev.$(git -C "$ROOT" rev-parse --short HEAD)"
 echo "$version" > "$OUT/VERSION"
+# What this build of the runtime is called where copies of it are kept for games to run from
+# (scripts/runtime-versions.sh): no two builds share a name, also not two of one version.
+echo "$version-$(uuidgen | tr 'A-F' 'a-f' | cut -c1-8)" > "$OUT/BUILD-ID"
 
 # The runtime's own Mach-O files, except the loader's bundle, which keeps its signature.
 machos=()

@@ -1,0 +1,11 @@
+# Releases that set Steam up before Hadron recorded what Steam's part was built from (HOOK-ID,
+# scripts/package-runtime.sh). A setup made by one of them only knows the checksum of the library
+# it put into Steam. Each line is: the HOOK-ID of the sources that library was built from, its
+# checksum (md5 of steam/notproton.dylib in the release's disk image), and the release.
+# scripts/steam-status takes such a setup as up to date while this build's HOOK-ID is the same.
+#
+# 0.1.0, 0.1.1 and 0.2.0 were built from the same NotProton revision, the same three patches and
+# the same Dobby commit as the HOOK-ID below. A release made after 0.2.0 needs no line here.
+b2f2af37d5c66aeabcb6839d3a0594d5 0c9caf0711ceb1b3a95bf500077e41d2 0.1.0
+b2f2af37d5c66aeabcb6839d3a0594d5 23d26d05086a0922bdc6a49834d48683 0.1.1
+b2f2af37d5c66aeabcb6839d3a0594d5 9507508d8f4b60c332930cb584365c6e 0.2.0

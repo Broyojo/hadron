@@ -49,8 +49,12 @@ entitlement that comes from a developer account
 and change yourself, and run with the loader from a release:
 
 1. Install a release of Hadron and set Steam up with it.
-2. Copy its runtime. On APFS this takes no extra space:
+2. Copy its runtime, and delete the copy's `BUILD-ID`. On APFS the copy takes no extra space:
    `cp -Rc /Applications/Hadron.app/Contents/SharedSupport/runtime ~/hadron-runtime`
+   `rm ~/hadron-runtime/BUILD-ID`
+   The file names the release's build. Games run from a copy Hadron keeps of each named build
+   (`scripts/runtime-versions.sh`); a runtime without the file is run in place, as a checkout
+   is, which is what you want for one you are changing.
 3. Check out the release's tag, so that what you build matches the rest, and build the part you
    are changing with its script. `scripts/package-loader.sh` is the one step to skip.
 4. Copy what you built into the copy, at the path the release has it:

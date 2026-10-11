@@ -17,7 +17,7 @@
 # D3D12 runs through vkd3d-proton on KosmicKrisp (docs/findings.md #22); HADRON_D3D12=wine uses
 # Wine's own d3d12 instead, for comparisons.
 # OpenGL runs on Zink, Mesa's OpenGL on Vulkan, on KosmicKrisp.
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 [ $# -ge 2 ] || { echo "usage: $0 <appid> <game.exe> [args...]" >&2; exit 1; }
 appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
 # Steam starts a game in the working directory its launch entry names, and scripts/steam-run
@@ -124,10 +124,10 @@ fi
 name=$(printf '%s' "${HADRON_APP_NAME:-$(basename "$exe" .exe)}" | tr -d '/:<>&\n' | cut -c1-80)
 name="${name:-game}"
 loader=$(/bin/realpath "$ROOT/dist/bin/wine")
-app="$HOME/Library/Application Support/Hadron/apps/$appid/$name.app"
+app="$HADRON_SUPPORT/apps/$appid/$name.app"
 wine="$app/Contents/MacOS/$name"
 if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ] || ! grep -q CFBundleIconFile "$app/Contents/Info.plist" 2>/dev/null; then
-    rm -rf "$HOME/Library/Application Support/Hadron/apps/$appid"
+    rm -rf "$HADRON_SUPPORT/apps/$appid"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" && ln -s "$loader" "$wine" && cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -53,6 +53,12 @@ Everything the window does is also a command: `hadron setup`, `hadron uninstall`
 (`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's
 window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
 
+**Updating.** Install the new version over the old one: `brew upgrade --cask hadron`, or the new
+disk image. It is safe while a game is running: games run from a copy of Hadron's runtime kept
+in your Library, so the running game is left as it is, and the next game you start uses the new
+version. Hadron's window asks for **Repair** only when a version changes the part of Hadron
+that sits inside Steam.
+
 To remove Hadron, take it out of Steam first (Uninstall in the window, or `hadron uninstall`),
 then delete the app or run `brew uninstall --cask hadron`. If you had the window add the `hadron`
 command, remove that link too: `sudo rm /usr/local/bin/hadron`.
