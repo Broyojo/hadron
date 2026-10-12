@@ -55,7 +55,10 @@ def main():
     for line in open(map_file):
         parts = line.rstrip('\n').split(' ', 2)
         if len(parts) == 3:
-            blocks.append((int(parts[0], 16), int(parts[1], 16), parts[2]))
+            try:
+                blocks.append((int(parts[0], 16), int(parts[1], 16), parts[2]))
+            except ValueError:
+                pass  # two threads' lines run together now and then
     # By address only: the sort is stable, so where FEX reused an address after clearing its
     # cache, the newest translation (last in the file) stays last and bisect finds it.
     blocks.sort(key=lambda b: b[0])

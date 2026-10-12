@@ -19,9 +19,12 @@ command around a self-contained runtime; a signed, notarized 0.1.0.
 3. **Unreal Engine 5.** Subnautica 2 does not load: Metal's compiler gives up on its largest
    compute kernels, 8-13 MB of generated MSL each ([test-games.md](test-games.md)). The failing
    shaders are saved by the driver, so this can be worked on without the game.
-4. **Speed.** Nothing has been optimised yet. Teardown is held back by CPU translation, Geometry
-   Dash drops frames while one core is at 100%, and macOS ends GPU work that runs about 50 ms
-   while other processes wait (seen with six test processes; to be checked for a game in front).
+4. **Speed.** Little has been optimised yet. Teardown went from 16 to about 60 fps once it ran
+   one frame ahead ([findings #33](findings.md), which lists what is left in the D3D12 path:
+   render passes split for indirect draws, the tile-based mode of vkd3d-proton, the copy at
+   present). Geometry Dash drops frames while one core is at 100%, and macOS ends GPU work that
+   runs about 50 ms while other processes wait (seen with six test processes; to be checked for
+   a game in front).
    Portal loses a third of its frame rate while a failed portal shot's effect is alive, to lock
    waits between the engine's threads ([findings #25](findings.md)).
 5. **Game controllers.** Wine's controller service starts in the packaged runtime; no controller

@@ -1,0 +1,87 @@
+From 2d00dd11a32ca7de081eb79579cb402677760085 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sun, 11 Oct 2026 22:45:40 -0400
+Subject: [PATCH] vkd3d: Add VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES for swapchains
+ with a latency handle.
+
+An application that waits on the latency handle of its swapchain, at
+the default maximum latency of 1, starts a frame only when the previous
+one has been presented. The CPU and the GPU then take turns. That is
+cheap where a present completes within a refresh cycle and the GPU runs
+at full clock whenever it has work. It is not on Apple GPUs, with
+KosmicKrisp on macOS: a frame that takes 2 ms to produce was presented
+at 21 to 40 FPS on a 120 Hz display, and the GPU stays at its lowest
+clock as long as it is idle for a part of each frame. Teardown ran at
+16 FPS on an M2 Pro with the GPU at 444 MHz and idle for a third of the
+time, and at 60 FPS with the GPU at 1398 MHz when allowed one frame
+ahead.
+
+The variable gives the fewest frames such a swapchain lets the
+application have in flight, whatever latency it asks for. The latency
+the application reads back is the one it set. Unset, nothing changes.
+---
+ libs/vkd3d/swapchain.c | 26 +++++++++++++++++++++++---
+ 1 file changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/libs/vkd3d/swapchain.c b/libs/vkd3d/swapchain.c
+index 8dd2cc10..f905f733 100644
+--- a/libs/vkd3d/swapchain.c
++++ b/libs/vkd3d/swapchain.c
+@@ -170,6 +170,7 @@ struct dxgi_vk_swap_chain
+     uint32_t frame_latency_event_internal_wait_counts;
+ 
+     UINT frame_latency;
++    UINT frame_latency_min;
+     UINT frame_latency_internal;
+     VkSurfaceKHR vk_surface;
+ 
+@@ -924,6 +925,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetGammaControl(IDXGIVkSwapC
+ static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetFrameLatency(IDXGIVkSwapChain2 *iface, UINT MaxLatency)
+ {
+     struct dxgi_vk_swap_chain *chain = impl_from_IDXGIVkSwapChain(iface);
++    UINT old_latency, new_latency;
+     TRACE("iface %p, MaxLatency %u.\n", iface, MaxLatency);
+ 
+     if (!MaxLatency || MaxLatency > DXGI_MAX_SWAP_CHAIN_BUFFERS)
+@@ -943,8 +945,10 @@ static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetFrameLatency(IDXGIVkSwapC
+     /* Only increasing the latency is handled here; apparently it is
+      * the application's responsibility to reduce the semaphore value
+      * in case the latency gets reduced. */
+-    if (MaxLatency > chain->frame_latency)
+-        vkd3d_native_sync_handle_release(chain->frame_latency_event, MaxLatency - chain->frame_latency);
++    old_latency = max(chain->frame_latency, chain->frame_latency_min);
++    new_latency = max(MaxLatency, chain->frame_latency_min);
++    if (new_latency > old_latency)
++        vkd3d_native_sync_handle_release(chain->frame_latency_event, new_latency - old_latency);
+ 
+     chain->frame_latency = MaxLatency;
+     return S_OK;
+@@ -1576,8 +1580,24 @@ static HRESULT dxgi_vk_swap_chain_init_sync_objects(struct dxgi_vk_swap_chain *c
+     {
+         INFO("Enabling frame latency handles.\n");
+         chain->frame_latency = 1;
++        chain->frame_latency_min = 1;
++
++        /* An application that waits on the latency handle with the default latency of 1 starts a frame
++         * only when the previous one has been presented, so the GPU idles while the CPU works and the
++         * other way around. Where presentation takes several refresh cycles, or where the GPU lowers its
++         * clock when it is not kept busy, that costs most of the frame rate. This lets the application
++         * run frames ahead regardless of the latency it asked for. */
++        if (vkd3d_get_env_var("VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES", env, sizeof(env)))
++        {
++            latency_override = strtoul(env, NULL, 0);
++            if (latency_override >= 1 && latency_override <= DXGI_MAX_SWAP_CHAIN_BUFFERS)
++                chain->frame_latency_min = latency_override;
++        }
++
++        if (chain->frame_latency_min > 1)
++            INFO("Application gets a frame latency of at least %u frames.\n", chain->frame_latency_min);
+ 
+-        if (FAILED(hr = vkd3d_native_sync_handle_create(chain->frame_latency,
++        if (FAILED(hr = vkd3d_native_sync_handle_create(max(chain->frame_latency, chain->frame_latency_min),
+                 VKD3D_NATIVE_SYNC_HANDLE_TYPE_SEMAPHORE, &chain->frame_latency_event)))
+         {
+             WARN("Failed to create frame latency semaphore, hr %#x.\n", hr);
+-- 
+2.54.0 (Apple Git-157)
+
