@@ -1021,7 +1021,8 @@ Half-Life's intro video was black, with its sound playing. The engine decodes
 `valve/media/valve.webm` itself (a libvpx built into `hw.dll`), uploads each frame with
 `glTexSubImage2D` to a rectangle texture and draws it as one quad to the window. A trace
 (`WINEDEBUG=+opengl`) showed all 149 frames uploaded and drawn, with blending off, so what the
-video's alpha channel holds lands in the window's back buffer. It holds 0.
+video's alpha channel holds lands in the window's back buffer. The frames' bytes were not read;
+that the picture was fully black and plays once the alpha is ignored says it holds 0.
 
 On Windows that does not matter: a window is opaque whatever its pixel format's alpha holds.
 Here it did. Zink creates its swapchain with pre-multiplied alpha when the EGL config has alpha
