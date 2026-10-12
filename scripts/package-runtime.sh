@@ -29,8 +29,8 @@ for lib in FREETYPE GNUTLS SDL2 VULKAN; do
 done
 
 [[ -x "$DIST/bin/wine" ]] || die "no runtime in $DIST: build it first"
-[[ -f "$BUILD/notproton/notproton.dylib" && -f "$BUILD/notproton/overlay-shim.dylib" ]] ||
-    die "missing the Steam client library or the overlay helper, run scripts/build-steam-play.sh"
+[[ -f "$BUILD/notproton/notproton.dylib" && -f "$BUILD/notproton/overlay-shim.dylib" && -x "$BUILD/notproton/activation-request" ]] ||
+    die "missing a Steam integration library or activation requester, run scripts/build-steam-play.sh"
 
 relpath() { perl -MFile::Spec -e 'print File::Spec->abs2rel($ARGV[0], $ARGV[1])' "$1" "$2"; }
 # The libraries a Mach-O file links, without its own name.
@@ -86,7 +86,7 @@ for script in hadron-procs.sh mtld3d-prefix paths.sh play report runtime-version
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"
-cp "$BUILD/notproton/notproton.dylib" "$BUILD/notproton/overlay-shim.dylib" "$OUT/steam/"
+cp "$BUILD/notproton/notproton.dylib" "$BUILD/notproton/overlay-shim.dylib" "$BUILD/notproton/activation-request" "$OUT/steam/"
 cp -R "$SRC/notproton/signatures" "$OUT/steam/signatures"
 # What Steam's part of Hadron was built from: the library's sources, the hooking library it
 # links and the hook signatures. scripts/steam-status asks for Steam to be set up again only when
@@ -290,7 +290,7 @@ for f in "${machos[@]}" "$EXT"/*; do
 done
 
 log "signing what changed"
-for f in "${machos[@]}" "$EXT"/* "$OUT/steam/notproton.dylib" "$OUT/steam/overlay-shim.dylib"; do
+for f in "${machos[@]}" "$EXT"/* "$OUT/steam/notproton.dylib" "$OUT/steam/overlay-shim.dylib" "$OUT/steam/activation-request"; do
     codesign -f -s - "$f" 2>/dev/null || die "cannot sign $f"
 done
 codesign -v "$OUT/dist/lib/wine/aarch64-unix/wine.app" || die "the loader's signature did not survive the copy"

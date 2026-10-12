@@ -1,7 +1,7 @@
 #import <AppKit/AppKit.h>
 
-/* Launch the private control through the same explicit Workspace API used for
- * the switch helper. The CLI open path did not reliably activate the control. */
+/* Launch the private control with explicit activation and a fresh instance,
+ * using the same Workspace API as the switch helper. */
 int main(int argc, const char **argv)
 {
     @autoreleasepool

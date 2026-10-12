@@ -28,9 +28,9 @@ fi
 
 log "building the Steam client library"
 # NotProton's Makefile expects Apple's clang, not Homebrew LLVM's.
-PATH="/usr/bin:$PATH" make -C "$NP" out/notproton.dylib >/dev/null
+PATH="/usr/bin:$PATH" make -C "$NP" out/notproton.dylib out/activation-request >/dev/null
 mkdir -p "$BUILD/notproton"
-cp "$NP/out/notproton.dylib" "$BUILD/notproton/notproton.dylib"
+cp "$NP/out/notproton.dylib" "$NP/out/activation-request" "$BUILD/notproton/"
 
 log "building the overlay helper"
 PATH="/usr/bin:$PATH" make -C "$NP" overlay-shim >/dev/null
