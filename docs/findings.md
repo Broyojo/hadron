@@ -1015,6 +1015,34 @@ before. Not covered: the app and the Library on different volumes (the copy is t
 one, 1.1 GB each time); two different builds started in one prefix at the same instant; and the
 old copy's space, which is held until a launch after its last game has ended.
 
+## OpenGL windows let their alpha show through (fixed, #32)
+
+Half-Life's intro video was black, with its sound playing. The engine decodes
+`valve/media/valve.webm` itself (a libvpx built into `hw.dll`), uploads each frame with
+`glTexSubImage2D` to a rectangle texture and draws it as one quad to the window. A trace
+(`WINEDEBUG=+opengl`) showed all 149 frames uploaded and drawn, with blending off, so what the
+video's alpha channel holds lands in the window's back buffer. The frames' bytes were not read;
+that the picture was fully black and plays once the alpha is ignored says it holds 0.
+
+On Windows that does not matter: a window is opaque whatever its pixel format's alpha holds.
+Here it did. Zink creates its swapchain with pre-multiplied alpha when the EGL config has alpha
+bits and the surface was not created with `EGL_PRESENT_OPAQUE_EXT`, the Metal layer is then
+composited with the frame's alpha, and a frame with alpha 0 came out black. Mesa offered the
+extension only on Wayland, and Wine's Mac driver did not ask for it.
+
+Mesa patch 0084 offers `EGL_EXT_present_opaque` for window surfaces on a Metal layer, and Wine
+patch 0028 creates every OpenGL window surface with it, as Wine's Wayland driver does. The
+swapchain is then opaque, and KosmicKrisp drops the alpha when it copies the frame to the
+drawable. What the application reads back is unchanged: the alpha stays in its framebuffer.
+
+`tests/win/glalpha.c` draws a frame whose left half has alpha 0 and prints what it reads back
+(`0 255 0 0` on the left before and after). With the two patches the video plays, seen by the
+player on 2026-10-11. This applies to every OpenGL game: what a game left in its back buffer's
+alpha decided how the frame was composited, which no Windows game expects. Not measured: how
+macOS composites a frame whose colour exceeds its alpha, which is what such a frame is to it.
+Not covered: a window that is meant to be see-through (a layered window with per-pixel alpha),
+which the Mac driver's old OpenGL path supported and this one never did.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
