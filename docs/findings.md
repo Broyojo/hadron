@@ -933,6 +933,31 @@ identities were verified, and neither session rejected a focus event. Eleven
 Win32 checks also passed for hidden/minimized creation, show, restore,
 hide/reshow after minimization, and cancellation before showing.
 
+The original experiments are preserved as one twelve-case native reproducer and
+eleven Win32 lifecycle checks under `tests/`; see
+[the build/run instructions](../tests/mac/minimization.md). Both passed on the
+same Mac and macOS; the Win32 checks used the runtime rebuilt from main. This
+adds automated evidence, not a new gameplay or visual acceptance run.
+
+A local trace-only experiment restored immediately after ordinary and deferred
+native requests. The traces established that the request had returned, no
+`windowWillMiniaturize` had entered, and at restore entry the marker remained set
+with `pendingMinimize` false. Restore arrived with `minimized_valid` true and cleared
+the marker before any native callback. That validity flag compares `WS_MINIMIZE`
+with Wine's cached requested state, independently of native miniaturization.
+Thus the tested restores did not skip the guard or leave a stale marker.
+
+Immediate restore also exposed a separate native/Win32 state mismatch, observed
+both with #47 and in the older trace-only 0.2.0 source/runtime control. The restore
+correctly cleared the marker, but native minimization subsequently completed
+while Win32 reported restored. This case remains unresolved and warrants separate
+investigation; #47 addresses automatic ordering that cancels minimization, not
+cancellation of an already-issued native request. Successful Win32-only checks
+do not establish that this mismatch is resolved. Subsequent completed
+minimize/restore controls worked, but do not establish recovery from the earlier
+immediate restore or correctness across all timing sequences.
+Diagnostic instrumentation remains local; production behavior is unchanged.
+
 ## Games ran from inside the app, so an update could change a running game (fixed, #31)
 
 Hadron.app carries the runtime, and Steam's tool started games straight from it:
