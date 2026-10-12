@@ -1068,6 +1068,99 @@ macOS composites a frame whose colour exceeds its alpha, which is what such a fr
 Not covered: a window that is meant to be see-through (a layered window with per-pixel alpha),
 which the Mac driver's old OpenGL path supported and this one never did.
 
+## D3D12: a game that waits for each frame keeps the GPU at its lowest clock (fixed, #33)
+
+Teardown ran at 16 fps on an M2 Pro (1512x982, render scale 100%, quality Low), which the first
+look had put down to CPU translation (#22). It was not that. Measured in one level, standing
+still:
+
+| | render scale 100% | 50% |
+| --- | --- | --- |
+| frames per second (Metal HUD) | 15.9 | 27.4 |
+| GPU time per frame | 43.3 ms | 19.6 ms |
+| frame interval | 62.9 ms | 36.5 ms |
+
+- The frame interval is the GPU time plus 17 to 20 ms, not the larger of two overlapping
+  times: the CPU and the GPU take turns. A Metal System Trace (`xctrace record --template
+  "Metal System Trace" --attach <pid>`, then `xctrace export`) shows one block of GPU work per
+  frame and the GPU idle for the rest.
+- `sudo powermetrics --samplers gpu_power` showed the GPU at 444 MHz, the lowest of its eight
+  states (the highest is 1398 MHz), for 100% of the time, and idle for 27 to 43% of it. The
+  trace says the same ("Minimum GPU Performance state"). The Mac was on mains power, not in Low
+  Power Mode, and its thermal state was nominal. The device tree gives the GPU's controller a
+  target utilisation of 85% (`gpu-perf-tgt-utilization`): it raises the clock when the GPU is
+  busier than that, and a GPU that waits for the CPU for a part of every frame never is.
+- The main thread used 7% of a core on the game's first screen and waited for the rest, in
+  `NtWaitForSingleObject`. `sample` had shown 56% of its samples in translated code in the
+  level, which says where the stack was and not that the thread ran; the CPU times of `ps -M`
+  are the measure.
+- The cause of the turns is the game's own pacing. Its swapchain has a latency handle
+  (`DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT`) at the default latency of 1, and it
+  waits on the handle before each frame. vkd3d-proton releases the handle when
+  `vkWaitForPresentKHR` returns, which KosmicKrisp's window system code does from the drawable's
+  presented handler: when the frame is on the display. On the game's first screen, where a frame
+  takes 2 ms to make (450 fps with the game's vertical sync off), that gave 21 to 40 fps on a
+  120 Hz display with vertical sync on.
+
+So two things multiply. A frame is reported as shown only several refresh cycles after it was
+queued, and the game waits for that; and because the GPU idles during the wait and while the
+game prepares the next frame, it stays at a third of its speed. At full clock the same GPU work
+would take 14 ms (43.3 x 444 / 1398), inside a 60 fps frame. That the same pacing costs little
+on Windows, where a GPU with work does not stay at a third of its clock, is reasoning: it was
+not measured.
+
+vkd3d-proton patch 0003 adds `VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES`: the fewest frames a swapchain
+with a latency handle lets the application have in flight, whatever latency it asks for. The
+latency the application reads back stays the one it set. `scripts/play` sets it to 2. With that,
+in the same place at render scale 100%: about 60 fps, the GPU at 1398 MHz for 97 to 100% of the
+time and idle for 0 to 3% (measured with an experimental build that set the latency the same
+way; the committed patch was measured on the first screen only). On the first screen: 69 fps
+against 36 (the table below). A swapchain without a latency handle is not affected;
+vkd3d-proton already lets those run three frames ahead, and notes the same "GPU goes falsely
+idle" effect on other hardware.
+
+This is a deviation from what the game asks for, in timing only: it gets one frame more between
+input and picture than it requested. At 60 fps that is 33 ms where one frame at 16 fps was
+63 ms. A game that reaches the display's rate at latency 1 pays a refresh cycle for nothing;
+`VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES=1` in its launch options gives it exactly what it asks for.
+
+Game Mode was tried as the other thing that might raise the clock. It is off for Hadron's games
+(the HUD says so: the bundles games run from are not declared as games), and `xcrun gamepolicyctl
+game-mode set on` forces it on. On the game's first screen at render scale 100%, 80 seconds a
+run, the GPU's state read from a Metal System Trace:
+
+| latency | Game Mode | frames per second (median) | GPU performance state |
+| --- | --- | --- | --- |
+| the game's (1) | automatic: off | 35.9 | minimum, 99% of the time |
+| the game's (1) | forced on | 39.4 | minimum, 99% |
+| 2 | forced on | 69.9 | minimum, 99% |
+| 2 | automatic: off | 69.0 | minimum, 100% |
+
+No difference beyond the noise of that screen, which loads the game in the background. This does
+not settle it: the screen is light enough that the GPU stays at its minimum even at latency 2, and
+forcing the mode on does not show that macOS took the process for the game. Not done: the same
+comparison in a level, with the bundle declared as a game. Not known either: what CrossOver does
+here.
+
+Ruled out on the way: staggered submissions (`VKD3D_CONFIG=no_staggered_submit` changed nothing),
+and the D3D12 layer's own CPU cost (2% of the main thread's samples). Left for later, each a cost
+per frame that is now worth measuring again:
+
+- KosmicKrisp runs the preprocessing of device-generated commands as a compute pass inside the
+  render pass, which ends the pass, stores its attachments and loads them again: 10 to 14 times
+  a frame in Teardown. vkd3d-proton already asks for the preprocessing ahead of the pass
+  (`vkCmdPreprocessGeneratedCommandsEXT`), which KosmicKrisp ignores.
+- vkd3d-proton has a mode for tile-based GPUs (render passes kept open across command lists),
+  which it turns on by driver; KosmicKrisp is not on its list, Asahi's driver for the same GPUs
+  is.
+- The window system code copies every frame to the drawable and leaves the layer non-opaque, a
+  workaround for a Metal 4 crash; the HUD reports the game as composited, not direct.
+- A frame is reported as shown three to six refresh cycles after it was queued (the first
+  screen's 21 to 40 fps for a 2 ms frame). The default of 2 covers for that: as long as it holds,
+  no game that waits for each frame reaches the display's rate at latency 1, however light its
+  frames. When the report comes on time, measure in a level again whether latency 1 keeps the
+  GPU busy enough, and set the default back to 1 if it does.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

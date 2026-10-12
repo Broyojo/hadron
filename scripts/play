@@ -165,6 +165,7 @@ for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|ME
     case "$var" in
         WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|WINE_MAC_OPENGL|MESA_LOADER_DRIVER_OVERRIDE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
         VKD3D_SHADER_CACHE_PATH) [ -n "${vkd3d_cache:-}" ] && continue ;;
+        VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES) continue ;;
     esac
     eval "value=\${$var}"
     set -- "$var=$value" "$@"
@@ -189,6 +190,12 @@ fi
 mkdir -p "$HADRON_LOGS/failed-msl"
 set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"
 [ -n "$vkd3d_cache" ] && set -- "VKD3D_SHADER_CACHE_PATH=$vkd3d_cache" "$@"
+# A D3D12 game that waits for each frame to be shown before it starts the next (a swapchain with a
+# latency handle, at its default latency of 1) gets to run one frame ahead. Here a frame takes two
+# to four refresh cycles to be reported as shown, and the GPU, idle while the game waits and
+# prepares, stays at its lowest clock: Teardown ran at 16 fps so, and at 60 one frame ahead
+# (docs/findings.md #33). 1 gives a game exactly the latency it asks for.
+set -- "VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES=${VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES:-2}" "$@"
 
 # Steam's overlay hooks Metal's present calls and the event loop when its library is loaded, so it
 # has to be in the process from the start, as in a Mac game. Opened later by lsteamclient it
