@@ -1,0 +1,54 @@
+From 8a3021a566762e3abf61c5a125c679b61de19b5c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sun, 11 Oct 2026 21:39:28 -0400
+Subject: [PATCH] winemac.drv: Present EGL window surfaces as opaque.
+
+A window on Windows is opaque whatever the alpha of its pixel format
+holds. An EGL window surface with an alpha channel is composited with
+it unless EGL_PRESENT_OPAQUE_EXT says otherwise, so a frame drawn with
+alpha 0 did not show: Half-Life's intro video, which is uploaded with
+alpha 0, was black.
+
+Ask for an opaque surface, as winewayland.drv does.
+---
+ dlls/winemac.drv/egl.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winemac.drv/egl.c b/dlls/winemac.drv/egl.c
+index d9d63121a2..11e42e5001 100644
+--- a/dlls/winemac.drv/egl.c
++++ b/dlls/winemac.drv/egl.c
+@@ -53,10 +53,21 @@ static BOOL macdrv_egl_surface_create(struct client_surface *client, int format,
+ {
+     struct macdrv_client_surface *surface = impl_from_client_surface(client);
+     EGLConfig config = egl->configs[(format - 1) % egl->config_count];
++    EGLint attribs[4], *attrib = attribs;
+     struct opengl_drawable *gl;
+ 
+     TRACE("client %s, format %d\n", debugstr_client_surface(client), format);
+ 
++    /* A window is opaque whatever its pixel format's alpha holds, as on Windows. */
++    if (!egl->extensions[EGL_EXT_present_opaque])
++        WARN("Missing EGL_EXT_present_opaque extension\n");
++    else
++    {
++        *attrib++ = EGL_PRESENT_OPAQUE_EXT;
++        *attrib++ = EGL_TRUE;
++    }
++    *attrib++ = EGL_NONE;
++
+     if (!macdrv_client_surface_acquire_metal_swapchain(surface)) return FALSE;
+     if (!(gl = opengl_drawable_create(&macdrv_egl_surface_funcs, format, client, NULL))) return FALSE;
+ 
+@@ -65,7 +76,7 @@ static BOOL macdrv_egl_surface_create(struct client_surface *client, int format,
+     opengl_drawable_map_buffer(gl, GL_FRONT_AND_BACK, GL_BACK);
+ 
+     gl->surface = funcs->p_eglCreateWindowSurface(egl->display, config,
+-            (EGLNativeWindowType)macdrv_swapchain_get_layer(surface->metal_swapchain), NULL);
++            (EGLNativeWindowType)macdrv_swapchain_get_layer(surface->metal_swapchain), attribs);
+     if (!gl->surface)
+     {
+         ERR("Failed to create an EGL surface for %s, error %#x\n", debugstr_client_surface(client),
+-- 
+2.54.0 (Apple Git-157)
+
