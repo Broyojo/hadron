@@ -1130,6 +1130,11 @@ per frame that is now worth measuring again:
   is.
 - The window system code copies every frame to the drawable and leaves the layer non-opaque, a
   workaround for a Metal 4 crash; the HUD reports the game as composited, not direct.
+- A frame is reported as shown three to six refresh cycles after it was queued (the first
+  screen's 21 to 40 fps for a 2 ms frame). The default of 2 covers for that: as long as it holds,
+  no game that waits for each frame reaches the display's rate at latency 1, however light its
+  frames. When the report comes on time, measure in a level again whether latency 1 keeps the
+  GPU busy enough, and set the default back to 1 if it does.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
