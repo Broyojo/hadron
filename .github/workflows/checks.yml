@@ -51,3 +51,5 @@ jobs:
       # as arm64 against the client's preference for x86_64 (docs/findings.md #24).
       - name: The Steam library's spawn hook
         run: make -C src/notproton spawn-env
+      - name: Steam UI bundle paths and compatibility transforms
+        run: make -C src/notproton webpatch-fixtures
