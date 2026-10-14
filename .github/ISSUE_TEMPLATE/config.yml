@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A question, or help with setting Hadron up
+    url: https://discord.gg/ShNTcxWjKN
+    about: Ask in the Discord server (#help), where an answer usually comes sooner than on an issue.
+  - name: An idea, or something to discuss
+    url: https://github.com/Broyojo/hadron/discussions
+    about: Discussions is the place for what is not a bug in Hadron or in a particular game.

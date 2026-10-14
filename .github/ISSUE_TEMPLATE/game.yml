@@ -1,5 +1,6 @@
 name: A game does not work
 description: A game does not start, crashes, looks wrong or runs badly
+labels: ["game"]
 body:
   - type: input
     id: game
