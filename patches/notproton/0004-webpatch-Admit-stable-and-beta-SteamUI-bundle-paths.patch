@@ -1,0 +1,108 @@
+From 333f4a527136a30003665d792f9af5f45d1533c3 Mon Sep 17 00:00:00 2001
+From: Ivan Karpan <github@ivankarpan.com>
+Date: Tue, 13 Oct 2026 10:15:40 +0100
+Subject: [PATCH] webpatch: Admit stable and beta SteamUI bundle paths
+
+Steam beta moves the Compatibility UI from chunk~*.js to sp.js. The
+existing transformer recognizes both UI shapes, but the filename filter
+prevents the beta bundle from reaching it.
+
+Backport the filename filter and 14 path checks from NotProtonNot's
+upstream commit 27a119f01495bdd77139c997e6eb769ad8b1f150. Preserve the
+legacy stable paths and the existing all-gates-match refusal behavior;
+exclude localization and third-party library bundles. Broader resolver
+and logging changes from that upstream commit are not included.
+
+Upstream: https://github.com/NotProtonNot/NotProton/commit/27a119f01495bdd77139c997e6eb769ad8b1f150
+Co-Authored-By: Codex <noreply@openai.com>
+---
+ dylib/feats/webpatch.c  | 24 ++++++++++++++++++++----
+ dylib/tests/gatecheck.c | 29 +++++++++++++++++++++++++++++
+ 2 files changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/dylib/feats/webpatch.c b/dylib/feats/webpatch.c
+index 51bf9be..a2d51db 100644
+--- a/dylib/feats/webpatch.c
++++ b/dylib/feats/webpatch.c
+@@ -272,11 +272,27 @@ static int has_suffix(const char *s, const char *suf) {
+     return ls >= lf && memcmp(s + ls - lf, suf, lf) == 0;
+ }
+ 
++static const char *inside_steamui(const char *path) {
++    const char *at = strstr(path, "/steamui/");
++    if (at)
++        return at + sizeof("/steamui/") - 1;
++    if (strncmp(path, "steamui/", sizeof("steamui/") - 1) == 0)
++        return path + sizeof("steamui/") - 1;
++    return NULL;
++}
++
++// The compatibility UI has shipped in both chunk~*.js and sp.js.
++// np_webpatch_transform rejects scripts without matching anchors.
+ int np_webpatch_should_patch(const char *path) {
+-    return path
+-        && strstr(path, "steamui") != NULL
+-        && strstr(path, "/chunk~") != NULL
+-        && has_suffix(path, ".js");
++    if (!path || !has_suffix(path, ".js"))
++        return 0;
++
++    const char *rest = inside_steamui(path);
++    if (!rest)
++        return 0;
++
++    return strncmp(rest, "localization/", sizeof("localization/") - 1) != 0
++        && strncmp(rest, "libraries/", sizeof("libraries/") - 1) != 0;
+ }
+ 
+ char *np_webpatch_transform(const uint8_t *src, size_t src_len, size_t *out_len,
+diff --git a/dylib/tests/gatecheck.c b/dylib/tests/gatecheck.c
+index 1a85e9b..ac31c9b 100644
+--- a/dylib/tests/gatecheck.c
++++ b/dylib/tests/gatecheck.c
+@@ -49,6 +49,34 @@ static void check_gate(const char *nm, size_t i, const np_gate_t *a,
+     }
+ }
+ 
++static void check_paths(void) {
++    static const struct { const char *path; int want; } cases[] = {
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/sp.js",                   1 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/chunk~2dcc5aaf7.js",      1 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/1129.js",                 1 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/library.js",              1 },
++        { "steamui/sp.js",                                                         1 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/app/sp.js",               1 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/localization/en-json.js", 0 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/libraries/lib~00299.js",  0 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/sp.js.orig",              0 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/css/library.css",         0 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/notsteamui/sp.js",                0 },
++        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui",                         0 },
++        { "sp.js",                                                                 0 },
++    };
++    size_t n = sizeof(cases) / sizeof(cases[0]);
++    for (size_t i = 0; i < n; i++) {
++        int got = np_webpatch_should_patch(cases[i].path);
++        if (!got != !cases[i].want)
++            wrong("should_patch(%s) answered %d, wanted %d",
++                  cases[i].path, got, cases[i].want);
++    }
++    if (np_webpatch_should_patch(NULL))
++        wrong("should_patch(NULL) answered yes");
++    printf("%zu chunk paths checked\n", n + 1);
++}
++
+ static void selfcheck(void) {
+     size_t total = 0;
+     for (size_t sh = 0; sh < NP_SHAPE_COUNT; sh++) {
+@@ -77,6 +105,7 @@ static void selfcheck(void) {
+ 
+     printf("%zu shapes, %zu gates, %zu fixes checked\n",
+            NP_SHAPE_COUNT, total, NP_FIX_COUNT);
++    check_paths();
+ }
+ 
+ static uint8_t *slurp(const char *path, size_t *len) {
+-- 
+2.56.0
+

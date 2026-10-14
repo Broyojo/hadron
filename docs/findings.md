@@ -1161,14 +1161,43 @@ per frame that is now worth measuring again:
   frames. When the report comes on time, measure in a level again whether latency 1 keeps the
   GPU busy enough, and set the default back to 1 if it does.
 
-## Game launch activation and inactive fullscreen ordering (#34)
+## Steam beta's Compatibility UI moved outside the filename filter (#34)
+
+Steam beta 1791856936 puts its Compatibility UI in `steamui/sp.js`, while stable
+1788652215 uses `chunk~*.js`. The pinned NotProton filter admitted only the latter,
+so the existing beta transformer never received the new bundle.
+
+NotProton patch 0004 backports the filename filter and path tests from upstream
+[`27a119f`](https://github.com/NotProtonNot/NotProton/commit/27a119f01495bdd77139c997e6eb769ad8b1f150).
+It admits JavaScript under `steamui/`, excluding localization and library bundles.
+The transformer is unchanged: compatibility edits still require every gate to match,
+and transformed contents are served through an anonymous file without changing Steam's
+files. Broader upstream resolver and logging changes are not included.
+
+Tested on an Apple M5 MacBook Pro, 32 GB, macOS 27.0.1 (26A434):
+the 14 path cases and three stable/beta fixtures pass, including refusal of truncated,
+duplicated, and already-patched input. A reader using the built library receives
+transformed stable-fixture and actual beta-bundle contents; excluded paths and disk
+contents remain unchanged. The patch queue reapplies to the pinned revision and matches
+the tested source. CI runs the path and fixture checks.
+
+Live checks on both Steam versions passed native Mac defaults, a Windows/Hadron override,
+Mac revert, restart persistence, Windows-only launches, and channel changes without
+Repair. Rise of the Third Power supplied the platform-switch control; Bravely Default
+supplied the Windows-only control. A locally built app also passed fresh setup on both
+channels, with game logs confirming its managed runtime. The tested library matches the
+installed copy. Other Macs, startup cost, a fresh full engine packaging build, and
+notarized distribution were not tested.
+
+Switching tests used existing prefixes; first-run prefix initialization was not validated.
+## Game launch activation and inactive fullscreen ordering (#35)
 
 Steam launches could assign Win32 focus without activating the native macOS game
 window. Subnautica stayed behind other apps; Bravely Default and Portal 2 drew in
 front but required manual focus. Wine detaches the game process during launch,
 so the game cannot rely on inheriting Steam's activation context.
 
-NotProton patch 0004 provides a cooperative activation handoff. `steam-run` calls
+NotProton patch 0005 provides a cooperative activation handoff. `steam-run` calls
 a native requester on its existing game route, before `scripts/play` starts Wine.
 Path queries and outside-install helpers do not request activation. The requester
 identifies its Steam ancestor and asks the foreground Steam frontend to yield to
