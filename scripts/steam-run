@@ -217,6 +217,15 @@ case "$program" in
         exec "$wine" "$@" >> "$log" 2>&1 ;;
 esac
 
+# Only this branch starts the per-game bundle. Let the active Steam frontend
+# grant it permission before Wine detaches it; helpers and queries never ask.
+# A checkout and a packaged runtime keep the requester beside their Steam library.
+activation="$ROOT/steam/activation-request"
+[ ! -d "$ROOT/src/notproton" ] || activation="$ROOT/build/notproton/activation-request"
+if [ -x "$activation" ]; then
+    "$activation" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" >> "$log" 2>&1
+fi
+
 shift
 echo "game: $program $*" >> "$log"
 # The game's name as Steam shows it, for the Dock and the menu bar (see scripts/play).

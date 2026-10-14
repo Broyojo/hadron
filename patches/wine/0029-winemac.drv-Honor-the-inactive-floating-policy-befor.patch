@@ -1,0 +1,31 @@
+From a6bff0590c5f5c08050a9ed3d05bfc23731b30dd Mon Sep 17 00:00:00 2001
+From: Ivan Karpan <github@ivankarpan.com>
+Date: Mon, 12 Oct 2026 14:27:12 +0100
+Subject: [PATCH] winemac.drv: Honor the inactive floating policy before
+ applying the Dock floor.
+
+minimumLevelForActive can return the normal level for inactive fullscreen windows, but adjustWindowLevels raises every floating window above the Dock regardless. Apply that floor only when the computed minimum is above normal. Active fullscreen and permitted inactive windowed topmost windows keep their existing elevation.
+
+Co-Authored-By: Codex <noreply@openai.com>
+---
+ dlls/winemac.drv/cocoa_app.m | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index c64d67702f..4fe5dd2bda 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -618,7 +618,9 @@ - (void) adjustWindowLevels:(BOOL)active
+             NSInteger origLevel = [window level];
+             NSInteger newLevel = [window minimumLevelForActive:active];
+ 
+-            if (window.floating)
++            /* The inactive floating policy can give fullscreen windows a normal
++             * minimum. Do not raise them again with the floating window floor. */
++            if (window.floating && newLevel > NSNormalWindowLevel)
+             {
+                 if (minFloatingLevel <= maxNonfloatingLevel)
+                     minFloatingLevel = maxNonfloatingLevel + 1;
+-- 
+2.56.0
+

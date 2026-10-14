@@ -1190,6 +1190,55 @@ installed copy. Other Macs, startup cost, a fresh full engine packaging build, a
 notarized distribution were not tested.
 
 Switching tests used existing prefixes; first-run prefix initialization was not validated.
+## Game launch activation and inactive fullscreen ordering (#35)
+
+Steam launches could assign Win32 focus without activating the native macOS game
+window. Subnautica stayed behind other apps; Bravely Default and Portal 2 drew in
+front but required manual focus. Wine detaches the game process during launch,
+so the game cannot rely on inheriting Steam's activation context.
+
+NotProton patch 0005 provides a cooperative activation handoff. `steam-run` calls
+a native requester on its existing game route, before `scripts/play` starts Wine.
+Path queries and outside-install helpers do not request activation. The requester
+identifies its Steam ancestor and asks the foreground Steam frontend to yield to
+the game's bundle ID. It waits for acknowledgement before continuing; inactive
+frontends decline, expired requests are rejected, and an absent reply times out
+after two seconds. Shell argument handling and arm64 spawn selection are unchanged.
+
+Inactive fullscreen windows also had an ordering defect: `minimumLevelForActive:`
+returned normal level under Wine's inactive-floating policy, but
+`adjustWindowLevels:` then raised floating windows above the Dock. Wine patch 0029
+applies that floor only when the computed minimum exceeds normal. An inactive game
+stays at level 0; active fullscreen and permitted windowed topmost windows retain
+their elevation.
+
+The [native controls](../tests/mac/launch-focus.md) check activation from either
+Steam frontend, delayed windows, blocked callbacks, absent receivers, deliberate
+switching, and inactive fullscreen ordering. Relay cases wait for their private
+processes to terminate and fail on missing launch/completion evidence. Routing
+checks cover quoted direct and shell-wrapped launches, launchers, app-ID selection,
+queries and helpers. Timeout and cleanup checks preserve unrelated processes.
+The activation and routing controls pass on an M5 with 32 GB, macOS 27.0.1
+(26A434). Native requester execution measured 48–157 ms, including process and
+AppKit startup; this is not a game-launch benchmark.
+
+On 2026-10-12, the owner reported two successful Steam test runs each for Bravely
+Default, Portal 2 and Subnautica on the same M5. The tested candidate included all
+main changes through `142140a`. The agreed checks covered launch focus and input,
+switching away during startup and returning, ordinary and rapid switching,
+minimize/restore, and brief rendering, sound and gameplay across the games'
+available fullscreen, borderless and windowed modes. First-run initialization,
+other macOS versions and multiple displays remain unverified.
+Immediate restore before native minimization starts and fullscreen resolution
+changes remain separate issues (#30).
+
+**Known visual regression:** fullscreen minimization on Cmd+Tab animates behind
+the newly focused app. Lowering the inactive window from level 21 to 0 changes
+which app is drawn above the animation. The observed traces do not establish an
+additional minimization delay.
+
+Install the Steam integration through Hadron's usual setup and restart Steam to
+load it. Replacing the runtime library alone does not update the copy in Steam.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 

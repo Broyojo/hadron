@@ -1,0 +1,992 @@
+From a3f26b3c175dcd41c3e05f1915b70bf96cc03d1e Mon Sep 17 00:00:00 2001
+From: Ivan Karpan <ivan.karpan@onereach.com>
+Date: Mon, 12 Oct 2026 18:46:47 +0100
+Subject: [PATCH] activation: Cooperate with Steam before detached game launch
+
+Detached Wine games cannot inherit Steam's native activation context. Let the
+foreground Steam client or helper yield activation to the game's bundle and
+acknowledge the request before Wine starts. Inactive frontends decline and
+expired requests cannot yield later; missing replies have a bounded wait.
+
+Provide a native requester for Hadron's game route so compatibility queries
+and installer helpers do not request activation. Keep spawn architecture and
+environment handling unchanged.
+
+Add isolated activation, routing-hook and process-lifecycle controls, including
+delayed windows, deliberate switching, blocked callbacks and absent receivers.
+
+Co-Authored-By: Codex <noreply@openai.com>
+---
+ Makefile                            |  28 +++-
+ dylib/feats/activation-request.c    |   9 ++
+ dylib/feats/activation.h            |   7 +
+ dylib/feats/activation.m            | 147 ++++++++++++++++++
+ dylib/tests/activation-detach.c     |  27 ++++
+ dylib/tests/activation-probe.m      | 222 ++++++++++++++++++++++++++++
+ dylib/tests/activation-processes.py |  59 ++++++++
+ dylib/tests/activation-relay.py     | 151 +++++++++++++++++++
+ dylib/tests/activation.md           |  41 +++++
+ dylib/tests/activation_processes.py |  89 +++++++++++
+ dylib/tests/spawn-env.c             |  40 ++++-
+ 11 files changed, 815 insertions(+), 5 deletions(-)
+ create mode 100644 dylib/feats/activation-request.c
+ create mode 100644 dylib/feats/activation.h
+ create mode 100644 dylib/feats/activation.m
+ create mode 100644 dylib/tests/activation-detach.c
+ create mode 100644 dylib/tests/activation-probe.m
+ create mode 100644 dylib/tests/activation-processes.py
+ create mode 100644 dylib/tests/activation-relay.py
+ create mode 100644 dylib/tests/activation.md
+ create mode 100644 dylib/tests/activation_processes.py
+
+diff --git a/Makefile b/Makefile
+index afa8284..50f2404 100644
+--- a/Makefile
++++ b/Makefile
+@@ -9,7 +9,7 @@ CFLAGS   := -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) \
+ LDFLAGS  := -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) \
+             -dynamiclib -install_name @rpath/notproton.dylib
+ 
+-FRAMEWORKS := -framework CoreFoundation
++FRAMEWORKS := -framework CoreFoundation -framework AppKit
+ 
+ DOBBY_DIR  := build/dobby
+ DOBBY_LIBS := $(DOBBY_DIR)/libdobby.a \
+@@ -53,7 +53,7 @@ ARM64_DYLIB := $(OUT_DIR)/notproton.arm64.dylib
+ X86_STUB    := $(OUT_DIR)/notproton.x86_64.dylib
+ TARGET      := $(OUT_DIR)/notproton.dylib
+ 
+-OBJS := $(patsubst %.c,$(OUT_DIR)/%.o,$(SRCS))
++OBJS := $(patsubst %.c,$(OUT_DIR)/%.o,$(SRCS)) $(OUT_DIR)/dylib/feats/activation.o
+ DEPS := $(OBJS:.o=.d)
+ 
+ .PHONY: all clean rebuild dobby deploy dylib-install sigcheck app-payload app app-zip \
+@@ -77,6 +77,22 @@ TEST_PATHS := dylib/tests overlay-shim/tests app/Tests
+ tests-list:
+ 	@for p in $(TEST_PATHS); do echo $$p; done
+ 
++# Interactive desktop controls, deliberately separate from unattended checks.
++.PHONY: activation-relay
++activation-relay:
++	@mkdir -p $(OUT_DIR)
++	python3 -B dylib/tests/activation-relay.py
++
++# Called only from Hadron's game route, before Wine detaches the game.
++$(OUT_DIR)/activation-request: dylib/feats/activation-request.c dylib/feats/activation.m dylib/util/log.c dylib/util/file.c
++	@mkdir -p $(dir $@)
++	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -O2 -Wall -Wextra \
++		-o $@ $^ $(FRAMEWORKS)
++
++.PHONY: activation-processes
++activation-processes:
++	python3 -B dylib/tests/activation-processes.py
++
+ # A check with no inputs left is reported
+ SKIP = echo "==> $(1): $(2) not present, skipped"
+ 
+@@ -281,11 +297,11 @@ $(ARM64_DYLIB): $(OBJS)
+ 	@mkdir -p $(dir $@)
+ 	$(CC) $(LDFLAGS) -o $@ $^ $(DOBBY_LIBS) $(FRAMEWORKS) -lc++
+ 
+-$(X86_STUB): dylib/stub_x86_64.c
++$(X86_STUB): dylib/stub_x86_64.c dylib/feats/activation.m dylib/util/log.c dylib/util/file.c
+ 	@mkdir -p $(dir $@)
+ 	$(CC) -arch x86_64 -mmacosx-version-min=$(MIN_VER) \
+ 		-dynamiclib -install_name @rpath/notproton.dylib \
+-		-o $@ $<
++		-o $@ $^ $(FRAMEWORKS)
+ 
+ $(TARGET): $(ARM64_DYLIB) $(X86_STUB)
+ 	lipo -create $^ -output $@
+@@ -296,6 +312,10 @@ $(OUT_DIR)/%.o: %.c
+ 	@mkdir -p $(dir $@)
+ 	$(CC) $(CFLAGS) -c $< -o $@
+ 
++$(OUT_DIR)/%.o: %.m
++	@mkdir -p $(dir $@)
++	$(CC) $(CFLAGS) -c $< -o $@
++
+ $(RUN_SCRIPT_H): dylib/feats/compat_run.sh dylib/embed_script.py
+ 	@mkdir -p $(GENERATED_DIR)
+ 	python3 dylib/embed_script.py $< $@ RUN_SCRIPT
+diff --git a/dylib/feats/activation-request.c b/dylib/feats/activation-request.c
+new file mode 100644
+index 0000000..22dcd79
+--- /dev/null
++++ b/dylib/feats/activation-request.c
+@@ -0,0 +1,9 @@
++// Internal steam-run helper; it never activates itself or starts a game.
++#include "activation.h"
++
++int main(int argc, char **argv)
++{
++    if (argc != 2) return 2;
++    np_activation_prepare(argv[1]);
++    return 0;
++}
+diff --git a/dylib/feats/activation.h b/dylib/feats/activation.h
+new file mode 100644
+index 0000000..c256754
+--- /dev/null
++++ b/dylib/feats/activation.h
+@@ -0,0 +1,7 @@
++#ifndef NOTPROTON_ACTIVATION_H
++#define NOTPROTON_ACTIVATION_H
++
++void np_activation_start(void);
++void np_activation_prepare(const char *app_id);
++
++#endif
+diff --git a/dylib/feats/activation.m b/dylib/feats/activation.m
+new file mode 100644
+index 0000000..b176aa2
+--- /dev/null
++++ b/dylib/feats/activation.m
+@@ -0,0 +1,147 @@
++#import <AppKit/AppKit.h>
++#include "activation.h"
++#include "../util/log.h"
++#include <errno.h>
++#include <math.h>
++#include <libproc.h>
++#include <poll.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++static NSString *const request_name = @"com.broyojo.hadron.activation.request";
++static NSString *const game_prefix = @"com.broyojo.hadron.game.";
++static id observer;
++
++static BOOL steam_application(NSRunningApplication *app)
++{
++    return [app.bundleIdentifier isEqualToString:@"com.valvesoftware.steam"] ||
++           [app.bundleIdentifier isEqualToString:@"com.valvesoftware.steam.helper"];
++}
++
++// steam-run requests the handoff only after selecting its game route. Its
++// short-lived requester is a descendant of the client, not a Steam application.
++// Keep the relay's Steam identity check; a manual launch has no such ancestor.
++static pid_t steam_ancestor(void)
++{
++    pid_t pid = getpid();
++    for (unsigned depth = 0; pid > 1 && depth < 64; depth++)
++    {
++        if (steam_application([NSRunningApplication runningApplicationWithProcessIdentifier:pid]))
++            return pid;
++        struct proc_bsdinfo info;
++        if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != sizeof(info) ||
++            info.pbi_ppid == (uint32_t)pid) break;
++        pid = info.pbi_ppid;
++    }
++    return 0;
++}
++
++static BOOL valid_app_id(const char *value)
++{
++    if (!value || !*value || strlen(value) > 10 || strspn(value, "0123456789") != strlen(value))
++        return NO;
++    unsigned long long number = strtoull(value, NULL, 10);
++    return number && number <= UINT32_MAX;
++}
++
++static void reply(NSString *path, char result)
++{
++    struct sockaddr_un address = {.sun_family = AF_UNIX};
++    const char *name = path.fileSystemRepresentation;
++    if (!name || strlen(name) >= sizeof(address.sun_path)) return;
++    memcpy(address.sun_path, name, strlen(name) + 1);
++    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
++    if (fd == -1) return;
++    sendto(fd, &result, 1, 0, (struct sockaddr *)&address, sizeof(address));
++    close(fd);
++}
++
++void np_activation_start(void)
++{
++    if (observer) return;
++    observer = [[NSDistributedNotificationCenter defaultCenter]
++        addObserverForName:request_name object:nil queue:[NSOperationQueue mainQueue]
++        usingBlock:^(NSNotification *note) {
++            NSDictionary *info = note.userInfo;
++            NSNumber *sender = info[@"sender"], *frontend = info[@"frontend"], *deadline = info[@"deadline"];
++            NSString *bundle = info[@"bundle"], *path = info[@"reply"];
++            if (![sender isKindOfClass:[NSNumber class]] || ![frontend isKindOfClass:[NSNumber class]] ||
++                ![deadline isKindOfClass:[NSNumber class]] || ![bundle isKindOfClass:[NSString class]] ||
++                ![path isKindOfClass:[NSString class]] || frontend.intValue != getpid()) return;
++            if (![bundle hasPrefix:game_prefix] ||
++                !valid_app_id([[bundle substringFromIndex:game_prefix.length] UTF8String])) return;
++            if (!steam_application([NSRunningApplication runningApplicationWithProcessIdentifier:sender.intValue])) return;
++            if (![path hasPrefix:@"/tmp/hadron-activation-"]) return;
++            struct stat status;
++            if (lstat(path.fileSystemRepresentation, &status) || !S_ISSOCK(status.st_mode) || status.st_uid != getuid()) return;
++            char granted = 0;
++            if (isfinite(deadline.doubleValue) && NSProcessInfo.processInfo.systemUptime < deadline.doubleValue && NSApp.active)
++            {
++                [NSApp yieldActivationToApplicationWithBundleIdentifier:bundle];
++                granted = 1;
++            }
++            reply(path, granted);
++        }];
++}
++
++void np_activation_prepare(const char *app_id)
++{
++    @autoreleasepool {
++        if (!valid_app_id(app_id)) return;
++        pid_t sender = steam_ancestor();
++        if (!sender) return;
++        NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
++        if (!steam_application(front)) return;
++        NSString *bundle = [game_prefix stringByAppendingString:[NSString stringWithUTF8String:app_id]];
++        if (front.processIdentifier == getpid() && [NSThread isMainThread])
++        {
++            if (NSApp.active) [NSApp yieldActivationToApplicationWithBundleIdentifier:bundle];
++            return;
++        }
++
++        // A Steam frontend owns the active window. Finish its handoff before Wine,
++        // since a detached Wine child cannot inherit the client's activation context.
++        char folder[] = "/tmp/hadron-activation-XXXXXX";
++        if (!mkdtemp(folder)) { NP_WARN("[activation] cannot create reply directory"); return; }
++        struct sockaddr_un address = {.sun_family = AF_UNIX};
++        snprintf(address.sun_path, sizeof(address.sun_path), "%s/reply", folder);
++        int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
++        if (fd == -1 || bind(fd, (struct sockaddr *)&address, sizeof(address)))
++        {
++            NP_WARN("[activation] cannot bind reply socket");
++            if (fd != -1) close(fd);
++            rmdir(folder);
++            return;
++        }
++        NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
++        NSTimeInterval deadline = started + 2;
++        NSDictionary *info = @{@"sender": @(sender), @"frontend": @(front.processIdentifier),
++                               @"bundle": bundle, @"reply": @(address.sun_path), @"deadline": @(deadline)};
++        [[NSDistributedNotificationCenter defaultCenter] postNotificationName:request_name
++            object:nil userInfo:info deliverImmediately:YES];
++        char granted = 0;
++        struct pollfd item = {.fd = fd, .events = POLLIN};
++        int waited;
++        do {
++            int remaining = (int)((deadline - NSProcessInfo.processInfo.systemUptime) * 1000);
++            waited = remaining > 0 ? poll(&item, 1, remaining) : 0;
++        } while (waited < 0 && errno == EINTR);
++        if (waited > 0 && (item.revents & POLLIN)) recv(fd, &granted, 1, 0);
++        close(fd);
++        unlink(address.sun_path);
++        rmdir(folder);
++    }
++}
++
++__attribute__((constructor))
++static void activation_init(void)
++{
++    const char *name = getprogname();
++    if (!name || (strcmp(name, "steam_osx") && strcmp(name, "Steam Helper"))) return;
++    np_log_init();
++    dispatch_async(dispatch_get_main_queue(), ^{ np_activation_start(); });
++}
+diff --git a/dylib/tests/activation-detach.c b/dylib/tests/activation-detach.c
+new file mode 100644
+index 0000000..e9f1912
+--- /dev/null
++++ b/dylib/tests/activation-detach.c
+@@ -0,0 +1,27 @@
++#include <errno.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/wait.h>
++#include <unistd.h>
++
++int main(int argc, char **argv)
++{
++    if (argc < 2) return 2;
++    pid_t child = fork();
++    if (child == -1) return 2;
++    if (!child)
++    {
++        pid_t grandchild = fork();
++        if (grandchild == -1) _exit(2);
++        if (!grandchild)
++        {
++            execv(argv[1], argv + 1);
++            _exit(2);
++        }
++        _exit(0);
++    }
++    int status;
++    while (waitpid(child, &status, 0) == -1)
++        if (errno != EINTR) return 2;
++    return WIFEXITED(status) ? WEXITSTATUS(status) : 2;
++}
+diff --git a/dylib/tests/activation-probe.m b/dylib/tests/activation-probe.m
+new file mode 100644
+index 0000000..fdd81a7
+--- /dev/null
++++ b/dylib/tests/activation-probe.m
+@@ -0,0 +1,222 @@
++// Native helper/client/detached-child control; never operates on Steam or games.
++#import <AppKit/AppKit.h>
++#include <spawn.h>
++#include <errno.h>
++#include <sys/wait.h>
++#include <unistd.h>
++void np_activation_start(void);
++extern FILE *np_log_file;
++extern int np_log_level;
++
++@interface ProbeWindow : NSPanel
++@end
++@implementation ProbeWindow
++- (BOOL)canBecomeKeyWindow { return YES; }
++- (BOOL)canBecomeMainWindow { return YES; }
++@end
++
++@interface Probe : NSObject <NSApplicationDelegate, NSWindowDelegate>
++@property NSString *role;
++@property NSString *folder;
++@property NSString *handoff;
++@property double delay;
++@property BOOL switchAway;
++@property double helperStartDelay;
++@property double helperExitDelay;
++@property NSWindow *window;
++@property FILE *log;
++@end
++@implementation Probe
++- (void)record:(NSString *)phase
++{
++    NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
++    NSDictionary *row = @{@"phase": phase, @"role": self.role, @"pid": @(getpid()), @"ppid": @(getppid()),
++        @"uptime": @(NSProcessInfo.processInfo.systemUptime), @"active": @(NSApp.active),
++        @"key": @(self.window.keyWindow), @"visible": @(self.window.visible),
++        @"level": @(self.window.level), @"front_pid": @(front.processIdentifier),
++        @"front_bundle": front.bundleIdentifier ?: @""};
++    NSData *data = [NSJSONSerialization dataWithJSONObject:row options:NSJSONWritingSortedKeys error:NULL];
++    fwrite(data.bytes, 1, data.length, self.log); fputc('\n', self.log); fflush(self.log);
++}
++- (void)show
++{
++    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
++    self.window = [[ProbeWindow alloc] initWithContentRect:NSMakeRect(100, 100, 480, 240)
++        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
++        backing:NSBackingStoreBuffered defer:NO];
++    self.window.title = [@"Launch activation probe: " stringByAppendingString:self.role];
++    self.window.delegate = self;
++    [self.window orderFront:nil];
++    [self.window makeKeyWindow];
++    [self record:@"request-activation"];
++    [NSApp activate];
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
++        [self record:@"after-request"];
++    });
++}
++- (void)applicationDidFinishLaunching:(NSNotification *)note
++{
++    (void)note;
++    [self record:@"launched"];
++    if ([self.role isEqualToString:@"parent"])
++    {
++        [self show];
++        BOOL relay = [self.handoff hasPrefix:@"relay-"];
++        if (!relay) np_activation_start();
++        if (relay)
++        {
++            NSWorkspaceOpenConfiguration *config = [NSWorkspaceOpenConfiguration configuration];
++            NSString *role = [self.handoff containsString:@"absent"] ? @"relay-absent" :
++                [self.handoff containsString:@"slow"] ? @"relay-slow" : @"relay-helper";
++            config.arguments = @[role, self.folder, @(self.helperStartDelay).stringValue, @(self.helperExitDelay).stringValue];
++            config.createsNewApplicationInstance = YES;
++            config.activates = YES;
++            [self record:@"helper-opening"];
++            [NSWorkspace.sharedWorkspace openApplicationAtURL:
++                [NSURL fileURLWithPath:[self.folder stringByAppendingPathComponent:@"Helper.app"]]
++                configuration:config completionHandler:^(NSRunningApplication *app, NSError *error) {
++                    dispatch_async(dispatch_get_main_queue(), ^{
++                        [self record:(app && !error) ? @"helper-opened" : @"helper-open-failed"];
++                    });
++                }];
++        }
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((.4 + self.helperStartDelay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++            [self record:@"before-spawn"];
++            void (^spawnGame)(void) = ^{
++                NSString *child = [self.folder stringByAppendingPathComponent:@"Child.app/Contents/MacOS/probe"];
++                NSString *delay = [NSString stringWithFormat:@"%.3f", self.delay];
++                pid_t pid;
++                int result;
++                NSString *home = [@"HOME=" stringByAppendingString:NSHomeDirectory()];
++                NSString *user = [@"USER=" stringByAppendingString:NSUserName()];
++                char *cleanEnv[] = {"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=en_US.UTF-8",
++                    (char *)home.UTF8String, (char *)user.UTF8String, NULL};
++                {
++                    NSString *shim = [self.folder stringByAppendingPathComponent:@"detach"];
++                    char *detachedArgs[] = {(char *)shim.fileSystemRepresentation,
++                        (char *)child.fileSystemRepresentation, "child", (char *)self.folder.fileSystemRepresentation,
++                        (char *)delay.UTF8String, NULL};
++                    result = posix_spawn(&pid, shim.fileSystemRepresentation, NULL, NULL, detachedArgs, cleanEnv);
++                }
++                if (result) { [self record:@"spawn-failed"]; [NSApp terminate:nil]; return; }
++                [self record:@"after-spawn"];
++                if (self.switchAway)
++                {
++                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
++                        NSWorkspaceOpenConfiguration *config = [NSWorkspaceOpenConfiguration configuration];
++                        config.arguments = @[@"helper", self.folder];
++                        config.createsNewApplicationInstance = YES;
++                        config.activates = YES;
++                        [self record:@"other-opening"];
++                        [NSWorkspace.sharedWorkspace openApplicationAtURL:
++                            [NSURL fileURLWithPath:[self.folder stringByAppendingPathComponent:relay ? @"Other.app" : @"Helper.app"]]
++                            configuration:config completionHandler:^(NSRunningApplication *app, NSError *error) {
++                                dispatch_async(dispatch_get_main_queue(), ^{
++                                    [self record:(app && !error) ? @"other-opened" : @"other-open-failed"];
++                                });
++                            }];
++                        [self record:@"switch-away"];
++                    });
++                }
++            };
++            if (![self.handoff isEqualToString:@"relay-none"])
++            {
++                [self record:@"before-handoff"];
++                // Use the shipped requester as steam-run does, across a shell
++                // ancestor; the requester never becomes a GUI application.
++                NSString *requester = [self.folder stringByAppendingPathComponent:@"activation-request"];
++                char *args[] = {"/bin/sh", "-c", "\"$1\" 4294967002; result=$?; exit \"$result\"", "sh",
++                                (char *)requester.fileSystemRepresentation, NULL};
++                pid_t request = 0;
++                extern char **environ;
++                int rc = posix_spawn(&request, "/bin/sh", NULL, NULL, args, environ);
++                // Steam's spawning call has returned by the time steam-run
++                // asks. Keep this parent's main queue available to receive it.
++                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
++                    int status = 0;
++                    pid_t waited = -1;
++                    if (!rc) do { waited = waitpid(request, &status, 0); } while (waited < 0 && errno == EINTR);
++                    BOOL failed = rc || waited != request || !WIFEXITED(status) || WEXITSTATUS(status);
++                    dispatch_async(dispatch_get_main_queue(), ^{
++                        if (failed) [self record:@"requester-failed"];
++                        [self record:@"after-handoff"];
++                        spawnGame();
++                    });
++                });
++            }
++            else spawnGame();
++        });
++    }
++    else if ([self.role isEqualToString:@"child"])
++    {
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++            [self show];
++        });
++    }
++    else
++    {
++        if ([self.role isEqualToString:@"relay-helper"] || [self.role isEqualToString:@"relay-slow"])
++            np_activation_start();
++        [self show];
++        if ([self.role isEqualToString:@"relay-slow"])
++            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
++                [self record:@"slow-callback-begin"];
++                usleep(700000);
++                [self record:@"slow-callback-end"];
++            });
++    }
++    double lifetime = [self.role isEqualToString:@"child"] ? self.delay + 2 : self.delay + 7;
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(lifetime * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++        [self record:@"final"]; [NSApp terminate:nil];
++    });
++}
++- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
++{
++    (void)sender;
++    if ([self.role hasPrefix:@"relay-"] && self.helperExitDelay > 0)
++    {
++        [self record:@"exit-delay-begin"];
++        usleep((useconds_t)(self.helperExitDelay * 1000000));
++        [self record:@"exit-delay-end"];
++    }
++    return NSTerminateNow;
++}
++- (void)applicationDidBecomeActive:(NSNotification *)note { (void)note; [self record:@"did-activate"]; }
++- (void)applicationDidResignActive:(NSNotification *)note { (void)note; [self record:@"did-deactivate"]; }
++- (void)windowDidBecomeKey:(NSNotification *)note { (void)note; [self record:@"did-become-key"]; }
++- (void)windowDidResignKey:(NSNotification *)note { (void)note; [self record:@"did-resign-key"]; }
++@end
++
++int main(int argc, const char **argv)
++{
++    @autoreleasepool
++    {
++        if (argc < 3) return 2;
++        Probe *probe = [Probe new];
++        probe.role = @(argv[1]); probe.folder = @(argv[2]);
++        if ([probe.role isEqualToString:@"parent"])
++        {
++            if (argc < 6) return 2;
++            probe.handoff = @(argv[3]); probe.delay = atof(argv[4]); probe.switchAway = atoi(argv[5]);
++            probe.helperStartDelay = argc > 6 ? atof(argv[6]) : 0;
++            probe.helperExitDelay = argc > 7 ? atof(argv[7]) : 0;
++        }
++        else if ([probe.role isEqualToString:@"child"]) probe.delay = argc > 3 ? atof(argv[3]) : 0;
++        NSString *path = [probe.folder stringByAppendingPathComponent:[probe.role stringByAppendingString:@".jsonl"]];
++        probe.log = fopen(path.fileSystemRepresentation, "a");
++        if (!probe.log) return 2;
++        NSString *activationLog = [probe.folder stringByAppendingPathComponent:[probe.role stringByAppendingString:@".activation.log"]];
++        np_log_level = 3;
++        np_log_file = fopen(activationLog.fileSystemRepresentation, "a");
++        if ([probe.role hasPrefix:@"relay-"])
++        {
++            if (argc > 3) usleep((useconds_t)(atof(argv[3]) * 1000000));
++            probe.helperExitDelay = argc > 4 ? atof(argv[4]) : 0;
++        }
++        [NSApplication sharedApplication];
++        NSApp.delegate = probe;
++        [NSApp run];
++        fclose(probe.log);
++    }
++    return 0;
++}
+diff --git a/dylib/tests/activation-processes.py b/dylib/tests/activation-processes.py
+new file mode 100644
+index 0000000..6bac22b
+--- /dev/null
++++ b/dylib/tests/activation-processes.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python3
++"""Unattended termination, timeout and failure-cleanup controls; no GUI apps."""
++import json
++from pathlib import Path
++import shutil
++import subprocess
++import tempfile
++from activation_processes import processes, wait_for_exit, cleanup, pending_launches
++
++with tempfile.TemporaryDirectory(prefix='activation-processes-') as temporary:
++    case = Path(temporary).resolve()
++    own = case / 'Helper.app/Contents/MacOS/probe'
++    own.parent.mkdir(parents=True)
++    source = case / 'sleep.c'
++    source.write_text('#include <stdlib.h>\n#include <unistd.h>\nint main(int n, char **v) { if (n != 2) return 2; sleep(atoi(v[1])); return 0; }\n')
++    subprocess.run(['xcrun', 'clang', source, '-o', own], check=True)
++    unrelated_path = case / 'unrelated/probe'
++    unrelated_path.parent.mkdir()
++    shutil.copyfile(own, unrelated_path)
++    unrelated_path.chmod(0o755)
++    unrelated = subprocess.Popen([unrelated_path, '30'])
++    child = None
++    try:
++        child = subprocess.Popen([own, '1'])
++        wait_for_exit(case, 3)
++        child.wait(timeout=1)
++        print('PASS: waits for explicit process exit')
++        child = subprocess.Popen([own, '30'])
++        try:
++            wait_for_exit(case, .1)
++        except TimeoutError:
++            pass
++        else:
++            raise AssertionError('Missing timeout failure')
++        # This is the same finally path used when open, qualification or a timer fails.
++        cleanup(case)
++        child.wait(timeout=1)
++        assert not processes(case)
++        assert unrelated.poll() is None, 'Cleanup touched a different executable with the same name'
++        print('PASS: timeout fails and cleanup stops only the exact private executable')
++        log = case / 'parent.jsonl'
++        log.write_text(json.dumps({'phase': 'helper-opening'}) + '\n')
++        assert pending_launches(case) == {'helper'}
++        try:
++            cleanup(case)
++        except RuntimeError:
++            pass
++        else:
++            raise AssertionError('An unaccounted asynchronous launch must fail cleanup')
++        with log.open('a') as out:
++            out.write(json.dumps({'phase': 'helper-open-failed'}) + '\n')
++        cleanup(case)
++        print('PASS: absent asynchronous completion cannot qualify as cleanup')
++    finally:
++        if child is not None and child.poll() is None:
++            child.kill()
++            child.wait(timeout=2)
++        unrelated.terminate()
++        unrelated.wait(timeout=2)
+diff --git a/dylib/tests/activation-relay.py b/dylib/tests/activation-relay.py
+new file mode 100644
+index 0000000..9736057
+--- /dev/null
++++ b/dylib/tests/activation-relay.py
+@@ -0,0 +1,151 @@
++#!/usr/bin/env python3
++"""Interactive native activation controls; uses private apps, never Steam or games."""
++from pathlib import Path
++import hashlib
++import json
++import plistlib
++import shutil
++import subprocess
++import tempfile
++import time
++from activation_processes import wait_for_exit, cleanup
++
++root = Path(__file__).resolve().parents[2]
++tests = root / 'dylib/tests'
++out = Path(tempfile.mkdtemp(prefix='activation-', dir=root / 'out'))
++print('Results:', out, flush=True)
++
++def run(args, **options):
++    return subprocess.run([str(a) for a in args], check=True, timeout=30, **options)
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++# Only test application identities differ. The handoff/acknowledgement code is
++# compiled unchanged, with the production memory-management flags (no ARC).
++source = root / 'dylib/feats/activation.m'
++text = source.read_text()
++identities = {'com.valvesoftware.steam': 'com.hadron.activation-test.parent.' + out.name,
++              'com.valvesoftware.steam.helper': 'com.hadron.activation-test.helper.' + out.name}
++for original, replacement in identities.items():
++    if text.count('@"' + original + '"') != 1:
++        raise RuntimeError('Unexpected production frontend identity definition')
++    text = text.replace('@"' + original + '"', '@"' + replacement + '"')
++candidate = out / 'activation.m'
++candidate.write_text(text)
++activation = out / 'activation.o'
++run(['xcrun', 'clang', '-O2', '-Wall', '-Wextra', '-Werror',
++     '-I', root / 'dylib/feats', '-c', candidate, '-o', activation])
++probe = out / 'probe'
++run(['xcrun', 'clang', '-fobjc-arc', '-O2', '-Wall', '-Wextra', '-Werror',
++     '-framework', 'AppKit', tests / 'activation-probe.m', activation,
++     root / 'dylib/util/log.c', root / 'dylib/util/file.c', '-o', probe])
++requester = out / 'activation-request'
++run(['xcrun', 'clang', '-O2', '-Wall', '-Wextra', '-Werror', '-framework', 'AppKit',
++     tests.parent / 'feats/activation-request.c', activation,
++     root / 'dylib/util/log.c', root / 'dylib/util/file.c', '-o', requester])
++detach = out / 'detach'
++run(['xcrun', 'clang', '-O2', '-Wall', '-Wextra', '-Werror',
++     tests / 'activation-detach.c', '-o', detach])
++run(['codesign', '-f', '-s', '-', probe])
++
++bundles = {'Parent': 'com.hadron.activation-test.parent.' + out.name,
++           'Helper': 'com.hadron.activation-test.helper.' + out.name,
++           'Other': 'com.hadron.activation-test.other.' + out.name,
++           'Child': 'com.broyojo.hadron.game.4294967002'}
++cases = [('relay-none', 0, False, False, 0, 0),
++         ('relay-ready', 0, False, True, 0, 0),
++         ('relay-ready', 1.2, False, True, 0, 0),
++         ('relay-slow', 0, False, True, 0, 0),
++         ('relay-absent', 0, False, False, 0, 0),
++         ('relay-ready', 1.2, True, False, 0, 0),
++         ('relay-ready', 0, False, True, .7, 1.0),
++         ('parent-ready', 0, False, True, 0, 0)]
++results = []
++receipt = {'source_sha256': sha(source), 'compiled_source_sha256': sha(candidate),
++           'requester_source_sha256': sha(tests.parent / 'feats/activation-request.c'),
++           'probe_source_sha256': sha(tests / 'activation-probe.m'),
++           'runner_sha256': sha(Path(__file__)),
++           'process_checks_sha256': sha(tests / 'activation_processes.py'),
++           'requester_sha256': sha(requester), 'probe_sha256': sha(probe), 'detach_sha256': sha(detach),
++           'identity_substitutions': identities,
++           'macos': run(['sw_vers'], capture_output=True, text=True).stdout}
++(out / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
++
++for mode, delay, switch, expected, start_delay, exit_delay in cases:
++    listing = run(['ps', '-axo', 'comm='], capture_output=True, text=True).stdout
++    if any(row.strip().lower().endswith('.exe') or Path(row.strip()).name.lower()
++           in ('wine', 'wine64', 'wineserver') for row in listing.splitlines()):
++        raise RuntimeError('Existing Wine session; postpone interactive controls')
++    case = out / f'{mode}-{delay}-{int(switch)}-{start_delay}-{exit_delay}'
++    case.mkdir()
++    for role, bundle in bundles.items():
++        contents = case / (role + '.app') / 'Contents'
++        (contents / 'MacOS').mkdir(parents=True)
++        shutil.copy2(probe, contents / 'MacOS/probe')
++        info = {'CFBundleExecutable': 'probe', 'CFBundleIdentifier': bundle,
++                'CFBundleName': role, 'CFBundlePackageType': 'APPL'}
++        if role == 'Child':
++            info['LSUIElement'] = True
++        (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
++    shutil.copy2(detach, case / 'detach')
++    shutil.copy2(requester, case / 'activation-request')
++    try:
++        run(['open', '-n', '-W', '-a', case / 'Parent.app', '--args', 'parent', case,
++             mode, delay, int(switch), start_delay, exit_delay])
++        parent_exit = time.monotonic()
++        wait_for_exit(case, 10)
++        (case / 'termination.json').write_text(json.dumps({
++            'all_exited': True, 'wait_after_parent_ms': (time.monotonic() - parent_exit) * 1000}))
++    finally:
++        cleanup(case)
++    def rows(role):
++        return [json.loads(line) for line in (case / (role + '.jsonl')).read_text().splitlines()]
++    parent, child = rows('parent'), rows('child')
++    before = next(r for r in parent if r['phase'] == 'before-spawn')
++    after = next(r for r in child if r['phase'] == 'after-request')
++    helper_role = 'relay-absent' if mode == 'relay-absent' else 'relay-slow' if mode == 'relay-slow' else 'relay-helper'
++    helper = rows(helper_role) if mode.startswith('relay-') else []
++    other = rows('helper') if switch else []
++    # A missing launch/final record, mixed process identities, failed asynchronous
++    # launch, or failed requester cannot qualify merely because focus looks right.
++    complete = all(any(r['phase'] == 'launched' for r in records) and
++                   any(r['phase'] == 'final' for r in records) and
++                   len({r['pid'] for r in records}) == 1
++                   for records in (parent, child, *([helper] if helper else []), *([other] if switch else [])))
++    complete = complete and (not mode.startswith('relay-') or any(r['phase'] == 'helper-opened' for r in parent))
++    complete = complete and (not switch or any(r['phase'] == 'other-opened' for r in parent))
++    complete = complete and not any(r['phase'].endswith('-failed') for r in parent)
++    if exit_delay:
++        complete = complete and any(r['phase'] == 'exit-delay-end' for r in helper)
++    allowed = set(bundles.values())
++    qualified = (complete and before['front_bundle'] == bundles['Helper' if mode.startswith('relay-') else 'Parent'] and
++                 child[0]['ppid'] == 1 and
++                 all(r['front_bundle'] in allowed for r in parent + helper + child + other
++                     if r['phase'] == 'did-deactivate'))
++    if switch:
++        qualified = qualified and after['front_bundle'] == bundles['Other']
++    handoff = None
++    if mode != 'relay-none':
++        begin = next(r for r in parent if r['phase'] == 'before-handoff')
++        end = next(r for r in parent if r['phase'] == 'after-handoff')
++        handoff = (end['uptime'] - begin['uptime']) * 1000
++    timing_ok = True
++    if mode == 'relay-slow':
++        slow_begin = next(r for r in helper if r['phase'] == 'slow-callback-begin')
++        slow_end = next(r for r in helper if r['phase'] == 'slow-callback-end')
++        timing_ok = slow_begin['uptime'] <= begin['uptime'] < slow_end['uptime'] <= end['uptime']
++    if mode == 'relay-absent':
++        timing_ok = 1900 <= handoff <= 2600
++    passed = qualified and timing_ok and after['active'] == expected and after['key'] == expected
++    result = {'mode': mode, 'delay': delay, 'switch': switch,
++              'helper_start_delay': start_delay, 'helper_exit_delay': exit_delay,
++              'expected_activation': expected, 'before': before, 'after': after,
++              'handoff_ms': handoff, 'qualified': qualified,
++              'timing_ok': timing_ok, 'result': 'PASS' if passed else 'FAIL'}
++    results.append(result)
++    (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
++    print(json.dumps(result), flush=True)
++    if not passed:
++        raise RuntimeError('Activation mismatch or unqualified desktop; inspect logs')
++print('PASS: eight activation controls and explicit process termination; this does not establish game acceptance.')
+diff --git a/dylib/tests/activation.md b/dylib/tests/activation.md
+new file mode 100644
+index 0000000..67c6585
+--- /dev/null
++++ b/dylib/tests/activation.md
+@@ -0,0 +1,41 @@
++# Cooperative launch activation controls
++
++`make activation-relay` builds small native applications and exercises the actual
++activation relay with only the two Steam frontend identities replaced by private
++test identities. It never loads code into Steam or launches a game. The activation
++source uses production memory-management flags; the test app uses ARC. The
++parent invokes the shipped `activation-request` entry point through a shell,
++keeping its main queue available as Steam does after spawning the tool.
++
++Run on an unlocked macOS desktop without another Wine session. The controls change
++focus for about ninety seconds; do not interact with their windows. Each application exits
++on its own. Cases wait for their exact private executable paths to disappear;
++missing asynchronous launch completion fails cleanup. Failure cleanup signals
++only those paths, never an application name or shared bundle identifier. Each
++suite uses private frontend identifiers, and workspace launches request fresh
++instances. Receipts, source/binary hashes and native callback logs are retained in
++`out/activation-*`. Missing callbacks, unexpected application switches and incomplete
++results fail rather than being counted as success.
++
++The detached no-handoff baseline must remain inactive. A ready helper must grant
++activation for immediate and delayed windows. Blocking the helper's main queue
++must demonstrate acknowledgement before spawning, not success by a repeated lucky
++timing. An absent receiver must time out within the bounded interval and continue
++without activation. A deliberate switch during delayed creation must keep the
++other app active. Requests, acknowledgements, application activation and key-window
++callbacks are recorded separately. A foreground-parent control also checks the
++request while the client's own main queue receives it. Controlled helper startup
++and termination delays exercise the exit wait before another case begins.
++
++`make activation-processes` exercises the bounded exit wait, timeout and failure
++cleanup without changing desktop focus. A same-named executable outside the case
++must survive, and an unaccounted asynchronous launch must fail cleanup.
++Hadron's `tests/mac/test-steam-activation.py` exercises the real spawn hook and
++`steam-run` routing with inert backends: direct and shell-wrapped games/launchers,
++quoted arguments, app-ID precedence/fallback, path queries and outside-install
++helpers. No game, Wine, or activation API is invoked by those routing tests.
++
++These controls reproduce the native handoff mechanism. They do not establish game
++rendering, input, fullscreen presentation, Wine minimization behavior, or acceptance
++on a different macOS version. Validate those through ordinary owner-led Steam
++launches with the installed candidate and again without temporary diagnostics.
+diff --git a/dylib/tests/activation_processes.py b/dylib/tests/activation_processes.py
+new file mode 100644
+index 0000000..29272ea
+--- /dev/null
++++ b/dylib/tests/activation_processes.py
+@@ -0,0 +1,89 @@
++"""Bounded lifecycle checks for the exact executables in a private relay case."""
++import ctypes
++import os
++import json
++import signal
++import time
++
++libproc = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
++libproc.proc_listallpids.argtypes = [ctypes.c_void_p, ctypes.c_int]
++libproc.proc_listallpids.restype = ctypes.c_int
++libproc.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
++libproc.proc_pidpath.restype = ctypes.c_int
++
++
++def executable(pid):
++    buf = ctypes.create_string_buffer(4096)
++    if libproc.proc_pidpath(pid, buf, len(buf)) <= 0:
++        return None  # Exited processes have no executable path.
++    return os.fsdecode(buf.value)
++
++
++def processes(case):
++    paths = {str((case / (role + '.app/Contents/MacOS/probe')).resolve())
++             for role in ('Parent', 'Helper', 'Other', 'Child')}
++    paths.update(str((case / name).resolve()) for name in ('detach', 'activation-request'))
++    count = libproc.proc_listallpids(None, 0)
++    if count <= 0:
++        raise RuntimeError('Cannot enumerate processes')
++    # Retry if the process table grew beyond our allocation.
++    while True:
++        pids = (ctypes.c_int * (count + 256))()
++        used = libproc.proc_listallpids(pids, ctypes.sizeof(pids))
++        if used <= 0:
++            raise RuntimeError('Cannot enumerate processes')
++        if used < len(pids):
++            break
++        count = used
++    return {pid: path for pid in pids[:used] if (path := executable(pid)) in paths}
++
++
++def wait_for_exit(case, timeout):
++    deadline = time.monotonic() + timeout
++    while True:
++        alive = processes(case)
++        if not alive:
++            return
++        if time.monotonic() >= deadline:
++            raise TimeoutError(f'Private case processes did not exit: {alive}')
++        time.sleep(.05)
++
++
++def pending_launches(case):
++    log = case / 'parent.jsonl'
++    if not log.exists():
++        return set()
++    phases = []
++    for line in log.read_text().splitlines():
++        try:
++            phases.append(json.loads(line)['phase'])
++        except (ValueError, KeyError):
++            # A concurrent partial write cannot establish launch completion.
++            return {'incomplete-log'}
++    return {role for role in ('helper', 'other') if role + '-opening' in phases
++            and role + '-opened' not in phases and role + '-open-failed' not in phases}
++
++
++def cleanup(case):
++    # LaunchServices can still be starting an application after a failing parent
++    # exits. Account for completion callbacks, not an arbitrary quiet interval.
++    deadline = time.monotonic() + 5
++    while True:
++        alive = processes(case)
++        pending = pending_launches(case)
++        if not alive and not pending:
++            return
++        expired = time.monotonic() >= deadline
++        for pid, path in alive.items():
++            # Give an in-flight launch its bounded chance to report its PID.
++            if pending and '/Parent.app/' in path and not expired:
++                continue
++            if executable(pid) == path:
++                try:
++                    os.kill(pid, signal.SIGKILL)
++                except ProcessLookupError:
++                    pass
++        if expired:
++            # No later case may start after an unaccounted asynchronous launch.
++            raise RuntimeError(f'Incomplete private cleanup: alive={alive}, pending={pending}')
++        time.sleep(.05)
+diff --git a/dylib/tests/spawn-env.c b/dylib/tests/spawn-env.c
+index 7a6b060..353f6dd 100644
+--- a/dylib/tests/spawn-env.c
++++ b/dylib/tests/spawn-env.c
+@@ -10,6 +10,12 @@
+ int   np_log_level = 0;
+ FILE *np_log_file  = NULL;
+ 
++static int activation_requests;
++void np_activation_prepare(const char *app_id) {
++    (void)app_id;
++    activation_requests++;
++}
++
+ int DobbyHook(void *address, void *replace_call, void **origin_call) {
+     (void)address; (void)replace_call; (void)origin_call;
+     return -1;
+@@ -63,6 +69,21 @@ static void tool(const char *path, char *const argv[], int want, const char *wha
+     check(np_spawns_tool(path, argv) == want, what);
+ }
+ 
++// The hook cannot know where steam-run will route the parsed command. It must
++// leave activation to that route, even while selecting arm64 for every tool use.
++static int no_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *fa,
++                    const posix_spawnattr_t *attr, char *const argv[], char *const envp[]) {
++    (void)pid; (void)path; (void)fa; (void)attr; (void)argv; (void)envp;
++    return 0;
++}
++
++static void no_handoff(const char *path, char *const argv[], const char *what) {
++    char *env[] = {"STEAM_COMPAT_APP_ID=620", NULL};
++    activation_requests = 0;
++    np_spawn_without_insert(no_spawn, "test", NULL, path, NULL, NULL, argv, env);
++    check(activation_requests == 0, what);
++}
++
+ extern char **environ;
+ 
+ // What a child started through the hook reports for sysctl.proc_translated: 1 under
+@@ -77,7 +98,17 @@ static int translated(char *const argv[], const posix_spawnattr_t *attr) {
+     return WEXITSTATUS(status) > 1 ? -1 : WEXITSTATUS(status);
+ }
+ 
+-int main(void) {
++int main(int argc, char **argv) {
++    // Integration callers run steam-run's real routing with private stub backends.
++    if (argc > 2 && !strcmp(argv[1], "--spawn")) {
++        pid_t pid;
++        int status;
++        int rc = np_spawn_without_insert(posix_spawn, "integration", &pid, argv[2],
++                                         NULL, NULL, argv + 2, environ);
++        if (rc || waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) return 2;
++        check(!activation_requests, "spawn must defer activation to steam-run");
++        return failures ? 1 : WEXITSTATUS(status);
++    }
+     // The client runs a tool as sh -c with the quoted command line it logs.
+     char *game[] = { (char *)"/bin/sh", (char *)"-c",
+                      (char *)"'/Users/x/Library/Application Support/Steam/compatibilitytools.d/notproton/.'/run"
+@@ -100,6 +131,13 @@ int main(void) {
+                      (char *)"'/Users/x/Library/Application Support/Steam/compatibilitytools.d/notproton'/run run", NULL };
+     tool("/bin/sh", bare, 1, "the tool's directory quoted without a trailing dot is the tool");
+ 
++    char *query[] = {"/compatibilitytools.d/notproton/run", "getcompatpath", NULL};
++    char *installer[] = {"/compatibilitytools.d/notproton/run", "run",
++                         "/Steam/legacycompat/iscriptevaluator.exe", NULL};
++    no_handoff(query[0], query, "getcompatpath must not request activation");
++    no_handoff(installer[0], installer, "installer must not request activation");
++    no_handoff("/bin/sh", game, "shell launch defers activation to the game route");
++
+     // The client's preference, as it is in steamclient.dylib. A Mac without Rosetta cannot
+     // start the x86_64 sh it selects; one with Rosetta runs it translated, which is what the
+     // checks below can see. They need Rosetta to tell the difference, so they are skipped
+-- 
+2.56.0
+
