@@ -1,0 +1,5 @@
+# The list of changes GitHub writes under a release's notes (scripts/publish-release.sh).
+changelog:
+  exclude:
+    labels:
+      - skip-changelog

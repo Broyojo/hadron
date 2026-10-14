@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Make the draft release that scripts/release.sh created public: give it its notes and the update
-# feed (appcast.xml, with the same notes), then publish it as the latest release. Older copies of
-# Hadron.app read the feed from the latest release, so they learn of this version the moment it
-# is published and not before.
+# Make the draft release that scripts/release.sh created public: give it its notes, followed by
+# the list of changes GitHub makes, and the update feed (appcast.xml, with the same notes), then
+# publish it as the latest release. Older copies of Hadron.app read the feed from the latest
+# release, so they learn of this version the moment it is published and not before.
 #
 # Usage: scripts/publish-release.sh <notes.md>
 #
@@ -24,10 +24,18 @@ state=$(gh release view "v$version" --json isDraft,assets \
 [[ "${state#true }" == "sha256:$(shasum -a 256 "$DMG" | cut -d' ' -f1)" ]] ||
     die "the disk image on GitHub is not $DMG"
 
+# The notes as written come first, then GitHub's list of what was merged since the last release:
+# each pull request with its author, who contributed for the first time, and the full comparison.
+# A pull request labelled skip-changelog is left out (.github/release.yml).
+full="$BUILD/package/notes-$version.md"
+changes=$(gh api "repos/{owner}/{repo}/releases/generate-notes" -f tag_name="v$version" --jq .body) ||
+    die "GitHub did not list the changes since the last release"
+printf '%s\n\n%s\n' "$(cat "$notes")" "$changes" > "$full"
+
 feed="$BUILD/package/appcast.xml"
-"$ROOT/scripts/make-appcast.sh" "$APP" "$DMG" "$notes" "$feed"
+"$ROOT/scripts/make-appcast.sh" "$APP" "$DMG" "$full" "$feed"
 gh release upload "v$version" "$feed" --clobber
-gh release edit "v$version" --title "Hadron $version" --notes-file "$notes" --draft=false --latest
+gh release edit "v$version" --title "Hadron $version" --notes-file "$full" --draft=false --latest
 log "published: $(gh release view "v$version" --json url --jq .url)"
 log "the feed: https://github.com/Broyojo/hadron/releases/latest/download/appcast.xml"
 log "now put $BUILD/package/hadron.rb into the tap as Casks/hadron.rb"
