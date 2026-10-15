@@ -1253,12 +1253,14 @@ vkd3d-proton noticed that the typed view was larger, and created it anyway, whic
 usage rule of `vkCreateBufferView`; KosmicKrisp passed it on, and Metal's assertion ends the
 process.
 
-vkd3d-proton patch 0004 clamps the typed view to the device's limit. A typed buffer view in
-D3D12 holds at most 2^27 elements, so only the typed companion of a structured or raw view can
-be this large, and the storage buffer descriptor still covers the whole buffer.
+vkd3d-proton patch 0004 clamps the typed view to the device's limit when it is the companion
+of a raw or structured view's storage buffer descriptor: shaders read that one, and it still
+covers the whole buffer. A typed view proper that is too large is left as before (vkd3d-proton
+reports that games make them and that AMD's and NVIDIA's drivers read past their stated limit);
+on KosmicKrisp it would still fail, and that needs larger texel buffers in the driver.
 `tests/win/d3d12bigview.c` makes the same view over a 2 GB upload buffer and reads two words past
 element 2^28 in a compute shader: before, the process ended with the same assertion; after, both
-words read back as written. Not tried: the game itself, which is not installed here.
+words read back as written, and vkd3d-proton logs the clamp. Not tried: the game itself, which is not installed here.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
