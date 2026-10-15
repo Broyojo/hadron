@@ -1,0 +1,280 @@
+From 45cccd40165f72a271089faadace5a83f871c055 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 15 Oct 2026 00:09:09 -0400
+Subject: [PATCH] webpatch: Show only the graphics options Hadron's renderers
+ read
+
+The Compatibility page's Graphics panel was written for CrossOver. Under
+Hadron, the backend choice (CX_GRAPHICS_BACKEND), both DLSS switches,
+AVX2 for Rosetta, MSync and the high-resolution switch write launch
+options that nothing reads: Hadron picks the renderer by the game's API,
+has no D3DMetal and no NVIDIA libraries, runs x86 code with FEX, has no
+MSync in its Wine and its own launch script.
+
+Keep the Metal HUD and MetalFX upscaling, which DXMT reads, and say that
+the upscaler is for Direct3D 10 and 11 games. Arguments that a removed
+control wrote stay in the launch options untouched.
+---
+ dylib/feats/webpatch.c                  | 30 ++--------
+ dylib/tests/panel-behavior/behavior.js  | 69 +++++++---------------
+ dylib/tests/panel-behavior/switching.js | 76 ++++++++-----------------
+ 3 files changed, 52 insertions(+), 123 deletions(-)
+
+diff --git a/dylib/feats/webpatch.c b/dylib/feats/webpatch.c
+index a2d51db..cc4d246 100644
+--- a/dylib/feats/webpatch.c
++++ b/dylib/feats/webpatch.c
+@@ -104,7 +104,8 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
+     return 1;
+ }
+ 
+-// CrossOver options panel. Not in great shape, but it'll do
++// Graphics options panel: the options Hadron's renderers read. CrossOver's backend choice,
++// DLSS, AVX2 for Rosetta, MSync and its high-resolution switch have no effect there.
+ #define NP_CX_OPTIONS_CSS \
+     "\".MSCXPanel{margin-top:10px}" \
+     ".MSCXPanel .MSCXRow{display:flex;flex-direction:row;padding:9px;margin:0;" \
+@@ -122,9 +123,6 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
+     "T=(ks,l,on,off)=>(0," RT ".jsx)(" BARREL ".Yh,{className:\"MSCXRow\",label:l," \
+     "checked:g(ks[0])===on," \
+     "onChange:v=>s(ks.map(k=>[k,v?on:(off||\"\")]))},ks[0])," \
+-    "b=g(\"CX_GRAPHICS_BACKEND\")," \
+-    "dm=\"\"===b||\"d3dmetal\"===b," \
+-    "dx=\"\"===b||\"dxmt\"===b," \
+     "sw=\"1\"===g(\"DXMT_METALFX_SPATIAL_SWAPCHAIN\")," \
+     "F=\"d3d11.metalSpatialUpscaleFactor=\"," \
+     "cf=g(\"DXMT_CONFIG\")," \
+@@ -132,32 +130,16 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
+     "{data:\"1.5\",label:\"1.5x\"}," \
+     "{data:\"1.72\",label:\"1.72x\"}," \
+     "{data:\"2.0\",label:\"2x\"}," \
+-    "{data:\"3.0\",label:\"3x\"}]," \
+-    "B=[{data:\"\",label:\"Automatic\"}," \
+-    "{data:\"d3dmetal\",label:\"D3DMetal\"}," \
+-    "{data:\"dxmt\",label:\"DXMT\"}," \
+-    "{data:\"dxvk\",label:\"DXVK\"}," \
+-    "{data:\"wined3d\",label:\"WineD3D\"}];" \
++    "{data:\"3.0\",label:\"3x\"}];" \
+     "if(t.unAppID<2147483648&&(t.vecPlatforms||[]).indexOf(\"osx\")>=0" \
+     "&&!t.strCompatToolName)return null;" \
+     "return(0," RT ".jsx)(\"div\",{className:\"MSCXPanel\",children:(0," RT ".jsxs)(" RT ".Fragment,{children:[" \
+     "(0," RT ".jsx)(\"style\",{children:" NP_CX_OPTIONS_CSS "})," \
+     "(0," RT ".jsxs)(" BARREL ".XY,{label:\"Graphics\",children:[" \
+-    "(0," RT ".jsx)(" BARREL ".m,{rgOptions:B,selectedOption:b," \
+-    "onChange:v=>s([[\"CX_GRAPHICS_BACKEND\",v.data]]" \
+-    ".concat(\"\"===v.data||\"d3dmetal\"===v.data?[]:[[\"D3DM_ENABLE_METALFX\",\"\"]])" \
+-    ".concat(\"\"===v.data||\"dxmt\"===v.data?[]:" \
+-    "[[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",\"\"],[\"DXMT_CONFIG\",\"\"]])" \
+-    ".concat(\"dxmt\"===v.data?[]:[[\"DXMT_ENABLE_NVEXT\",\"\"]]))})," \
+-    "T([\"MTL_HUD_ENABLED\"],\"Metal HUD\",\"1\")," \
+-    "dm&&T([\"D3DM_ENABLE_METALFX\"],\"DLSS\",\"1\")," \
+-    "\"dxmt\"===b&&T([\"DXMT_ENABLE_NVEXT\"],\"DLSS\",\"1\")," \
+-    "T([\"ROSETTA_ADVERTISE_AVX\"],\"Advertise AVX2 to Rosetta\",\"1\",\"0\")," \
+-    "T([\"WINEMSYNC\"],\"MSync\",\"1\",\"0\")," \
+-    "T([\"NOTPROTON_RETINA\"],\"High Resolution\",\"1\",\"0\")" \
++    "T([\"MTL_HUD_ENABLED\"],\"Metal HUD\",\"1\")" \
+     "]},\"gfx\")," \
+-    "dx&&(0," RT ".jsx)(" BARREL ".XY," \
+-    "{label:\"MetalFX Upscaling (Samples from the resolution the game is set to)\"," \
++    "(0," RT ".jsx)(" BARREL ".XY," \
++    "{label:\"MetalFX Upscaling (Direct3D 10 and 11 games. Samples from the resolution the game is set to)\"," \
+     "children:(0," RT ".jsx)(" BARREL ".m,{rgOptions:U," \
+     "selectedOption:sw?(0===cf.indexOf(F)?cf.slice(F.length):\"2.0\"):\"\"," \
+     "onChange:v=>s(v.data?[[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",\"1\"],[\"DXMT_CONFIG\",F+v.data]]" \
+diff --git a/dylib/tests/panel-behavior/behavior.js b/dylib/tests/panel-behavior/behavior.js
+index 3438f1c..d9855cb 100644
+--- a/dylib/tests/panel-behavior/behavior.js
++++ b/dylib/tests/panel-behavior/behavior.js
+@@ -21,65 +21,40 @@ for (const form of Object.keys(FORMS)) {
+        'a shortcut renders the panel before a tool name reaches the page');
+ 
+   let r = nodes('');
+-  t.ok(toggles(r).length === 5 && sections(r).length === 2, 'automatic shows five toggles in two sections');
+-  t.ok(r.filter(x => x.type === 'Dropdown').length === 2, 'two dropdowns');
+-  t.ok(!('label' in r.find(x => x.type === 'Dropdown').props), 'the backend dropdown carries no label column');
++  t.ok(toggles(r).join(',') === 'Metal HUD' && sections(r).length === 2,
++       `only the Metal HUD toggle, in two sections (${toggles(r).join(',')})`);
++  t.ok(r.filter(x => x.type === 'Dropdown').length === 1, 'one dropdown: the upscaler');
++  // CrossOver's options that nothing in Hadron reads stay off the page, whatever the
++  // launch options already hold.
++  r = nodes('CX_GRAPHICS_BACKEND=dxmt DXMT_ENABLE_NVEXT=1 WINEMSYNC=1 NOTPROTON_RETINA=1');
++  t.ok(toggles(r).join(',') === 'Metal HUD' && r.filter(x => x.type === 'Dropdown').length === 1,
++       'no backend, DLSS, AVX2, MSync or high-resolution control, even when set');
+ 
+-  r = nodes('CX_GRAPHICS_BACKEND=dxmt');
+-  t.ok(toggles(r).filter(l => l === 'DLSS').length === 1 && sections(r).includes('MetalFX'),
+-       'dxmt keeps one DLSS and keeps MetalFX');
+-  r = nodes('CX_GRAPHICS_BACKEND=d3dmetal');
+-  t.ok(toggles(r).filter(l => l === 'DLSS').length === 1 && !sections(r).includes('MetalFX'),
+-       'd3dmetal keeps one DLSS and hides MetalFX');
+-  // Both flags are labeled DLSS, so a backend showing its own and its neighbor's
+-  // would put the same word on two rows.
+-  for (const b of ['', 'd3dmetal', 'dxmt', 'dxvk', 'wined3d']) {
+-    const ls = toggles(nodes(b ? 'CX_GRAPHICS_BACKEND=' + b : ''));
+-    t.ok(ls.filter(l => l === 'DLSS').length === (b === 'dxvk' || b === 'wined3d' ? 0 : 1),
+-         `${b || 'automatic'} shows DLSS at most once (${ls.join(',')})`);
+-  }
+-  // The row that writes the flag the chosen backend actually reads.
+-  const dlss = (b, key) => {
+-    written.length = 0;
+-    nodes('CX_GRAPHICS_BACKEND=' + b).find(x => x.props.label === 'DLSS').props.onChange(true);
+-    t.ok(last().includes(key + '=1'), `${b} DLSS writes ${key} (${last()})`);
+-  };
+-  dlss('d3dmetal', 'D3DM_ENABLE_METALFX');
+-  dlss('dxmt', 'DXMT_ENABLE_NVEXT');
+-  t.ok(nodes('CX_GRAPHICS_BACKEND=dxmt DXMT_ENABLE_NVEXT=1')
+-         .find(x => x.props.label === 'DLSS').props.checked === true,
+-       'the dxmt DLSS toggle reads as on from its argument');
+-
+-  t.ok(nodes('CX_GRAPHICS_BACKEND=dxmt').find(x => x.type === 'Dropdown').props.selectedOption === 'dxmt',
+-       'the backend dropdown reflects the current value');
+   t.ok(nodes('MTL_HUD_ENABLED=1').find(x => x.props.label === 'Metal HUD').props.checked === true,
+        'a toggle reads as on from its argument');
++  written.length = 0;
++  nodes('').find(x => x.props.label === 'Metal HUD').props.onChange(true);
++  t.ok(last() === 'MTL_HUD_ENABLED=1', `the HUD toggle writes its argument (${last()})`);
+ 
+-  nodes('CX_GRAPHICS_BACKEND=dxmt').filter(x => x.type === 'Dropdown')[1].props.onChange({ data: '2.0' });
+-  t.ok(last().includes('metalSpatialUpscaleFactor=2.0'), 'the upscaler writes its factor');
++  nodes('').find(x => x.type === 'Dropdown').props.onChange({ data: '2.0' });
++  t.ok(last().includes('DXMT_METALFX_SPATIAL_SWAPCHAIN=1') && last().includes('metalSpatialUpscaleFactor=2.0'),
++       `the upscaler writes its switch and factor (${last()})`);
++  t.ok(nodes('DXMT_METALFX_SPATIAL_SWAPCHAIN=1 DXMT_CONFIG=d3d11.metalSpatialUpscaleFactor=1.5')
++         .find(x => x.type === 'Dropdown').props.selectedOption === '1.5',
++       'the upscaler reflects the current factor');
+ 
+-  // The section names the factor, so a label promising a resolution to go and set in
+-  // the game is the wording this replaced.
+-  const upscaler = nodes('CX_GRAPHICS_BACKEND=dxmt').find(x => x.type === 'Section' &&
+-    x.props.label.indexOf('MetalFX') === 0);
++  // The section names the factor and the games it applies to: DXMT alone reads it.
++  const upscaler = nodes('').find(x => x.type === 'Section' && x.props.label.indexOf('MetalFX') === 0);
++  t.ok(/Direct3D 10 and 11 games/.test(upscaler.props.label), 'the upscaler section says which games it is for');
+   t.ok(/Samples from the resolution the game is set to/.test(upscaler.props.label),
+        'the upscaler section says where it samples from');
+-  const factors = nodes('CX_GRAPHICS_BACKEND=dxmt').filter(x => x.type === 'Dropdown')[1]
+-    .props.rgOptions.map(o => o.label);
++  const factors = nodes('').find(x => x.type === 'Dropdown').props.rgOptions.map(o => o.label);
+   t.ok(factors.join(',') === 'Off,1.5x,1.72x,2x,3x', `the factors name themselves (${factors.join(',')})`);
+ 
+-  // The value is the name wine gives the library, which is lower case, and the label is
+-  // the name in a list of four the reader picks from.
+-  const backends = nodes('').find(x => x.type === 'Dropdown').props.rgOptions;
+-  t.ok(backends.map(o => o.label).join(',') === 'Automatic,D3DMetal,DXMT,DXVK,WineD3D',
+-       `the backends name themselves (${backends.map(o => o.label).join(',')})`);
+-  t.ok(backends.map(o => o.data).join(',') === ',d3dmetal,dxmt,dxvk,wined3d',
+-       'the backend values stay as the tool reads them');
+-
+   const root = P({ details: details('') });
+   t.ok(root.props.className === 'MSCXPanel', 'the panel root carries its own class');
+   const classes = nodes('').filter(x => x.type === 'Toggle').map(x => x.props.className);
+-  t.ok(classes.length === 5 && classes.every(c => c === 'MSCXRow'), 'every checkbox carries the row class');
++  t.ok(classes.length === 1 && classes.every(c => c === 'MSCXRow'), 'every checkbox carries the row class');
+   const css = nodes('').filter(x => x.type === 'style');
+   t.ok(css.length === 1 && css[0].props.children.includes('.MSCXPanel .MSCXRow{'),
+        'the panel carries one stylesheet defining the row rule');
+diff --git a/dylib/tests/panel-behavior/switching.js b/dylib/tests/panel-behavior/switching.js
+index f2c1ce7..f3d37d0 100644
+--- a/dylib/tests/panel-behavior/switching.js
++++ b/dylib/tests/panel-behavior/switching.js
+@@ -1,46 +1,27 @@
+-// An option belongs to the backend that reads it, and the control for it goes away
+-// with that backend. An argument left behind is one the page can no longer switch
+-// off, so changing the backend has to take it along.
++// Changing an option rewrites the launch options: its own arguments change, and every
++// other word, the user's own and %command% included, has to come through as it was.
+ 'use strict';
+ const { panel, walk, details, runner, FORMS } = require('./harness');
+ 
+ const emit = process.argv[2];
+ if (!emit) { console.error('usage: switching.js <emit>'); process.exit(2); }
+ 
+-const DXMT = ['DXMT_METALFX_SPATIAL_SWAPCHAIN', 'DXMT_CONFIG'];
+-const D3DM = ['D3DM_ENABLE_METALFX'];
+-const NVEXT = ['DXMT_ENABLE_NVEXT'];
+-const DLSS_ON = 'CX_GRAPHICS_BACKEND=dxmt DXMT_ENABLE_NVEXT=1';
+-const UPSCALED = 'CX_GRAPHICS_BACKEND=dxmt DXMT_METALFX_SPATIAL_SWAPCHAIN=1'
+-               + ' DXMT_CONFIG=d3d11.metalSpatialUpscaleFactor=2.0';
++const OTHERS = ['-novid', 'WINEMSYNC=1', 'CX_GRAPHICS_BACKEND=dxmt', 'DXVK_HUD=fps'];
++const UPSCALED = 'DXMT_METALFX_SPATIAL_SWAPCHAIN=1 DXMT_CONFIG=d3d11.metalSpatialUpscaleFactor=2.0';
+ 
+-// Whichever backend is chosen, the arguments the others own have to be gone and the
+-// arguments no backend owns have to survive.
+ const CASES = [
+-  { to: 'd3dmetal', from: UPSCALED, gone: DXMT, kept: [] },
+-  { to: 'dxvk',     from: UPSCALED, gone: DXMT, kept: [] },
+-  { to: 'wined3d',  from: UPSCALED, gone: DXMT, kept: [] },
+-  { to: 'dxmt',     from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1', gone: D3DM, kept: [] },
+-  { to: 'dxvk',     from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1', gone: D3DM, kept: [] },
+-  // Automatic resolves to either backend, so neither one's arguments are stale.
+-  { to: '',         from: UPSCALED, gone: [], kept: DXMT },
+-  { to: '',         from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1', gone: [], kept: D3DM },
+-  // The dxmt DLSS row is the exception: it shows under dxmt alone, so automatic has
+-  // nowhere to switch the flag off and has to take it along.
+-  { to: '',         from: DLSS_ON, gone: NVEXT, kept: [] },
+-  { to: 'd3dmetal', from: DLSS_ON, gone: NVEXT, kept: [] },
+-  { to: 'dxvk',     from: DLSS_ON, gone: NVEXT, kept: [] },
+-  { to: 'wined3d',  from: DLSS_ON, gone: NVEXT, kept: [] },
+-  { to: 'dxmt',     from: DLSS_ON, gone: [], kept: NVEXT },
+-  // Switching into dxmt drops the other backend's DLSS rather than leaving both set.
+-  { to: 'dxmt',
+-    from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1 DXMT_ENABLE_NVEXT=1',
+-    gone: D3DM, kept: NVEXT },
+-  // Stripping arguments by name is the kind of thing that takes neighbours with it.
+-  { to: 'dxvk',
+-    from: '-novid MTL_HUD_ENABLED=1 WINEMSYNC=1 NOTPROTON_RETINA=1 ' + UPSCALED + ' %command%',
+-    gone: DXMT,
+-    kept: ['-novid', 'MTL_HUD_ENABLED=1', 'WINEMSYNC=1', 'NOTPROTON_RETINA=1', '%command%'] },
++  { what: 'upscaler off', from: OTHERS.join(' ') + ' ' + UPSCALED + ' %command%',
++    act: ns => ns.find(x => x.type === 'Dropdown').props.onChange({ data: '' }),
++    gone: ['DXMT_METALFX_SPATIAL_SWAPCHAIN', 'DXMT_CONFIG'], set: [] },
++  { what: 'upscaler to 3x', from: OTHERS.join(' ') + ' ' + UPSCALED + ' %command%',
++    act: ns => ns.find(x => x.type === 'Dropdown').props.onChange({ data: '3.0' }),
++    gone: [], set: ['DXMT_CONFIG=d3d11.metalSpatialUpscaleFactor=3.0'] },
++  { what: 'HUD on', from: OTHERS.join(' ') + ' %command%',
++    act: ns => ns.find(x => x.props.label === 'Metal HUD').props.onChange(true),
++    gone: [], set: ['MTL_HUD_ENABLED=1'] },
++  { what: 'HUD off', from: 'MTL_HUD_ENABLED=1 ' + OTHERS.join(' ') + ' %command%',
++    act: ns => ns.find(x => x.props.label === 'Metal HUD').props.onChange(false),
++    gone: ['MTL_HUD_ENABLED'], set: [] },
+ ];
+ 
+ let failed = 0;
+@@ -49,26 +30,17 @@ for (const form of Object.keys(FORMS)) {
+   const t = runner(form);
+   for (const c of CASES) {
+     written.length = 0;
+-    const nodes = walk(P({ details: details(c.from) }));
+-    const backend = nodes.find(x => x.type === 'Dropdown' &&
+-      (x.props.rgOptions || []).some(o => o.data === 'dxmt'));
+-    backend.props.onChange({ data: c.to });
++    c.act(walk(P({ details: details(c.from) })));
+     const opts = written.length ? written[written.length - 1].opts : '';
++    const words = opts.split(' ');
+     const stale = c.gone.filter(k => opts.indexOf(k + '=') >= 0);
+-    const lost = c.kept.filter(k => opts.indexOf(k) < 0);
+-    const to = c.to || 'automatic';
+-    t.ok(stale.length === 0 && lost.length === 0,
+-         `switching to ${to} drops ${c.gone.length} and keeps ${c.kept.length}`
+-         + (stale.length ? ` [stale: ${stale}]` : '') + (lost.length ? ` [lost: ${lost}]` : ''));
++    const unset = c.set.filter(w => !words.includes(w));
++    const lost = OTHERS.filter(w => !words.includes(w));
++    t.ok(!stale.length && !unset.length && !lost.length && opts.trim().endsWith('%command%'),
++         `${c.what}: ${opts}` + (stale.length ? ` [stale: ${stale}]` : '')
++         + (unset.length ? ` [not set: ${unset}]` : '') + (lost.length ? ` [lost: ${lost}]` : ''));
+   }
+-  // %command% has to stay last or Steam runs the game before the arguments.
+-  written.length = 0;
+-  const nodes = walk(P({ details: details(UPSCALED + ' %command%') }));
+-  nodes.find(x => x.type === 'Dropdown' &&
+-    (x.props.rgOptions || []).some(o => o.data === 'dxmt')).props.onChange({ data: 'dxvk' });
+-  const opts = written[written.length - 1].opts;
+-  t.ok(opts.trim().endsWith('%command%'), `%command% stays last (${opts})`);
+   failed += t.failed;
+ }
+-console.log(failed ? `\n${failed} failure(s)` : '\nno stale arguments, nothing lost');
++console.log(failed ? `\n${failed} failure(s)` : '\nonly the option changed, nothing else lost');
+ process.exit(failed ? 1 : 0);
+-- 
+2.54.0 (Apple Git-157)
+
