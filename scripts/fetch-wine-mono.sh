@@ -7,7 +7,8 @@
 # pinned here. Its arm64 build also holds the x86 and x86-64 runtimes.
 #
 #   toolchains/wine-mono/wine-mono-<version>   the release as it comes, and its COPYING
-#   dist/share/wine/mono/wine-mono-<version>   a clone of it, for Wine and the runtime
+#   dist/share/wine/mono/wine-mono-<version>   a clone of it, for Wine and the runtime, and the
+#                                              same in dist-dev for a dev build of Wine
 #
 # Usage: scripts/fetch-wine-mono.sh
 source "$(dirname "$0")/env.sh"
@@ -44,8 +45,12 @@ if [[ "$(cat "$dest/.hadron-version" 2>/dev/null)" != "$MONO_VERSION" ]]; then
     rm -f "$archive"
 fi
 
+# Into the release runtime, and the dev build's (scripts/build-wine.sh --dev) when there is one.
 # Wine looks only for the version it asks for; an older one would just take space.
-rm -rf "$DIST/share/wine/mono"
-mkdir -p "$DIST/share/wine/mono"
-cp -Rc "$dest/wine-mono-$MONO_VERSION" "$DIST/share/wine/mono/"
-log "Wine Mono $MONO_VERSION is in $DIST/share/wine/mono"
+for tree in "$DIST" "$ROOT/dist-dev"; do
+    [[ "$tree" == "$DIST" || -d "$tree/share/wine" ]] || continue
+    rm -rf "$tree/share/wine/mono"
+    mkdir -p "$tree/share/wine/mono"
+    cp -Rc "$dest/wine-mono-$MONO_VERSION" "$tree/share/wine/mono/"
+    log "Wine Mono $MONO_VERSION is in $tree/share/wine/mono"
+done
