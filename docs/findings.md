@@ -1240,6 +1240,28 @@ additional minimization delay.
 Install the Steam integration through Hadron's usual setup and restart Steam to
 load it. Replacing the runtime library alone does not update the copy in Steam.
 
+## D3D12: a structured buffer view over 2 GB ended the process (fixed, #36)
+
+Jurassic World Evolution 2 died while starting (issue #56), with Metal's failed assertion
+`MTLTextureDescriptor has width (532676608) greater than the maximum allowed size of 268435456`
+right after vkd3d-proton's `Application is attempting to use more elements in a typed buffer
+(532676608) than supported by device (268435456)`. The game makes a structured shader resource
+view over a 2 GB buffer. vkd3d-proton writes two descriptors for it: a storage buffer, which
+shaders use, and a typed texel buffer of 32-bit words beside it. KosmicKrisp reports Metal's
+limit for a texture buffer, 2^28 texels, as `maxTexelBufferElements`, and that is the real limit.
+vkd3d-proton noticed that the typed view was larger, and created it anyway, which breaks a valid
+usage rule of `vkCreateBufferView`; KosmicKrisp passed it on, and Metal's assertion ends the
+process.
+
+vkd3d-proton patch 0004 clamps the typed view to the device's limit when it is the companion
+of a raw or structured view's storage buffer descriptor: shaders read that one, and it still
+covers the whole buffer. A typed view proper that is too large is left as before (vkd3d-proton
+reports that games make them and that AMD's and NVIDIA's drivers read past their stated limit);
+on KosmicKrisp it would still fail, and that needs larger texel buffers in the driver.
+`tests/win/d3d12bigview.c` makes the same view over a 2 GB upload buffer and reads two words past
+element 2^28 in a compute shader: before, the process ended with the same assertion; after, both
+words read back as written, and vkd3d-proton logs the clamp. Not tried: the game itself, which is not installed here.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

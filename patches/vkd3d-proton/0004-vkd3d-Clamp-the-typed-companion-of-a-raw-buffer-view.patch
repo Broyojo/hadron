@@ -1,0 +1,78 @@
+From 11716bbc3d7be72c28ca6cccd200a1fadb086d7b Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 14 Oct 2026 23:58:00 -0400
+Subject: [PATCH] vkd3d: Clamp the typed companion of a raw buffer view to
+ maxTexelBufferElements.
+
+With typed offset buffers, a view of more elements than the device
+allows was still created at its full size, after a FIXME. That breaks a
+valid usage rule of vkCreateBufferView, and KosmicKrisp, whose limit is
+Metal's 2^28 texels for a texture buffer, turns it into a Metal texture
+that Metal refuses with a failed assertion, which ends the process.
+Jurassic World Evolution 2 makes such a view while starting: a
+structured SRV over a 2 GB buffer, 532676608 words.
+
+For a raw or structured view, the typed descriptor is only a companion
+of the storage buffer descriptor written with it, which shaders read and
+which still covers the whole range. Clamp that companion to the limit.
+A typed view proper is left as it was.
+---
+ libs/vkd3d/resource.c | 21 ++++++++++++++++-----
+ 1 file changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/libs/vkd3d/resource.c b/libs/vkd3d/resource.c
+index 42c7d0bc..2e153cca 100644
+--- a/libs/vkd3d/resource.c
++++ b/libs/vkd3d/resource.c
+@@ -5991,8 +5991,8 @@ static bool vkd3d_buffer_view_get_aligned_view(
+         struct d3d12_device *device, struct d3d12_resource *resource,
+         DXGI_FORMAT format, unsigned int vk_flags,
+         VkDeviceSize first_element, VkDeviceSize num_elements,
+-        VkDeviceSize structured_stride, struct vkd3d_bound_buffer_range *bound_range,
+-        struct vkd3d_view **view)
++        VkDeviceSize structured_stride, bool ssbo_covers_range,
++        struct vkd3d_bound_buffer_range *bound_range, struct vkd3d_view **view)
+ {
+     const struct vkd3d_format *vkd3d_format;
+     VkDeviceSize max_resource_elements;
+@@ -6029,7 +6029,18 @@ static bool vkd3d_buffer_view_get_aligned_view(
+         /* Requantizing the typed offset is shaky business if we overflow max_elements when doing so.
+          * We can always fall back to 0 offset for the difficult and rare cases. */
+ 
+-        if (num_elements > max_elements)
++        if (num_elements > max_elements && ssbo_covers_range)
++        {
++            /* The typed descriptor of a raw or structured view is only a companion of the
++             * storage buffer one, which shaders read and which still covers the whole range.
++             * A larger view breaks a valid usage rule, and a driver that cannot hold it fails. */
++            WARN("Clamping the typed companion of a raw view from %llu to %llu elements.\n",
++                  (unsigned long long)num_elements, (unsigned long long)max_elements);
++            num_elements = max_elements;
++            bound_range->element_offset = 0;
++            bound_range->element_count = num_elements;
++        }
++        else if (num_elements > max_elements)
+         {
+             FIXME("Application is attempting to use more elements in a typed buffer (%llu) than supported by device (%llu).\n",
+                   (unsigned long long)num_elements, (unsigned long long)max_elements);
+@@ -6368,7 +6379,7 @@ static void vkd3d_create_buffer_srv(vkd3d_cpu_descriptor_va_t desc_va,
+             vk_flags = vkd3d_view_flags_from_d3d12_buffer_srv_flags(desc->Buffer.Flags);
+             if (!vkd3d_buffer_view_get_aligned_view(device, resource, desc->Format, vk_flags,
+                     desc->Buffer.FirstElement, desc->Buffer.NumElements, desc->Buffer.StructureByteStride,
+-                    &bound_range, &view))
++                    desc_is_raw && emit_ssbo, &bound_range, &view))
+                 return;
+ 
+             descriptor_info[vk_write_count].buffer_view = view ? view->vk_buffer_view : VK_NULL_HANDLE;
+@@ -7140,7 +7151,7 @@ static void vkd3d_create_buffer_uav(vkd3d_cpu_descriptor_va_t desc_va, struct d3
+ 
+             if (!vkd3d_buffer_view_get_aligned_view(device, resource, desc->Format, flags,
+                     desc->Buffer.FirstElement, desc->Buffer.NumElements,
+-                    desc->Buffer.StructureByteStride, &bound_range, &view))
++                    desc->Buffer.StructureByteStride, desc_is_raw && emit_ssbo, &bound_range, &view))
+                 return;
+ 
+             descriptor_info[vk_write_count].buffer_view = view ? view->vk_buffer_view : VK_NULL_HANDLE;
+-- 
+2.54.0 (Apple Git-157)
+
