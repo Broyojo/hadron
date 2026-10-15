@@ -186,6 +186,17 @@ else
     echo "OpenGL needs Zink and KosmicKrisp: run scripts/build-vulkan.sh" >&2
     exit 1
 fi
+# Media Foundation and DirectShow decode through GStreamer (winegstreamer, scripts/build-gstreamer.sh):
+# only the runtime's own plugins, and a registry of them for each build of the runtime, so that two
+# builds never take each other's.
+gst="$ROOT/dist/gstreamer"
+if [ -d "$gst/lib/gstreamer-1.0" ]; then
+    mkdir -p "$HOME/Library/Caches/Hadron"
+    set -- "GST_PLUGIN_SYSTEM_PATH_1_0=$gst/lib/gstreamer-1.0" \
+           "GST_PLUGIN_SCANNER_1_0=$gst/libexec/gstreamer-1.0/gst-plugin-scanner" \
+           "GST_REGISTRY_1_0=$HOME/Library/Caches/Hadron/gstreamer-registry-$(basename "$ROOT").bin" \
+           ${GST_DEBUG:+"GST_DEBUG=$GST_DEBUG"} "$@"
+fi
 # A shader Metal refuses to compile is a driver bug: KosmicKrisp saves its source here.
 mkdir -p "$HADRON_LOGS/failed-msl"
 set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"

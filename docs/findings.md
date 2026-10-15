@@ -1323,6 +1323,36 @@ mscoree logs that a registry key is missing until Wine next updates the prefix a
 support package. A new prefix records .NET 4.8.1 as installed, so Steam's install scripts skip
 the .NET redistributable. Not tried: Fable itself, which is not installed here, and any game in
 it; whether Fable's mixed native and .NET code runs on Wine Mono is the next question.
+## Media Foundation could not play anything: no GStreamer (fixed, #38)
+
+A game that plays a video or sound file through Media Foundation, the usual path on Windows for
+Unity's VideoPlayer and Unreal's media framework, got nothing (issue #69; likely part of #59).
+`tests/win/mfplay.c` reads a file through a source reader and counts what it decodes. On 0.3.0 an
+MP4 (H.264 and AAC) failed at once: `class {317df618-...} not registered`,
+`MFCreateSourceReaderFromURL failed: 0xc00d36c4`. Two parts were missing:
+
+- Wine's MP4, AVI, ASF, WAV and MP3 sources hand a file to its GStreamer handler unless a registry
+  value says otherwise, even when FFmpeg (winedmo) could read it, and Hadron had no GStreamer.
+- With that value set, the file opened through FFmpeg, and then no decoder existed: in this Wine
+  the H.264 and AAC decoders (and the others) are winegstreamer's, and winedmo only demuxes.
+  Upstream Wine's winedmo is still demux-only.
+
+So Hadron now ships GStreamer, as Proton does: `scripts/build-gstreamer.sh` builds 1.28.8's core,
+the base plugins winegstreamer uses (decodebin, conversion, resampling), demuxers for MP4,
+Matroska, AVI, WAV and ASF, the stream parsers, and gst-libav, which decodes with Hadron's own
+FFmpeg (now built with libavfilter, without filters, because gst-libav links it). All LGPL; GLib
+comes from Homebrew and is bundled. Wine is configured with it and builds winegstreamer.
+`scripts/play` gives the game only the runtime's plugins and a registry for each runtime build in
+`~/Library/Caches/Hadron`. It adds 17 MB of GStreamer and a few MB of GLib to the runtime.
+
+Measured with `mfplay.exe`: an MP4 decodes all 60 frames and 88 audio buffers, 64-bit and 32-bit;
+a WMV with WMA audio decodes too. From a packaged runtime, in a fresh prefix, the same, and the
+registry lists only the runtime's 20 plugins. A prefix made before this is updated by Wine on the
+next start (13 s once) and then plays. WebM does not open (`0xc00d36bb`), with VP9 and Opus or
+Vorbis; Windows' own Media Foundation needs an add-on for WebM too. winegstreamer logs
+`gst_video_info_from_caps: assertion 'gst_caps_is_fixed (caps)' failed` once per stream, which
+did not affect decoding. Not tried: DirectShow playback (quartz, which now also has GStreamer to
+use), and a game.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 

@@ -4,7 +4,8 @@
 #
 # Decoding only and under the LGPL: no encoders, muxers, devices or filters, nothing that needs
 # --enable-gpl, and no external libraries. That is what a release can carry; Homebrew's FFmpeg
-# links two dozen libraries, among them the GPL encoders x264 and x265.
+# links two dozen libraries, among them the GPL encoders x264 and x265. libavfilter is built,
+# without any filters, because GStreamer's FFmpeg plugin links it (scripts/build-gstreamer.sh).
 source "$(dirname "$0")/env.sh"
 
 FF="$SRC/ffmpeg"
@@ -12,13 +13,16 @@ FF="$SRC/ffmpeg"
 mkdir -p "$BUILD/ffmpeg"
 cd "$BUILD/ffmpeg"
 
-if [[ ! -f config.h ]]; then
+options=(--prefix="$DIST/ffmpeg" --cc=/usr/bin/clang
+    --enable-shared --disable-static --disable-programs --disable-doc --disable-debug
+    --disable-autodetect --disable-network
+    --disable-encoders --disable-muxers --disable-devices --disable-filters
+    --disable-avdevice --disable-swscale)
+# Configured again when the options change.
+if [[ ! -f config.h || "$(cat .hadron-options 2>/dev/null)" != "${options[*]}" ]]; then
     log "configuring FFmpeg"
-    "$FF/configure" --prefix="$DIST/ffmpeg" --cc=/usr/bin/clang \
-        --enable-shared --disable-static --disable-programs --disable-doc --disable-debug \
-        --disable-autodetect --disable-network \
-        --disable-encoders --disable-muxers --disable-devices --disable-filters \
-        --disable-avdevice --disable-avfilter --disable-swscale >/dev/null
+    "$FF/configure" "${options[@]}" >/dev/null
+    echo "${options[*]}" > .hadron-options
 fi
 log "building FFmpeg"
 make -j"$JOBS" >/dev/null

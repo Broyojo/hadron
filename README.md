@@ -162,6 +162,7 @@ Then:
 scripts/setup-toolchain.sh     # Homebrew dependencies and llvm-mingw
 scripts/fetch.sh               # clone the upstream sources and apply patches/
 scripts/build-ffmpeg.sh        # FFmpeg, decoding only, for Wine's media playback
+scripts/build-gstreamer.sh     # GStreamer on that FFmpeg, for Wine's media decoders
 scripts/build-vulkan.sh        # KosmicKrisp, Zink, vkd3d-proton and DXVK's DXGI (before Wine, which looks for Zink's EGL)
 scripts/build-wine.sh          # Wine -> dist/
 scripts/fetch-wine-mono.sh     # Wine Mono, .NET for Wine -> dist/share/wine/mono

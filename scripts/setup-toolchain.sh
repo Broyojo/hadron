@@ -7,7 +7,8 @@ source "$(dirname "$0")/env.sh"
 LLVM_MINGW_VERSION="${LLVM_MINGW_VERSION:-20260922}"
 
 log "installing Homebrew dependencies"
-brew install llvm lld bison meson ninja cmake pkg-config freetype gnutls molten-vk vulkan-headers
+# GLib is what GStreamer is built on (scripts/build-gstreamer.sh); the runtime carries it.
+brew install llvm lld bison meson ninja cmake pkg-config freetype gnutls molten-vk vulkan-headers glib
 
 TOOLCHAINS="$ROOT/toolchains"
 dest="$TOOLCHAINS/llvm-mingw"
