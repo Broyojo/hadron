@@ -1,0 +1,109 @@
+From ed7678612caeb281d9383fe5bc48040ee812ebb0 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 15 Oct 2026 13:53:11 -0400
+Subject: [PATCH 31/33] winemac.drv: Move windows with a display that a mode
+ change moves.
+
+macOS moves a display other than the main one when its new mode would
+overlap another display, and moves it back when the mode is restored. A
+fullscreen window stayed at the display's old position, off the
+display. Move the windows placed at a display's top-left corner along
+with it, as a window stays on its monitor on Windows.
+---
+ dlls/winemac.drv/cocoa_app.m | 55 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 55 insertions(+)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index 4fe5dd2bda..606cd20383 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -823,9 +823,59 @@ - (BOOL) captureDisplay:(CGDirectDisplayID)displayID
+         return CGDisplayIsCaptured(displayID) || CGDisplayCapture(displayID) == CGDisplayNoErr;
+     }
+ 
++    // Where each active display's top-left corner is, in Win32 (CG) coordinates.
++    - (NSDictionary*) displayOrigins
++    {
++        CGDirectDisplayID ids[32];
++        uint32_t count, i;
++        NSMutableDictionary* origins = [NSMutableDictionary dictionary];
++
++        if (CGGetActiveDisplayList(32, ids, &count) == kCGErrorSuccess)
++        {
++            for (i = 0; i < count; i++)
++            {
++                CGRect bounds = CGDisplayBounds(ids[i]);
++                origins[@(ids[i])] = [NSValue valueWithPoint:NSMakePoint(bounds.origin.x, bounds.origin.y)];
++            }
++        }
++        return origins;
++    }
++
++    // A mode change can move a display other than the main one: macOS moves a display that would
++    // overlap another, and moves it back when the mode is restored. A window placed at a display's
++    // top-left corner, as a fullscreen window is, goes with it, as it stays on its monitor on
++    // Windows.
++    - (void) moveWindowsWithDisplaysFrom:(NSDictionary*)before
++    {
++        NSDictionary* after = [self displayOrigins];
++
++        for (NSNumber* displayID in before)
++        {
++            NSPoint from = [before[displayID] pointValue], to;
++
++            if (!after[displayID]) continue;
++            to = [after[displayID] pointValue];
++            if (NSEqualPoints(from, to)) continue;
++
++            for (NSWindow* window in [NSApp windows])
++            {
++                NSRect frame;
++
++                if (![window isKindOfClass:[WineWindow class]] || [window isMiniaturized]) continue;
++                frame = [window frame];
++                [self flipRect:&frame];
++                if (fabs(frame.origin.x - from.x) >= 0.5 || fabs(frame.origin.y - from.y) >= 0.5) continue;
++                frame.origin = to;
++                [self flipRect:&frame];
++                [window setFrameOrigin:frame.origin];
++            }
++        }
++    }
++
+     - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
+     {
+         BOOL ret = FALSE;
++        NSDictionary* origins = [self displayOrigins];
+         NSNumber* displayIDKey = [NSNumber numberWithUnsignedInt:displayID];
+         CGDisplayModeRef originalMode;
+ 
+@@ -931,7 +981,10 @@ - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
+         }
+ 
+         if (ret)
++        {
++            [self moveWindowsWithDisplaysFrom:origins];
+             [self adjustWindowLevels];
++        }
+ 
+         return ret;
+     }
+@@ -1137,6 +1190,7 @@ - (void) handleCommandTab
+ 
+             if ([originalDisplayModes count] || displaysCapturedForFullscreen)
+             {
++                NSDictionary* origins = [self displayOrigins];
+                 NSNumber* displayID;
+                 for (displayID in originalDisplayModes)
+                 {
+@@ -1149,6 +1203,7 @@ - (void) handleCommandTab
+                 CGReleaseAllDisplays();
+                 [originalDisplayModes removeAllObjects];
+                 displaysCapturedForFullscreen = FALSE;
++                [self moveWindowsWithDisplaysFrom:origins];
+             }
+ 
+             for (app in [[NSWorkspace sharedWorkspace] runningApplications])
+-- 
+2.54.0 (Apple Git-157)
+
