@@ -165,6 +165,7 @@ scripts/build-ffmpeg.sh        # FFmpeg, decoding only, for Wine's media playbac
 scripts/build-gstreamer.sh     # GStreamer on that FFmpeg, for Wine's media decoders
 scripts/build-vulkan.sh        # KosmicKrisp, Zink, vkd3d-proton and DXVK's DXGI (before Wine, which looks for Zink's EGL)
 scripts/build-wine.sh          # Wine -> dist/
+scripts/fetch-wine-mono.sh     # Wine Mono, .NET for Wine -> dist/share/wine/mono
 scripts/build-fex.sh           # FEX's emulator DLLs
 scripts/build-llvm15.sh        # static LLVM 15, for DXMT's shader compiler
 scripts/build-dxmt.sh          # Direct3D 10/11

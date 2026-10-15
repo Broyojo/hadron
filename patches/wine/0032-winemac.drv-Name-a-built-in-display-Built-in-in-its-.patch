@@ -1,0 +1,41 @@
+From 0b10f16242940de563c133a410610fcdb3f01496 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 15 Oct 2026 14:11:29 -0400
+Subject: [PATCH 32/33] winemac.drv: Name a built-in display "Built-in" in its
+ generated EDID.
+
+A display whose EDID cannot be read, as the built-in panel of an Apple
+silicon Mac, gets a generated one named "Wine Monitor", and games list
+the Mac's own screen under that name. Call a built-in display "Built-in"
+instead; the descriptor holds 13 characters.
+---
+ dlls/winemac.drv/cocoa_display.m | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_display.m b/dlls/winemac.drv/cocoa_display.m
+index 647a863ff1..015f2b356e 100644
+--- a/dlls/winemac.drv/cocoa_display.m
++++ b/dlls/winemac.drv/cocoa_display.m
+@@ -857,10 +857,16 @@ static CFDataRef generate_edid(CGDirectDisplayID display_id, uint32_t vendor_num
+         timings++;
+     }
+ 
+-    /* display product name */
++    /* display product name: up to 13 characters, ended by a line feed and padded with spaces */
+     p[3] = 0xfc;
+-    strcpy((char *)p + 5, "Wine Monitor");
+-    p[17] = 0x0a;
++    {
++        const char *name = CGDisplayIsBuiltin(display_id) ? "Built-in" : "Wine Monitor";
++        size_t len = strlen(name);
++
++        memcpy(p + 5, name, len);
++        p[5 + len] = 0x0a;
++        memset(p + 6 + len, ' ', 12 - len);
++    }
+ 
+     /* checksum */
+     sum = 0;
+-- 
+2.54.0 (Apple Git-157)
+

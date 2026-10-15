@@ -78,6 +78,9 @@ rm -rf "$OUT/dist/include" "$OUT/dist/share/man" "$OUT/dist/share/aclocal" "$OUT
        "$OUT/dist"/{mesa,mesa-zink,ffmpeg,gstreamer}/include "$OUT/dist"/{ffmpeg,gstreamer}/share \
        "$OUT/dist/gstreamer/bin" "$OUT/dist/gstreamer/libexec/gstreamer-1.0/gst-completion-helper"
 find "$OUT/dist" -name '*.a' -delete
+# Wine Mono, which Wine's mscoree sets up in each new prefix (scripts/fetch-wine-mono.sh).
+mono=$(sed -n 's/^#define WINE_MONO_VERSION "\(.*\)"/\1/p' "$SRC/wine/dlls/mscoree/mscoree_private.h")
+[[ -n "$mono" && -d "$OUT/dist/share/wine/mono/wine-mono-$mono" ]] || die "missing Wine Mono $mono, run scripts/fetch-wine-mono.sh"
 for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ winemaker wmc wrc; do
     rm -f "$OUT/dist/bin/$tool"
 done

@@ -1,0 +1,39 @@
+From d8ae0863bdeb4ea2ba3682fdd8b05ae122e31f1d Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 15 Oct 2026 14:11:30 -0400
+Subject: [PATCH 33/33] win32u: Emulate display mode changes by default on
+ macOS.
+
+A real mode change on macOS captures the display, can make macOS
+rearrange the displays, gives a Retina display a scaled mode whose
+backing is larger than the panel, and is undone and redone on every
+switch to another app. Emulate it instead, as native Mac games render
+at a size of their choice and leave the display alone: the game sees
+the mode it asked for, and its window is scaled to the display with
+its aspect ratio kept. EmulateModeset in the registry still turns it
+off.
+---
+ dlls/win32u/sysparams.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/dlls/win32u/sysparams.c b/dlls/win32u/sysparams.c
+index 6ed5b77232..434494aa59 100644
+--- a/dlls/win32u/sysparams.c
++++ b/dlls/win32u/sysparams.c
+@@ -165,7 +165,13 @@ static INT64 last_query_display_time;
+ static UINT64 monitor_update_serial;
+ static pthread_mutex_t display_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
++/* On macOS a real mode change captures the display, can rearrange the displays and
++ * drops back on every switch to another app; emulate it unless EmulateModeset says not to. */
++#ifdef __APPLE__
++BOOL emulate_modeset = TRUE;
++#else
+ BOOL emulate_modeset = FALSE;
++#endif
+ BOOL decorated_mode = TRUE;
+ UINT64 thunk_lock_callback = 0;
+ 
+-- 
+2.54.0 (Apple Git-157)
+
