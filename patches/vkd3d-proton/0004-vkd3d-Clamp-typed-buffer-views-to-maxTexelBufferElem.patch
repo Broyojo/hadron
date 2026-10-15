@@ -1,0 +1,42 @@
+From 3c31ce9ee090c034c3d3af26a77b52438b31069c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 14 Oct 2026 23:58:00 -0400
+Subject: [PATCH] vkd3d: Clamp typed buffer views to maxTexelBufferElements.
+
+With typed offset buffers, a view of more elements than the device
+allows was still created at its full size, after a FIXME. That breaks a
+valid usage rule of vkCreateBufferView, and KosmicKrisp, whose limit is
+Metal's 2^28 texels for a texture buffer, turns it into a Metal texture
+that Metal refuses with a failed assertion, which ends the process.
+Jurassic World Evolution 2 makes such a view while starting: a
+structured SRV over a 2 GB buffer, 532676608 words.
+
+A typed buffer view in D3D12 holds at most 2^27 elements, so only the
+typed companion of a structured or raw view gets this large, and the
+storage buffer descriptor written with it covers the whole range. Clamp
+the typed view to the limit instead.
+---
+ libs/vkd3d/resource.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/libs/vkd3d/resource.c b/libs/vkd3d/resource.c
+index 42c7d0bc..d6895840 100644
+--- a/libs/vkd3d/resource.c
++++ b/libs/vkd3d/resource.c
+@@ -6031,8 +6031,12 @@ static bool vkd3d_buffer_view_get_aligned_view(
+ 
+         if (num_elements > max_elements)
+         {
+-            FIXME("Application is attempting to use more elements in a typed buffer (%llu) than supported by device (%llu).\n",
++            /* A larger view breaks a valid usage rule, and a driver that cannot hold it crashes.
++             * Structured and raw buffers get here when the typed descriptor is only a companion
++             * of the storage buffer one, which still covers the whole range. */
++            FIXME("Application is attempting to use more elements in a typed buffer (%llu) than supported by device (%llu), clamping.\n",
+                   (unsigned long long)num_elements, (unsigned long long)max_elements);
++            num_elements = max_elements;
+             bound_range->element_offset = 0;
+             bound_range->element_count = num_elements;
+         }
+-- 
+2.54.0 (Apple Git-157)
+
