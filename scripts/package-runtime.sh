@@ -74,8 +74,9 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 cp -Rc "$DIST" "$OUT/dist"
 # What only a build needs: headers, import and static libraries, pkg-config files, Wine's tools.
-rm -rf "$OUT/dist/include" "$OUT/dist/share/man" "$OUT/dist/share/aclocal" "$OUT/dist"/{.,mesa,mesa-zink,ffmpeg}/lib/pkgconfig \
-       "$OUT/dist"/{mesa,mesa-zink,ffmpeg}/include "$OUT/dist/ffmpeg/share"
+rm -rf "$OUT/dist/include" "$OUT/dist/share/man" "$OUT/dist/share/aclocal" "$OUT/dist"/{.,mesa,mesa-zink,ffmpeg,gstreamer}/lib/pkgconfig \
+       "$OUT/dist"/{mesa,mesa-zink,ffmpeg,gstreamer}/include "$OUT/dist"/{ffmpeg,gstreamer}/share \
+       "$OUT/dist/gstreamer/bin" "$OUT/dist/gstreamer/libexec/gstreamer-1.0/gst-completion-helper"
 find "$OUT/dist" -name '*.a' -delete
 for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ winemaker wmc wrc; do
     rm -f "$OUT/dist/bin/$tool"
@@ -125,7 +126,7 @@ machos=()
 while IFS= read -r f; do
     [[ "$f" == */wine.app/* ]] && continue
     file -b "$f" | grep -q 'Mach-O' && machos+=("$f")
-done < <(find "$OUT/dist/bin" "$OUT/dist/lib" "$OUT/dist/mesa" "$OUT/dist/mesa-zink" "$OUT/dist/ffmpeg" -type f \
+done < <(find "$OUT/dist/bin" "$OUT/dist/lib" "$OUT/dist/mesa" "$OUT/dist/mesa-zink" "$OUT/dist/ffmpeg" "$OUT/dist/gstreamer" -type f \
               \( -name '*.so' -o -name '*.dylib' -o -perm +111 \) ! -path '*-windows/*' ! -path '*/ext/*')
 
 log "bundling the libraries from Homebrew"
@@ -152,8 +153,10 @@ for f in "${machos[@]}"; do
     id=$(otool -D "$f" | tail -n +2)
     [[ "$id" == "$DIST"/* ]] && install_name_tool -id "@rpath/$(basename "$id")" "$f" 2>/dev/null
     # A search path into Homebrew (Zink's, for the Vulkan loader) becomes one to dist/ext/lib.
+    # One into this checkout (GStreamer's, to its own lib) becomes the same place in the runtime.
     while IFS= read -r rpath; do
         [[ "$rpath" == "$BREW"/* ]] && install_name_tool -rpath "$rpath" "@loader_path/$(relpath "$EXT" "$dir")" "$f" 2>/dev/null
+        [[ "$rpath" == "$DIST"/* ]] && install_name_tool -rpath "$rpath" "@loader_path/$(relpath "$OUT/dist/${rpath#"$DIST"/}" "$dir")" "$f" 2>/dev/null
     done < <(otool -l "$f" | awk '/LC_RPATH/ {getline; getline; print $2}')
 done
 # The Vulkan loader finds the driver through a manifest: relative to the manifest, not this checkout.
@@ -257,7 +260,8 @@ CRATES
 sort -u "$OUT/licenses/.bundled" | while read -r formula ver; do
     mkdir -p "$OUT/licenses/$formula"
     found=
-    for f in "$BREW/Cellar/$formula/$ver"/{LICENSE,LICENCE,COPYING,NOTICE}*; do
+    # The usual names, and the licence's own SPDX name, as GLib's package has it.
+    for f in "$BREW/Cellar/$formula/$ver"/{LICENSE,LICENCE,COPYING,NOTICE,LGPL-,GPL-,MIT,BSD-}*; do
         [[ -f "$f" ]] && cp "$f" "$OUT/licenses/$formula/" && found+="$(basename "$f") "
     done
     [[ -n "$found" ]] || die "Homebrew's $formula $ver has no licence file to carry"

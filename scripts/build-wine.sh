@@ -43,13 +43,16 @@ egl_state="no Zink"
 # The same for Hadron's own FFmpeg (scripts/build-ffmpeg.sh): Wine's media playback links it in
 # place of whatever FFmpeg the system has.
 [[ -f "$ROOT/dist/ffmpeg/lib/pkgconfig/libavcodec.pc" ]] && egl_state+=", own FFmpeg"
+# And for Hadron's GStreamer (scripts/build-gstreamer.sh), which Wine's Media Foundation and
+# DirectShow decoders (winegstreamer) are built on.
+[[ -f "$ROOT/dist/gstreamer/lib/pkgconfig/gstreamer-1.0.pc" ]] && egl_state+=", own GStreamer"
 [[ "$(cat .hadron-egl 2>/dev/null)" == "$egl_state" ]] || reconfigure=1
 
 if [[ ! -f Makefile || -n $reconfigure ]]; then
     log "configuring wine ($variant)"
     # Unix side: Apple clang (Objective-C/AppKit for winemac.drv, SDK defaults).
     # PE side: Homebrew clang targeting *-windows, linked with lld-link.
-    PKG_CONFIG_PATH="$ROOT/dist/ffmpeg/lib/pkgconfig:$BREW/opt/freetype/lib/pkgconfig:$BREW/opt/gnutls/lib/pkgconfig:$ROOT/dist/mesa-zink/lib/pkgconfig" \
+    PKG_CONFIG_PATH="$ROOT/dist/ffmpeg/lib/pkgconfig:$ROOT/dist/gstreamer/lib/pkgconfig:$BREW/opt/freetype/lib/pkgconfig:$BREW/opt/gnutls/lib/pkgconfig:$ROOT/dist/mesa-zink/lib/pkgconfig" \
     CPPFLAGS="-I$BREW/include $DEFS" \
     LDFLAGS="-L$BREW/lib" \
     CROSSCFLAGS="-g -O2 $DEFS" \
@@ -65,7 +68,8 @@ if [[ ! -f Makefile || -n $reconfigure ]]; then
     echo "$egl_state" > .hadron-egl
     # make does not notice that a library is now found somewhere else: build the ones that follow
     # the state above again.
-    rm -f dlls/winedmo/*.o dlls/winedmo/winedmo.so dlls/winemac.drv/*.o dlls/winemac.drv/winemac.so
+    rm -f dlls/winedmo/*.o dlls/winedmo/winedmo.so dlls/winemac.drv/*.o dlls/winemac.drv/winemac.so \
+          dlls/winegstreamer/*.o dlls/winegstreamer/winegstreamer.so
 fi
 
 log "building wine ($variant) with $JOBS jobs"
