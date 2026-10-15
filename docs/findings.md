@@ -1298,6 +1298,31 @@ display's full pixel size is #71; fullscreen in its own Space is #72.
 
 The built-in display of an Apple silicon Mac has no EDID Wine can read, and the one Wine
 generates for it was named "Wine Monitor"; games now list it as "Built-in" (Wine 0032).
+## .NET: mscoree was switched off for every game (fixed, #37)
+
+Fable Anniversary exited at once (issue #57): `Library mscoree.dll (which is needed by ... Fable
+Anniversary.exe) not found`, status c0000135. Its executable imports `mscoree.dll`, the .NET
+runtime's loader. Wine has that library, but `scripts/play` started every game with
+`WINEDLLOVERRIDES="mscoree,mshtml=;..."`, and `scripts/steam-run` made and updated prefixes the
+same way, so that wineboot would not stop at the Wine Mono and Gecko install dialogs. A program
+that links against mscoree then cannot load at all, and nothing that needs .NET can run.
+
+The runtime now carries Wine Mono 11.3.0, the version this Wine asks for, as Proton does, in
+`dist/share/wine/mono/wine-mono-11.3.0` (`scripts/fetch-wine-mono.sh`: the project's arm64 release,
+which also holds the x86 and x86-64 runtimes, checked against a pinned checksum). Wine finds a
+shared install there by itself, and when a prefix is made, mscoree installs the small support
+package from it without a dialog. Only `mshtml` is still switched off. Measured with a new prefix:
+wineboot took 23 s instead of 18 s, once, and the prefix grew by 7 MB; the runtime grows by
+240 MB on disk, about 43 MB compressed.
+
+`tests/win/mscoree-import.c` imports mscoree as Fable does: with mscoree off it fails with Fable's
+error; now the 32-bit and the 64-bit builds load and print the runtime version. C# programs
+compiled with Wine Mono's own `mcs.exe` (itself a .NET program) run as 32-bit and 64-bit, from a
+checkout and from a packaged runtime. In a prefix made before this change, .NET programs run too;
+mscoree logs that a registry key is missing until Wine next updates the prefix and installs the
+support package. A new prefix records .NET 4.8.1 as installed, so Steam's install scripts skip
+the .NET redistributable. Not tried: Fable itself, which is not installed here, and any game in
+it; whether Fable's mixed native and .NET code runs on Wine Mono is the next question.
 
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
