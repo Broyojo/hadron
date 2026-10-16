@@ -1329,7 +1329,8 @@ On a 16K host, decommitting/recommitting a 4K boundary page retained old bytes.
 Wine patch 0034 clears partial host pages through temporary writable aliases,
 without relaxing committed neighbours' protections; MAP_JIT uses per-thread write
 mode. Both aliases are prepared before clearing, so preparation failure leaves
-contents intact. Whole-view decommit still remaps the rounded host range, including
+contents intact. Alias writes invalidate the original instruction-cache range too.
+Whole-view decommit still remaps the rounded host range, including
 a view smaller than one host page, to release its backing. Cost: up to two alias
 map/protect/unmap cycles for partial boundaries. Other hosts keep their prior behaviour.
 
