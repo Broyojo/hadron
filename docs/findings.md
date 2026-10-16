@@ -1336,11 +1336,16 @@ a view smaller than one host page, to release its backing. Other hosts keep thei
 
 Patch 0035 makes it cheap: a host page that is already writable, the usual case, is cleared in
 place with no alias, and mprotect runs afterwards only when the host page's protection changes.
-Aliases remain for read-only, executable and no-access host pages. Decommit plus recommit of a
-4K page inside a host page, x86_64 / ARM64 on an M2 Pro: 1.2 / 0.8 us before, 5.2 / 4.7 us with
-aliases always, 1.3 / 0.9 us with 0035; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12
-and 2.1 / 1.7 us. `tests/win/decommit-neighbours.c` covers the alias path (read-only,
-executable and no-access neighbours), which main fails.
+Aliases remain for read-only, executable and no-access host pages. A partial host page with
+no other committed guest page is replaced whole instead, as a whole-view decommit is, which
+releases its backing rather than faulting it in.
+
+Decommit plus recommit, x86_64 / ARM64 on an M2 Pro (`tests/win/decommit-bench.c`): a 4K page
+inside a host page 1.2 / 0.8 us before, 5.2 / 4.7 us with aliases always, 1.3 / 0.9 us with
+0035; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12 and 2.1 / 1.7 us; a 4K page alone
+in its host page 3.2 / 2.9 us with 0035, the cost of a whole host page.
+`tests/win/decommit-neighbours.c` covers the alias path (read-only, executable and no-access
+neighbours), which main fails.
 
 The zero/preservation regression covers 19 cases on x86_64 and i386, including a
 whole 4K views with RW, read-only and RX protections. The Windows ARM64 concurrent read-only/RX-neighbour tests reject
