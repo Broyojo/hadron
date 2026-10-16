@@ -70,3 +70,13 @@ Apple's API contract and implementation were consulted:
 [mach_vm_remap](https://developer.apple.com/documentation/kernel/1402218-mach_vm_remap),
 [XNU VM interfaces](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/vm/vm_user.c),
 and the installed SDK's pthread/Mach declarations. No Metal/platform defect is claimed.
+
+The ARM64 probe also has an `--execute` mode: neighbouring native code runs concurrently
+from an executable/read-only host page while its other guest page is decommitted. The signed
+Wine test passes with zero successful protected writes, 371 caught write faults, unchanged
+neighbour bytes and zero wrong code results. This directly exercises executable ordinary
+pages, beyond the separate native MAP_JIT mechanism check.
+
+Final official queue check passes Wine (34), DXMT (3), and current-main NotProton (6).
+The activation fixture was rerun against that current six-patch NotProton source and passes
+all 24 routes. Other unchanged components were not fetched and are explicitly skipped.
