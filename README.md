@@ -186,16 +186,6 @@ Steam then runs games straight from this checkout. `scripts/build-app.sh` builds
 around a self-contained copy of the runtime (`scripts/package-runtime.sh`), with no reference to
 the checkout or to Homebrew: what a release carries.
 
-### Explicit alternate entry points
-
-Set `HADRON_GAME_EXE=Game.exe` as a plain Steam launch option or in your personal Hadron
-`games.conf` to choose an installed executable directly. It must be a non-symlink file in the
-install root. Only a main `waitforexitandrun` entry from that root is redirected; helper runs
-are unchanged. Arguments are retained: remove launcher-only arguments if necessary. Steam
-integration and the watchdog still run. Remove the option to restore the original launcher.
-This is an opt-in preference, not an automatic game-specific compatibility fix.
-See [testing and limitations](docs/fixes/steam-direct-entry.md).
-
 ## Running and debugging
 
 ```sh
@@ -207,6 +197,10 @@ scripts/stop                              # stop every Hadron process
 Each Steam launch logs to `steamapps/compatdata/<appid>/hadron-run.log` and to
 `build/logs/<appid>-*.log` (`~/Library/Logs/Hadron` for the installed app). Settings are environment variables, given as a game's Steam launch
 options or per app ID in `config/games.conf`; `scripts/play` documents them.
+
+To explicitly select another installed executable, use `HADRON_GAME_EXE=Game.exe` in Steam's
+launch options or your personal Hadron `games.conf`. This keeps Steam and the watchdog active;
+see [entry-point selection, validation and limitations](docs/fixes/steam-direct-entry.md).
 
 `scripts/build-wine.sh --dev` builds a variant that needs no entitlement, with Windows' fixed
 low addresses moved above 4GB, and `scripts/build-fex.sh --dev` gives it the x86 translator. It
