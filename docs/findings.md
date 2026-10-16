@@ -1323,6 +1323,7 @@ mscoree logs that a registry key is missing until Wine next updates the prefix a
 support package. A new prefix records .NET 4.8.1 as installed, so Steam's install scripts skip
 the .NET redistributable. Not tried: Fable itself, which is not installed here, and any game in
 it; whether Fable's mixed native and .NET code runs on Wine Mono is the next question.
+
 ## macOS partial decommit retained stale guest data (#42)
 
 On a 16K host, decommitting/recommitting a 4K boundary page retained old bytes.
@@ -1331,14 +1332,21 @@ without relaxing committed neighbours' protections; MAP_JIT uses per-thread writ
 mode. Both aliases are prepared before clearing, so preparation failure leaves
 contents intact. Alias writes invalidate the original instruction-cache range too.
 Whole-view decommit still remaps the rounded host range, including
-a view smaller than one host page, to release its backing. Cost: up to two alias
-map/protect/unmap cycles for partial boundaries. Other hosts keep their prior behaviour.
+a view smaller than one host page, to release its backing. Other hosts keep their prior behaviour.
+
+Patch 0035 makes it cheap: a host page that is already writable, the usual case, is cleared in
+place with no alias, and mprotect runs afterwards only when the host page's protection changes.
+Aliases remain for read-only, executable and no-access host pages. Decommit plus recommit of a
+4K page inside a host page, x86_64 / ARM64 on an M2 Pro: 1.2 / 0.8 us before, 5.2 / 4.7 us with
+aliases always, 1.3 / 0.9 us with 0035; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12
+and 2.1 / 1.7 us. `tests/win/decommit-neighbours.c` covers the alias path (read-only,
+executable and no-access neighbours), which main fails.
 
 The zero/preservation regression covers 19 cases on x86_64 and i386, including a
 whole 4K views with RW, read-only and RX protections. The Windows ARM64 concurrent read-only/RX-neighbour tests reject
 protected writes and preserve adjacent data/code; a delayed old RW-protection build
-reproduced the race. A native MAP_JIT mechanism probe passes, but full Wine JIT-view
-integration and game regression coverage remain for review.
+reproduced the race. A native MAP_JIT mechanism probe passes; full Wine JIT-view integration is not covered.
+Subnautica, Teardown and Portal 2 played normally on 0034 (2026-10-16).
 
 ## Media Foundation could not play anything: no GStreamer (fixed, #38)
 

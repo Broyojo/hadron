@@ -1,0 +1,86 @@
+From 1cbfb87d7549dc47cf6a1728791d2d236ecde908 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 16 Oct 2026 16:45:40 -0400
+Subject: [PATCH] ntdll: Clear writable partial host pages in place.
+
+A host page that is already writable needs no alias: zero the decommitted
+guest pages directly, and only call mprotect afterwards when the host
+page's protection changes. Invalidate the instruction cache only for
+executable host pages.
+---
+ dlls/ntdll/unix/virtual.c | 24 +++++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index e7b091da3d..f2cd2df159 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -2694,6 +2694,7 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+         char *base;
+         size_t size;
+         mach_vm_address_t alias;
++        int prot;
+         BOOL jit;
+     } partial[2] = {{0}};
+     char *end = base + size;
+@@ -2717,6 +2718,9 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+         partial[i].jit = is_jit_view( view ) && (get_host_page_vprot( host_base ) & VPROT_EXECMODE);
+         if (partial[i].jit) continue;
+ #endif
++        /* A host page that is already writable is cleared in place, with no alias. */
++        partial[i].prot = get_unix_prot( get_host_page_vprot( host_base ) );
++        if (partial[i].prot & PROT_WRITE) continue;
+         ret = mach_vm_remap( mach_task_self(), &partial[i].alias, host_page_size, 0, VM_FLAGS_ANYWHERE,
+                              mach_task_self(), (mach_vm_address_t)host_base, FALSE,
+                              &cur_prot, &max_prot, VM_INHERIT_NONE );
+@@ -2740,9 +2744,14 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+             continue;
+         }
+ #endif
++        if (!partial[i].alias)
++        {
++            memset( partial[i].base, 0, partial[i].size );
++            continue;
++        }
+         memset( (char *)partial[i].alias + (partial[i].base - host_base), 0, partial[i].size );
+         /* The original VA may retain executable instructions after an alias write. */
+-        sys_icache_invalidate( partial[i].base, partial[i].size );
++        if (partial[i].prot & PROT_EXEC) sys_icache_invalidate( partial[i].base, partial[i].size );
+     }
+     for (i = 0; i < 2; i++)
+         if (partial[i].alias) mach_vm_deallocate( mach_task_self(), partial[i].alias, host_page_size );
+@@ -2761,6 +2770,7 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+     char *host_end, *end;
+ #ifdef __APPLE__
+     char *partial_end;
++    int head_prot, tail_prot;
+ #endif
+     char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
+ 
+@@ -2790,13 +2800,21 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+         /* the replaced host pages are no longer MAP_JIT-backed */
+         if (host_start < host_end) set_page_vprot_bits( host_start, host_end - host_start, 0, VPROT_EXECMODE );
+     }
++#endif
++#ifdef __APPLE__
++    head_prot = get_unix_prot( get_host_page_vprot( base ) );
++    tail_prot = get_unix_prot( get_host_page_vprot( host_end ) );
+ #endif
+     set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );
+ 
+ #ifdef __APPLE__
+-    if (base < partial_end && mprotect_range( base, partial_end - base, 0, 0 ))
++    /* Committed neighbours usually keep a partial host page's protection unchanged. */
++    if (base < partial_end && (is_jit_view( view ) || get_unix_prot( get_host_page_vprot( base ) ) != head_prot) &&
++        mprotect_range( base, partial_end - base, 0, 0 ))
+         return STATUS_ACCESS_DENIED;
+-    if (host_end >= host_start && host_end < end && mprotect_range( host_end, end - host_end, 0, 0 ))
++    if (host_end >= host_start && host_end < end &&
++        (is_jit_view( view ) || get_unix_prot( get_host_page_vprot( host_end ) ) != tail_prot) &&
++        mprotect_range( host_end, end - host_end, 0, 0 ))
+         return STATUS_ACCESS_DENIED;
+ 
+ #endif
+-- 
+2.54.0 (Apple Git-157)
+
