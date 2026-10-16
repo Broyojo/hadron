@@ -1365,3 +1365,11 @@ The principled fix is to have mtld3d and DXMT present through Wine's client surf
 per-present notification), removing 0012's special case and its edge cases (GDI drawing after a
 device is destroyed while the view survives; games mixing GDI and 3D in one window). Needs
 coordination with the mtld3d and DXMT developers.
+
+## Native cursor reappears at the bottom screen edge (backport under test, #44)
+
+A Ready or Not gameplay test on 2026-10-16 exposed a native cursor over the crosshair
+after touching the bottom screen edge. A reduced Windows cursor/clip probe reproduced
+the visibility transition without changing Wine's hidden-cursor request. The cursor-only
+patch from Wine MR 11799 v4 is backported with its original author; native builds pass,
+while final visual acceptance remains pending. See [evidence and test instructions](fixes/cursor-visibility.md).

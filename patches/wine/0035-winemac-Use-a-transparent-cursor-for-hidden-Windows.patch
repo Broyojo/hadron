@@ -1,0 +1,102 @@
+From 2fd1cb85d499691ece4d16a314971a4ec96fa944 Mon Sep 17 00:00:00 2001
+From: Elvin Hayatov <AlvinHV@proton.me>
+Date: Fri, 16 Oct 2026 15:51:39 +0200
+Subject: [PATCH] winemac: replace hidden cursor with transparent cursor
+
+Backport the cursor-only patch from Wine MR 11799 v4. Keep hidden Windows cursors transparent and restore their shape when AppKit resets it. Raw mouse input changes are not included.
+
+Original-patch: https://list.winehq.org/hyperkitty/list/wine-gitlab@list.winehq.org/message/747TVCL5XYAMFH3MFVYM3FICMNZJSCBL/
+---
+ dlls/winemac.drv/cocoa_app.m | 45 ++++++++++++++++++++++--------------
+ 1 file changed, 28 insertions(+), 17 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index 606cd20383..27a40b9f97 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -73,6 +73,21 @@ - (BOOL)activateFromApplication:(NSRunningApplication *)application
+ }
+ 
+ 
++static NSCursor* WineTransparentCursor(void)
++{
++    static NSCursor* transparentCursor;
++    static dispatch_once_t once;
++
++    dispatch_once(&once, ^{
++        NSImage* image = [[NSImage alloc] initWithSize:NSMakeSize(1, 1)];
++        transparentCursor = [[NSCursor alloc] initWithImage:image hotSpot:NSZeroPoint];
++        [image release];
++    });
++
++    return transparentCursor;
++}
++
++
+ @implementation WineApplication
+ 
+ @synthesize wineController;
+@@ -188,6 +203,8 @@ - (id) init
+ 
+             [self setupObservations];
+ 
++            NSApp.presentationOptions |= NSApplicationPresentationDisableCursorLocationAssistance;
++
+             keyboardType = LMGetKbdType();
+ 
+             if ([NSApp isActive])
+@@ -1018,22 +1035,15 @@ - (void) updateCursor:(BOOL)force
+     {
+         if (force || lastTargetWindow)
+         {
+-            if (clientWantsCursorHidden && !cursorHidden)
+-            {
+-                [NSCursor hide];
+-                cursorHidden = TRUE;
+-            }
++            NSCursor* desiredCursor = clientWantsCursorHidden ? WineTransparentCursor() : cursor;
++            BOOL cursorWasReset = desiredCursor && [NSCursor currentCursor] != desiredCursor;
+ 
+-            if (!cursorIsCurrent)
++            if (force || !cursorIsCurrent || cursorHidden != clientWantsCursorHidden ||
++                cursorWasReset)
+             {
+-                [cursor set];
++                [desiredCursor set];
+                 cursorIsCurrent = TRUE;
+-            }
+-
+-            if (!clientWantsCursorHidden && cursorHidden)
+-            {
+-                [NSCursor unhide];
+-                cursorHidden = FALSE;
++                cursorHidden = clientWantsCursorHidden;
+             }
+         }
+         else
+@@ -1042,10 +1052,6 @@ - (void) updateCursor:(BOOL)force
+             {
+                 [[NSCursor arrowCursor] set];
+                 cursorIsCurrent = FALSE;
+-            }
+-            if (cursorHidden)
+-            {
+-                [NSCursor unhide];
+                 cursorHidden = FALSE;
+             }
+         }
+@@ -1954,6 +1960,11 @@ - (void) didSendEvent:(NSEvent*)anEvent
+                 [self handleCommandTab];
+             }
+         }
++
++        if (type == NSEventTypeCursorUpdate)
++            [self updateCursor:TRUE];
++        else if (clientWantsCursorHidden && [NSApp isActive])
++            [self updateCursor:FALSE];
+     }
+ 
+     - (void) setupObservations
+-- 
+2.47.1
+
