@@ -2,31 +2,31 @@
 # Guard the Mac while a game runs: log memory once a second and stop every Hadron process
 # (scripts/stop) before the system starts thrashing. scripts/play starts it in the background.
 #
-# Usage: scripts/watchdog <log file> <pid>
+# Usage: scripts/watchdog <log file> <pid> | --check
 #
 # <pid> is the game's launcher process (scripts/play execs into it); the watchdog exits with it.
 #
-# Stops the game when any of these holds:
-#   - macOS reports critical memory pressure (kern.memorystatus_vm_pressure_level 4);
-#   - swap in use grew by more than HADRON_SWAP_LIMIT_MB (default 2048) above the lowest it has been
-#     since the game started: the system is paging (macOS gives swap back slowly, so what was in use
-#     before doesn't count);
-#   - Hadron's Wine processes together hold more than HADRON_MEM_LIMIT_GB (default: half of RAM);
-#   - the disk has less than HADRON_DISK_MIN_GB (default 5) free: swap and logs need room.
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Installed runtimes stop at critical pressure or less than 1 GB free disk.
+# Checkouts also stop above half of RAM footprint or 2 GB swap growth, with
+# 5 GB free disk required. Explicit HADRON_* limits are hard in either mode.
+# scripts/play documents the policy and warning thresholds.
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 log="$1" pid="$2"
-ram_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
-mem_limit_mb=$(( ${HADRON_MEM_LIMIT_GB:-$(( ram_gb / 2 ))} * 1024 ))
-swap_limit_mb=${HADRON_SWAP_LIMIT_MB:-2048}
-disk_min_mb=$(( ${HADRON_DISK_MIN_GB:-5} * 1024 ))
+. "$ROOT/scripts/paths.sh"
+. "$ROOT/scripts/runtime-versions.sh"
+. "$ROOT/scripts/watchdog-policy.sh"
+mode=$(watchdog_runtime_mode "$ROOT" "$HADRON_RUNTIMES")
+watchdog_limits "$(( $(sysctl -n hw.memsize) / 1048576 ))" "$mode" || exit 1
+# play checks synchronously so invalid settings cannot leave Wine unguarded.
+[ "${1:-}" != --check ] || exit 0
 
 . "$ROOT/scripts/hadron-procs.sh"
 
 # Processes already classified, as pid:start keys, so lsof runs once per process rather than
 # every second; the start time keeps a reused PID from inheriting its predecessor's answer.
 ours=" " others=" "
-wine_rss() {  # sets rss (MB) and procs for this checkout's processes
-    rss=0 procs=0 seen=" "
+wine_memory() {  # sets rss, footprint (MB), and procs for this checkout's processes
+    rss=0 procs=0 seen=" " entries=
     for entry in $(hadron_candidates | awk '{ print $1 ":" $2 ":" $3 }'); do
         p=${entry%%:*} rest=${entry#*:}
         kb=${rest%%:*} key="$p:${rest#*:}"
@@ -39,8 +39,14 @@ wine_rss() {  # sets rss (MB) and procs for this checkout's processes
                 fi ;;
         esac
         rss=$((rss + kb / 1024)) procs=$((procs + 1))
+        entries="$entries $p:$kb"
     done
     ours=$(keep_seen "$ours") others=$(keep_seen "$others")
+    # proc_pid_rusage counts allocations on the Metal device and compressed pages that RSS misses.
+    footprint=$rss
+    if [ -x "$ROOT/dist/bin/hadron-memory" ] && [ -n "$entries" ]; then
+        footprint=$("$ROOT/dist/bin/hadron-memory" $entries) || footprint=$rss
+    fi
 }
 keep_seen() {  # the keys of $1 still running, so the lists don't grow over a long session
     kept=" "
@@ -52,21 +58,27 @@ swap_used_mb() {
 }
 
 swap_base=$(swap_used_mb)
-echo "watchdog: limits ${mem_limit_mb} MB resident, ${swap_limit_mb} MB more swap than the ${swap_base} MB in use, ${disk_min_mb} MB free disk, critical pressure" >> "$log"
+mem_description=none swap_description=none
+[ "$mem_hard" -eq 0 ] || mem_description="${mem_limit_mb} MB"
+[ "$swap_hard" -eq 0 ] || swap_description="${swap_limit_mb} MB"
+echo "watchdog: mode=$mode warning at ${mem_warn_mb} MB footprint or ${swap_warn_mb} MB swap growth; hard limits footprint=$mem_description swap=$swap_description from ${swap_base} MB, ${disk_min_mb} MB free disk, critical pressure" >> "$log"
+warned=0
 while kill -0 "$pid" 2>/dev/null; do
-    wine_rss
+    wine_memory
     pressure=$(sysctl -n kern.memorystatus_vm_pressure_level)
     swap=$(swap_used_mb)
-    disk=$(df -m "$ROOT" | awk 'NR == 2 { print $4 }')
-    echo "$(date +%H:%M:%S) rss_mb=$rss procs=$procs swap_mb=$swap pressure=$pressure disk_free_mb=$disk" >> "$log"
+    disk=$(df -m "$ROOT" "$HOME" | awk 'NR > 1 && (!seen || $4 < free) { free=$4; seen=1 } END { print free }')
+    echo "$(date +%H:%M:%S) rss_mb=$rss footprint_mb=$footprint procs=$procs swap_mb=$swap pressure=$pressure disk_free_mb=$disk" >> "$log"
 
-    reason=
-    [ "$pressure" -ge 4 ] && reason="critical memory pressure"
-    # Growth counts from the lowest swap seen, so reclaimed stale swap isn't headroom.
-    [ "$swap" -lt "$swap_base" ] && swap_base=$swap
-    [ $((swap - swap_base)) -gt "$swap_limit_mb" ] && reason="swap grew to ${swap} MB (from ${swap_base} MB)"
-    [ "$rss" -gt "$mem_limit_mb" ] && reason="Wine resident memory at ${rss} MB"
-    [ "$disk" -lt "$disk_min_mb" ] && reason="only ${disk} MB of disk left"
+    # Growth counts from the lowest swap seen, so reclaimed stale swap is not headroom.
+    [ "$swap" -ge "$swap_base" ] || swap_base=$swap
+    swap_growth=$((swap - swap_base))
+    watchdog_decide
+    if [ "$warned" -eq 0 ] && [ "$warning" -eq 1 ]; then
+        warned=1
+        echo "watchdog: memory warning: ${footprint} MB footprint, ${swap_growth} MB swap growth, pressure ${pressure}; game continues" >> "$log"
+        osascript -e 'display notification "Memory use is high. The game keeps running; Hadron will stop it only at an emergency limit." with title "Hadron memory warning"' 2>/dev/null
+    fi
     if [ -n "$reason" ]; then
         echo "watchdog: $reason, stopping the game" | tee -a "$log" >&2
         osascript -e "display notification \"$reason\" with title \"Hadron stopped the game\"" 2>/dev/null
