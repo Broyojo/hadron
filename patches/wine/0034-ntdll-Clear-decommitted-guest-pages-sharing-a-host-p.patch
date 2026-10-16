@@ -1,69 +1,143 @@
-From ddd17a9f672743f9358e251fcc377c35044f0e54 Mon Sep 17 00:00:00 2001
+From f9b25e3b37d915493a84eb7d2cdc18450f466445 Mon Sep 17 00:00:00 2001
 From: Lennard Zehner <127147155+Moeweneier@users.noreply.github.com>
-Date: Fri, 16 Oct 2026 09:36:08 +0200
-Subject: [PATCH] ntdll: Clear decommitted guest pages sharing a host page.
+Date: Fri, 16 Oct 2026 14:33:52 +0200
+Subject: [PATCH] ntdll: Clear partial decommitted host pages through writable
+ aliases.
 
-On 16K hosts, decommitting/recommitting a boundary 4K guest page
-retained stale allocator data instead of the required zeros.
+On 16K macOS hosts, boundary 4K guest pages retained stale contents on
+recommit. Clear partial boundaries without relaxing the host permissions
+of committed neighbours: use temporary shared writable aliases for
+ordinary pages, and the existing per-thread write mode for MAP_JIT pages.
+Prepare both aliases before writing and release them on failure.
 
-Clear partial boundary bytes through the existing protection path,
-then restore protections after clearing commitment. Round the host end
-consistently for whole-view decommit, including small views.
+Whole host pages keep anonymous remapping; round whole-view decommit
+consistently for small views. Other hosts keep their existing boundary
+behaviour. The macOS path incurs up to two alias map/protect/unmap cycles.
 
-The original release fails decommit-zero at offset 4096. The correction
-passes 17 cases, including read-only pages and committed neighbours.
+The 17-case zero/preservation regression passes on x86_64 and i386.
+A concurrent ARM64 writer cannot modify the protected neighbour; the old
+path with a diagnostic delay reproduces successful protected writes.
 
 Co-Authored-By: Codex <noreply@openai.com>
 ---
- dlls/ntdll/unix/virtual.c | 28 +++++++++++++++++++++++-----
- 1 file changed, 23 insertions(+), 5 deletions(-)
+ dlls/ntdll/unix/virtual.c | 90 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 85 insertions(+), 5 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 1b2c7db6af..9a3c0716d4 100644
+index 1b2c7db6af..4557acbe81 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -2693,14 +2693,28 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
+@@ -2685,6 +2685,69 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
+ }
+ 
+ 
++#ifdef __APPLE__
++/* Clear partial host pages without changing permissions on committed neighbours. */
++static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, size_t size )
++{
++    struct
++    {
++        char *base;
++        size_t size;
++        mach_vm_address_t alias;
++        BOOL jit;
++    } partial[2] = {{0}};
++    char *end = base + size;
++    char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
++    char *host_end = ROUND_ADDR( end, host_page_mask );
++    vm_prot_t cur_prot, max_prot;
++    kern_return_t ret = KERN_SUCCESS;
++    unsigned int i;
++
++    partial[0].base = base;
++    partial[0].size = min( host_start, end ) - base;
++    partial[1].base = host_end;
++    if (host_end >= host_start && host_end < end) partial[1].size = end - host_end;
++
++    /* Prepare both aliases before writing, so a preparation failure leaves data intact. */
++    for (i = 0; i < 2; i++)
++    {
++        char *host_base = ROUND_ADDR( partial[i].base, host_page_mask );
++        if (!partial[i].size) continue;
++#ifdef WX_EXCLUSIVE_HOST
++        partial[i].jit = is_jit_view( view ) && (get_host_page_vprot( host_base ) & VPROT_EXECMODE);
++        if (partial[i].jit) continue;
++#endif
++        ret = mach_vm_remap( mach_task_self(), &partial[i].alias, host_page_size, 0, VM_FLAGS_ANYWHERE,
++                             mach_task_self(), (mach_vm_address_t)host_base, FALSE,
++                             &cur_prot, &max_prot, VM_INHERIT_NONE );
++        if (ret) break;
++        ret = mach_vm_protect( mach_task_self(), partial[i].alias, host_page_size, FALSE,
++                               VM_PROT_READ | VM_PROT_WRITE );
++        if (ret) break;
++    }
++    if (!ret) for (i = 0; i < 2; i++)
++    {
++        char *host_base = ROUND_ADDR( partial[i].base, host_page_mask );
++        if (!partial[i].size) continue;
++#ifdef WX_EXCLUSIVE_HOST
++        if (partial[i].jit)
++        {
++            /* MAP_JIT cannot be aliased; its write permission is already per thread. */
++            pthread_jit_write_protect_np( 0 );
++            memset( partial[i].base, 0, partial[i].size );
++            pthread_jit_write_protect_np( 1 );
++            sys_icache_invalidate( partial[i].base, partial[i].size );
++            continue;
++        }
++#endif
++        memset( (char *)partial[i].alias + (partial[i].base - host_base), 0, partial[i].size );
++    }
++    for (i = 0; i < 2; i++)
++        if (partial[i].alias) mach_vm_deallocate( mach_task_self(), partial[i].alias, host_page_size );
++    return ret ? STATUS_ACCESS_DENIED : STATUS_SUCCESS;
++}
++#endif
++
+ /***********************************************************************
+  *           decommit_pages
+  *
+@@ -2693,14 +2756,23 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
   */
  static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size )
  {
 -    char *host_end, *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
-+    char *host_end, *end, *partial_end;
++    char *host_end, *end;
++#ifdef __APPLE__
++    char *partial_end;
++#endif
 +    char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
- 
--    if (!size)
++
 +    if (!size) size = view->size;
 +    end = base + size;
 +    host_end = ROUND_ADDR( end, host_page_mask );
-+
-+    /* A guest page can share its host page with committed neighbours. These boundary
-+     * bytes survive the whole-host-page remap below, so clear them before decommitting. */
-+    partial_end = min( host_start, end );
-+    if (base < partial_end)
-+    {
-+        if (mprotect_range( base, partial_end - base, VPROT_COMMITTED | VPROT_READ | VPROT_WRITE,
-+                            VPROT_EXEC | VPROT_GUARD | VPROT_WRITEWATCH )) return STATUS_ACCESS_DENIED;
-+        memset( base, 0, partial_end - base );
-+    }
-+    if (host_end >= host_start && host_end < end)
+ 
+-    if (!size)
++#ifdef __APPLE__
      {
 -        size = view->size;
 -        host_end = host_start + view->size;
-+        if (mprotect_range( host_end, end - host_end, VPROT_COMMITTED | VPROT_READ | VPROT_WRITE,
-+                            VPROT_EXEC | VPROT_GUARD | VPROT_WRITEWATCH )) return STATUS_ACCESS_DENIED;
-+        memset( host_end, 0, end - host_end );
++        NTSTATUS status = zero_partial_host_pages( view, base, size );
++        if (status) return status;
      }
 -    else host_end = ROUND_ADDR( base + size, host_page_mask );
++    partial_end = min( host_start, end );
++#endif
  
      if (host_start < host_end) anon_mmap_fixed( host_start, host_end - host_start, PROT_NONE, 0 );
  #ifdef WX_EXCLUSIVE_HOST
-@@ -2711,6 +2725,10 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+@@ -2711,6 +2783,14 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
      }
  #endif
      set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );
++
++#ifdef __APPLE__
 +    if (base < partial_end && mprotect_range( base, partial_end - base, 0, 0 ))
 +        return STATUS_ACCESS_DENIED;
 +    if (host_end >= host_start && host_end < end && mprotect_range( host_end, end - host_end, 0, 0 ))
 +        return STATUS_ACCESS_DENIED;
++
++#endif
      if (host_start < host_end) kernel_writewatch_register_range( view, host_start, host_end - host_start );
      return STATUS_SUCCESS;
  }
