@@ -1345,7 +1345,7 @@ inside a host page 1.2 / 0.8 us before, 5.2 / 4.7 us with aliases always, 1.3 / 
 0035; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12 and 2.1 / 1.7 us; a 4K page alone
 in its host page 3.2 / 2.9 us with 0035, the cost of a whole host page.
 `tests/win/decommit-neighbours.c` covers the alias path (read-only, executable and no-access
-neighbours), which main fails.
+neighbours), which main fails, and a decommit at the end of a view shorter than its host page.
 
 The zero/preservation regression covers 19 cases on x86_64 and i386, including a
 whole 4K views with RW, read-only and RX protections. The Windows ARM64 concurrent read-only/RX-neighbour tests reject

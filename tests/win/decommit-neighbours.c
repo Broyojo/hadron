@@ -25,8 +25,22 @@ static int check(DWORD neighbour, const char *name)
     return 0;
 }
 
+/* The last 4 KB of a 20 KB view: its host page reaches past the view. */
+static int short_view(void)
+{
+    unsigned char *p = VirtualAlloc(NULL, 20480, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    memset(p, 0x5a, 20480);
+    if (!VirtualFree(p + 16384, 4096, MEM_DECOMMIT)) return 6;
+    if (VirtualAlloc(p + 16384, 4096, MEM_COMMIT, PAGE_READWRITE) != p + 16384) return 7;
+    for (unsigned i = 0; i < 20480; i++)
+        if (p[i] != (i < 16384 ? 0x5a : 0)) { printf("FAIL short view: byte %u is %02x\n", i, p[i]); return 8; }
+    VirtualFree(p, 0, MEM_RELEASE);
+    printf("PASS short view\n");
+    return 0;
+}
+
 int main(void)
 {
-    return check(PAGE_READONLY, "read-only neighbours") || check(PAGE_EXECUTE_READ, "executable neighbours")
+    return short_view() || check(PAGE_READONLY, "read-only neighbours") || check(PAGE_EXECUTE_READ, "executable neighbours")
         || check(PAGE_NOACCESS, "no-access neighbours");
 }
