@@ -11,7 +11,10 @@ direct installed program; it does not automate privacy acceptance or pretend the
 
 The resolver tests main entry selection, paths with spaces, unchanged default and installer
 routes, nested helpers, missing files, traversal, backslashes, directories and symlinks.
-Only a `waitforexitandrun` program directly in the install root is eligible. A helper Steam
+Only a `waitforexitandrun` program directly in the install root is eligible by default.
+For a nested launcher, `HADRON_LAUNCHER_EXE=Launcher/launcher.exe` opts in only the exact
+original relative path. Absolute paths and dot components are rejected. Other helpers keep
+their original entry point. A helper Steam
 itself starts there with that same verb is indistinguishable and would also be redirected;
 this limitation is why selection is opt-in. Launcher-specific arguments are retained and may
 need removing. The file is validated before activation. Spaces work in the resolver, but the

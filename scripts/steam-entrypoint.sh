@@ -1,6 +1,15 @@
 # Resolve an explicitly selected entry point without redirecting Steam's helpers.
-steam_entrypoint() {  # <verb> <install root> <original program> <optional filename>
-    if [ "$1" != waitforexitandrun ] || [ -z "$4" ] || [ "$(dirname "$3")" != "$2" ]; then
+steam_entrypoint() {  # <verb> <install root> <original program> <optional filename> [original relative entry]
+    if [ "$1" != waitforexitandrun ] || [ -z "$4" ]; then
+        printf '%s\n' "$3"
+        return 0
+    fi
+    if [ -n "${5:-}" ]; then
+        case "/$5/" in
+            *"/../"*|*"/./"*|*"//"*|*\\*) echo 'steam-run: HADRON_LAUNCHER_EXE must be a relative path without dot components' >&2; return 1 ;;
+        esac
+        if [ "$3" != "$2/$5" ]; then printf '%s\n' "$3"; return 0; fi
+    elif [ "$(dirname "$3")" != "$2" ]; then
         printf '%s\n' "$3"
         return 0
     fi

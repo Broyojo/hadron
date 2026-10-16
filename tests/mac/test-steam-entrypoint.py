@@ -32,6 +32,26 @@ class EntryPointTests(unittest.TestCase):
                 (".", "waitforexitandrun", original, None),
                 ("..", "waitforexitandrun", original, None),
             ]
+            # Nested launchers are redirected only when explicitly named, preserving helpers.
+            for launcher, program, expected in [
+                ("nested/launcher.exe", str(root / "nested/launcher.exe"), str(root / "Game.exe")),
+                ("nested/launcher.exe", str(root / "nested/helper.exe"), str(root / "nested/helper.exe")),
+                ("nested/launcher.exe", original, original),
+                ("../launcher.exe", original, None),
+                ("/launcher.exe", original, None),
+                ("nested/./launcher.exe", original, None),
+                ("nested/../launcher.exe", original, None),
+                ("nested\\launcher.exe", original, None),
+            ]:
+                with self.subTest(launcher=launcher):
+                    result = subprocess.run(["sh", "-c", '. "$1"; steam_entrypoint "$2" "$3" "$4" "$5" "$6"',
+                        "test", str(ROOT / "scripts/steam-entrypoint.sh"), "waitforexitandrun", folder,
+                        program, "Game.exe", launcher], text=True, capture_output=True)
+                    if expected is None:
+                        self.assertNotEqual(result.returncode, 0)
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout.strip(), expected)
             for choice, verb, program, expected in cases:
                 with self.subTest(choice=choice, verb=verb, program=program):
                     result = subprocess.run(["sh", "-c", '. "$1"; steam_entrypoint "$2" "$3" "$4" "$5"',

@@ -200,6 +200,8 @@ options or per app ID in `config/games.conf`; `scripts/play` documents them.
 
 To explicitly select another installed executable, use `HADRON_GAME_EXE=Game.exe` in Steam's
 launch options or your personal Hadron `games.conf`. This keeps Steam and the watchdog active;
+For launchers in a subdirectory, also set `HADRON_LAUNCHER_EXE=Launcher/launcher.exe`
+to match the original entry exactly;
 see [entry-point selection, validation and limitations](docs/fixes/steam-direct-entry.md).
 
 `scripts/build-wine.sh --dev` builds a variant that needs no entitlement, with Windows' fixed

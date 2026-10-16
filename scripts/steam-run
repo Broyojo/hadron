@@ -219,7 +219,7 @@ esac
 
 # An alternate entry point is an explicit user preference, never an app default.
 . "$ROOT/scripts/steam-entrypoint.sh"
-selected=$(steam_entrypoint "$verb" "$install_path" "$program" "${HADRON_GAME_EXE:-}") || exit 1
+selected=$(steam_entrypoint "$verb" "$install_path" "$program" "${HADRON_GAME_EXE:-}" "${HADRON_LAUNCHER_EXE:-}") || exit 1
 [ "$selected" = "$program" ] || echo "user-selected entry point: $program -> $selected" >> "$log"
 program="$selected"
 
