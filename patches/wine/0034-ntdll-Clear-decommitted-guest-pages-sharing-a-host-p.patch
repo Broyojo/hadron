@@ -1,4 +1,4 @@
-From f9b25e3b37d915493a84eb7d2cdc18450f466445 Mon Sep 17 00:00:00 2001
+From 8f638dbc916d7e741e310517e58ea78973a21ad5 Mon Sep 17 00:00:00 2001
 From: Lennard Zehner <127147155+Moeweneier@users.noreply.github.com>
 Date: Fri, 16 Oct 2026 14:33:52 +0200
 Subject: [PATCH] ntdll: Clear partial decommitted host pages through writable
@@ -20,11 +20,11 @@ path with a diagnostic delay reproduces successful protected writes.
 
 Co-Authored-By: Codex <noreply@openai.com>
 ---
- dlls/ntdll/unix/virtual.c | 90 ++++++++++++++++++++++++++++++++++++---
- 1 file changed, 85 insertions(+), 5 deletions(-)
+ dlls/ntdll/unix/virtual.c | 93 +++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 90 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 1b2c7db6af..4557acbe81 100644
+index 1b2c7db6af..499a3cd03c 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -2685,6 +2685,69 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
@@ -97,7 +97,7 @@ index 1b2c7db6af..4557acbe81 100644
  /***********************************************************************
   *           decommit_pages
   *
-@@ -2693,14 +2756,23 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
+@@ -2693,14 +2756,30 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
   */
  static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size )
  {
@@ -107,26 +107,31 @@ index 1b2c7db6af..4557acbe81 100644
 +    char *partial_end;
 +#endif
 +    char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
-+
-+    if (!size) size = view->size;
-+    end = base + size;
-+    host_end = ROUND_ADDR( end, host_page_mask );
  
--    if (!size)
-+#ifdef __APPLE__
+     if (!size)
      {
--        size = view->size;
+         size = view->size;
 -        host_end = host_start + view->size;
-+        NTSTATUS status = zero_partial_host_pages( view, base, size );
-+        if (status) return status;
++        /* A whole view has no committed neighbour in its final host page. */
++        host_end = (char *)ROUND_SIZE( 0, base + size, host_page_mask );
      }
 -    else host_end = ROUND_ADDR( base + size, host_page_mask );
++    else
++    {
++#ifdef __APPLE__
++        NTSTATUS status = zero_partial_host_pages( view, base, size );
++        if (status) return status;
++#endif
++        host_end = ROUND_ADDR( base + size, host_page_mask );
++    }
++    end = base + size;
++#ifdef __APPLE__
 +    partial_end = min( host_start, end );
 +#endif
  
      if (host_start < host_end) anon_mmap_fixed( host_start, host_end - host_start, PROT_NONE, 0 );
  #ifdef WX_EXCLUSIVE_HOST
-@@ -2711,6 +2783,14 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+@@ -2711,6 +2790,14 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
      }
  #endif
      set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );

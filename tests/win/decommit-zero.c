@@ -42,6 +42,8 @@ int main(void)
             if (ret) return ret;
         }
     if (check(4096, 0, 4096, PAGE_READWRITE, 1)) return 8;
-    puts("PASS: 17 decommit/recommit cases preserve neighbours and committed data");
+    if (check(4096, 0, 4096, PAGE_READONLY, 1)) return 9;
+    if (check(4096, 0, 4096, PAGE_EXECUTE_READ, 1)) return 10;
+    puts("PASS: 19 decommit/recommit cases preserve neighbours and committed data");
     return 0;
 }

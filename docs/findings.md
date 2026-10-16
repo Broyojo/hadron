@@ -1325,22 +1325,19 @@ the .NET redistributable. Not tried: Fable itself, which is not installed here, 
 it; whether Fable's mixed native and .NET code runs on Wine Mono is the next question.
 ## macOS partial decommit retained stale guest data (#42)
 
-On a 16K host, Wine remapped only whole host pages, so a decommitted/recommitted 4K boundary
-page retained old bytes. The independent regression failed at offset 4096; the corrected
-macOS path passes 17 cases on both x86_64 and i386.
+On a 16K host, decommitting/recommitting a 4K boundary page retained old bytes.
+Wine patch 0034 clears partial host pages through temporary writable aliases,
+without relaxing committed neighbours' protections; MAP_JIT uses per-thread write
+mode. Both aliases are prepared before clearing, so preparation failure leaves
+contents intact. Whole-view decommit still remaps the rounded host range, including
+a view smaller than one host page, to release its backing. Cost: up to two alias
+map/protect/unmap cycles for partial boundaries. Other hosts keep their prior behaviour.
 
-The first correction temporarily changed the shared host page to RW. Review identified that
-`virtual_mutex` does not stop application threads: a read-only or executable committed
-neighbour could lose protection. A delayed diagnostic build confirms the race, allowing
-protected writes and changing a neighbour byte. The revised Wine patch 0034 prepares temporary
-writable aliases without changing original permissions; MAP_JIT uses per-thread write mode.
-The concurrent Windows ARM64 regression now rejects every protected write and preserves data.
-Both aliases are prepared before any clearing, so a preparation failure leaves contents intact.
-Cost: up to two alias map/protect/unmap cycles. Other hosts retain their prior boundary behaviour.
-
-The reduced Electron Node test previously completed after zeroing; normal GUI launcher
-reliability remains open. The new concurrency correction has not had full game/release
-acceptance. See [evidence, tests and limits](fixes/wine-decommit-zero.md).
+The zero/preservation regression covers 19 cases on x86_64 and i386, including a
+whole 4K views with RW, read-only and RX protections. The Windows ARM64 concurrent read-only/RX-neighbour tests reject
+protected writes and preserve adjacent data/code; a delayed old RW-protection build
+reproduced the race. A native MAP_JIT mechanism probe passes, but full Wine JIT-view
+integration and game regression coverage remain for review.
 
 ## Media Foundation could not play anything: no GStreamer (fixed, #38)
 
