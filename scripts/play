@@ -8,8 +8,11 @@
 # HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis.
 # FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
-# A watchdog warns at half of RAM and stops at critical pressure or an emergency limit.
-# HADRON_MEM_LIMIT_GB and HADRON_SWAP_LIMIT_MB set explicit hard limits.
+# The watchdog warns once at half of RAM footprint, 2–4 GB swap growth or elevated pressure.
+# Installed runtimes under Hadron/runtimes stop only at critical pressure or below 1 GB free disk.
+# Checkouts stop above half of RAM footprint, 2 GB swap growth or below 5 GB free disk.
+# HADRON_MEM_LIMIT_GB, HADRON_SWAP_LIMIT_MB and HADRON_DISK_MIN_GB override these defaults
+# as hard limits in either mode. Footprint includes compressed and graphics memory.
 # Scrolling sends whole wheel notches, which every game handles; HADRON_PRECISE_SCROLLING=1 sends
 # fractions for smooth scrolling, for applications that scale by the wheel delta.
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0

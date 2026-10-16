@@ -186,11 +186,6 @@ Steam then runs games straight from this checkout. `scripts/build-app.sh` builds
 around a self-contained copy of the runtime (`scripts/package-runtime.sh`), with no reference to
 the checkout or to Homebrew: what a release carries.
 
-The watchdog measures physical footprint, including compressed and graphics memory. It warns
-at half of RAM; its automatic memory/swap emergency limits require elevated macOS pressure.
-Critical pressure, low free disk space, and explicit user limits still stop games. See
-[watchdog measurements and policy](docs/fixes/watchdog-footprint.md).
-
 ## Running and debugging
 
 ```sh

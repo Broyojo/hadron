@@ -1354,6 +1354,22 @@ Vorbis; Windows' own Media Foundation needs an add-on for WebM too. winegstreame
 did not affect decoding. Not tried: DirectShow playback (quartz, which now also has GStreamer to
 use), and a game.
 
+## Watchdog footprint and runtime-specific guards (#40)
+
+An investigation Raft load stopped at 8,206 MB; a later completed load peaked at
+10,878 MB footprint and 2,021 MB swap growth with elevated, not critical, pressure.
+RSS misses compressed/graphics allocations. The native helper reads proc_pid_rusage
+physical footprint, falling back per unavailable process to RSS. The Steam runner
+keeps the watchdog alive across launcher exits; free space is checked on both runtime
+and home volumes. These measurements are not stock-release game acceptance.
+
+Installed runtime copies stop at critical pressure or below 1 GB free disk, with a
+single high-memory warning and no fixed memory/swap caps. Checkouts retain hard
+half-RAM, 2 GB swap-growth and 5 GB disk guards. Explicit HADRON_* limits are hard
+in both modes. Policy replays cover mode/path selection, recorded loads, pressure,
+disk boundaries, explicit limits and invalid values; native helper tests cover live
+footprint and per-process fallback. No allocation or startup-speed improvement is claimed.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style

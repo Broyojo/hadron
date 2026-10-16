@@ -6,21 +6,17 @@
 #
 # <pid> is the game's launcher process (scripts/play execs into it); the watchdog exits with it.
 #
-# Stops the game when any of these holds:
-#   - macOS reports critical memory pressure (kern.memorystatus_vm_pressure_level 4);
-#   - swap in use grew by more than HADRON_SWAP_LIMIT_MB (default: half of RAM,
-#     at most 8192 MB) above its lowest level since the game started, while memory pressure is
-#     elevated (macOS gives swap back slowly, so pre-existing use does not count);
-#   - Hadron's Wine processes together have a memory footprint above HADRON_MEM_LIMIT_GB
-#     (default: 90% of RAM) while memory pressure is elevated, including graphics and
-#     compressed memory. Explicit HADRON_* limits remain immediate hard limits;
-#   - the disk has less than HADRON_DISK_MIN_GB (default 5) free: swap and logs need room.
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Installed runtimes stop at critical pressure or less than 1 GB free disk.
+# Checkouts also stop above half of RAM footprint or 2 GB swap growth, with
+# 5 GB free disk required. Explicit HADRON_* limits are hard in either mode.
+# scripts/play documents the policy and warning thresholds.
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 log="$1" pid="$2"
+. "$ROOT/scripts/paths.sh"
+. "$ROOT/scripts/runtime-versions.sh"
 . "$ROOT/scripts/watchdog-policy.sh"
-helper=0
-[ ! -x "$ROOT/dist/bin/hadron-memory" ] || helper=1
-watchdog_limits "$(( $(sysctl -n hw.memsize) / 1048576 ))" "$helper" || exit 1
+mode=$(watchdog_runtime_mode "$ROOT" "$HADRON_RUNTIMES")
+watchdog_limits "$(( $(sysctl -n hw.memsize) / 1048576 ))" "$mode" || exit 1
 
 . "$ROOT/scripts/hadron-procs.sh"
 
@@ -60,7 +56,10 @@ swap_used_mb() {
 }
 
 swap_base=$(swap_used_mb)
-echo "watchdog: warning at ${mem_warn_mb} MB footprint or ${swap_warn_mb} MB swap growth; emergency limits ${mem_limit_mb} MB footprint, ${swap_limit_mb} MB swap growth from ${swap_base} MB, ${disk_min_mb} MB free disk, critical pressure" >> "$log"
+mem_description=none swap_description=none
+[ "$mem_hard" -eq 0 ] || mem_description="${mem_limit_mb} MB"
+[ "$swap_hard" -eq 0 ] || swap_description="${swap_limit_mb} MB"
+echo "watchdog: mode=$mode warning at ${mem_warn_mb} MB footprint or ${swap_warn_mb} MB swap growth; hard limits footprint=$mem_description swap=$swap_description from ${swap_base} MB, ${disk_min_mb} MB free disk, critical pressure" >> "$log"
 warned=0
 while kill -0 "$pid" 2>/dev/null; do
     wine_memory
