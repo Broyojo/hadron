@@ -1,4 +1,4 @@
-From 90f56a2d085deab5960699c7f66d037b733bae54 Mon Sep 17 00:00:00 2001
+From 2da3375d2d13eeef2e101ac2b6e4df46152c7ec8 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 16 Oct 2026 16:45:40 -0400
 Subject: [PATCH] ntdll: Clear writable partial host pages in place.
@@ -7,7 +7,8 @@ A host page that is already writable needs no alias: zero the decommitted
 guest pages directly. Call mprotect afterwards only when the host page's
 protection changes, which also leaves a MAP_JIT page's backing in place
 under a neighbour that may be running. Invalidate the instruction cache
-only for executable host pages.
+for any host page with an executable guest page, including one that is
+flipped to write mode at the moment.
 
 Whole and partial decommits take the same path: a boundary host page is
 replaced whole only when nothing else in it is in use, neither a committed
@@ -15,11 +16,11 @@ guest page of the view nor another view, and otherwise cleared page by
 page. Replacing it releases the backing that writing zeros would fault in,
 as for a view shorter than its host page.
 ---
- dlls/ntdll/unix/virtual.c | 84 +++++++++++++++++++++++++++++----------
- 1 file changed, 64 insertions(+), 20 deletions(-)
+ dlls/ntdll/unix/virtual.c | 86 +++++++++++++++++++++++++++++----------
+ 1 file changed, 64 insertions(+), 22 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index e7b091da3d..fc1e1e3335 100644
+index e7b091da3d..73e4dc56ce 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -2686,25 +2686,44 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
@@ -57,7 +58,7 @@ index e7b091da3d..fc1e1e3335 100644
          char *base;
          size_t size;
          mach_vm_address_t alias;
-+        int prot;
++        BYTE vprot;
          BOOL jit;
      } partial[2] = {{0}};
 -    char *end = base + size;
@@ -78,28 +79,28 @@ index e7b091da3d..fc1e1e3335 100644
          if (partial[i].jit) continue;
  #endif
 +        /* A host page that is already writable is cleared in place, with no alias. */
-+        partial[i].prot = get_unix_prot( get_host_page_vprot( host_base ) );
-+        if (partial[i].prot & PROT_WRITE) continue;
++        partial[i].vprot = get_host_page_vprot( host_base );
++        if (get_unix_prot( partial[i].vprot ) & PROT_WRITE) continue;
          ret = mach_vm_remap( mach_task_self(), &partial[i].alias, host_page_size, 0, VM_FLAGS_ANYWHERE,
                               mach_task_self(), (mach_vm_address_t)host_base, FALSE,
                               &cur_prot, &max_prot, VM_INHERIT_NONE );
-@@ -2740,9 +2762,14 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+@@ -2740,9 +2762,12 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
              continue;
          }
  #endif
-+        if (!partial[i].alias)
-+        {
-+            memset( partial[i].base, 0, partial[i].size );
-+            continue;
-+        }
-         memset( (char *)partial[i].alias + (partial[i].base - host_base), 0, partial[i].size );
-         /* The original VA may retain executable instructions after an alias write. */
+-        memset( (char *)partial[i].alias + (partial[i].base - host_base), 0, partial[i].size );
+-        /* The original VA may retain executable instructions after an alias write. */
 -        sys_icache_invalidate( partial[i].base, partial[i].size );
-+        if (partial[i].prot & PROT_EXEC) sys_icache_invalidate( partial[i].base, partial[i].size );
++        if (partial[i].alias)
++            memset( (char *)partial[i].alias + (partial[i].base - host_base), 0, partial[i].size );
++        else
++            memset( partial[i].base, 0, partial[i].size );
++        /* An executable page may have run code from here, even one now flipped to write mode. */
++        if (partial[i].vprot & VPROT_EXEC) sys_icache_invalidate( partial[i].base, partial[i].size );
      }
      for (i = 0; i < 2; i++)
          if (partial[i].alias) mach_vm_deallocate( mach_task_self(), partial[i].alias, host_page_size );
-@@ -2761,23 +2788,31 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+@@ -2761,23 +2786,31 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
      char *host_end, *end;
  #ifdef __APPLE__
      char *partial_end;
@@ -142,7 +143,7 @@ index e7b091da3d..fc1e1e3335 100644
      end = base + size;
  #ifdef __APPLE__
      partial_end = min( host_start, end );
-@@ -2790,13 +2825,22 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+@@ -2790,13 +2823,22 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
          /* the replaced host pages are no longer MAP_JIT-backed */
          if (host_start < host_end) set_page_vprot_bits( host_start, host_end - host_start, 0, VPROT_EXECMODE );
      }
