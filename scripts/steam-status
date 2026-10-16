@@ -48,7 +48,7 @@ linked=$(readlink "$HADRON_SUPPORT/runtime" 2>/dev/null || true)
 build=$(runtime_id "$ROOT")
 # Steam's tool starts scripts/steam-run through the link and has no other way to it.
 if [ ! -x "$HADRON_SUPPORT/runtime/scripts/steam-run" ]; then
-    printf 'broken\nSteam cannot find Hadron: the link to its runtime is missing. Repair puts it back.\n'
+    printf 'broken\nSteam cannot find the Hadron runtime. Repair puts it back.\n'
 # The copy in Steam has to be the one that was recorded (another Hadron, or anything else, may have
 # replaced it since).
 elif [ "$copy" != "$(/sbin/md5 -q "$INSERT" 2>/dev/null)" ]; then
@@ -68,7 +68,7 @@ elif [ -z "$build" ]; then
 # release built from the same (steam/HOOK-HISTORY). Games move to this build's runtime by
 # themselves, the next one that is started (scripts/runtime-versions.sh).
 elif ! same_hook; then
-    printf 'outdated\nHadron was updated. Click Repair to finish; it closes Steam.\n'
+    printf 'outdated\nHadron was updated. Click Repair to finish. This closes Steam.\n'
 elif [ "$(sed -n 1p "$HADRON_SUPPORT/source" 2>/dev/null)" != "$ROOT" ] && [ "$linked" != "$ROOT" ]; then
     printf 'outdated\nSteam is set up for another copy of Hadron. Repair points it at this one.\n'
 elif [ "$(runtime_id "$linked")" != "$build" ]; then
