@@ -86,7 +86,7 @@ for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ win
 done
 
 mkdir -p "$OUT/scripts" "$OUT/steam" "$OUT/licenses" "$EXT"
-for script in hadron-procs.sh mtld3d-prefix paths.sh play report runtime-versions.sh shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
+for script in hadron-procs.sh mtld3d-prefix paths.sh play report runtime-versions.sh shortcut-icon steam-entrypoint.sh steam-install steam-run steam-status steam-uninstall stop watchdog; do
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"

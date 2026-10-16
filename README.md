@@ -186,6 +186,16 @@ Steam then runs games straight from this checkout. `scripts/build-app.sh` builds
 around a self-contained copy of the runtime (`scripts/package-runtime.sh`), with no reference to
 the checkout or to Homebrew: what a release carries.
 
+### Explicit alternate entry points
+
+Set `HADRON_GAME_EXE=Game.exe` as a plain Steam launch option or in your personal Hadron
+`games.conf` to choose an installed executable directly. It must be a non-symlink file in the
+install root. Only a main `waitforexitandrun` entry from that root is redirected; helper runs
+are unchanged. Arguments are retained: remove launcher-only arguments if necessary. Steam
+integration and the watchdog still run. Remove the option to restore the original launcher.
+This is an opt-in preference, not an automatic game-specific compatibility fix.
+See [testing and limitations](docs/fixes/steam-direct-entry.md).
+
 ## Running and debugging
 
 ```sh

@@ -29,6 +29,8 @@ jobs:
           sh -n scripts/hadron-procs.sh || status=1
           sh -n scripts/runtime-versions.sh || status=1
           exit $status
+      - name: Explicit Steam entry points
+        run: python3 tests/mac/test-steam-entrypoint.py
       - name: Which copy of the runtime a game gets, and what is deleted
         run: tests/mac/test-runtime-versions.sh
       - name: The icon tool compiles
