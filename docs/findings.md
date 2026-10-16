@@ -1354,6 +1354,23 @@ Vorbis; Windows' own Media Foundation needs an add-on for WebM too. winegstreame
 did not affect decoding. Not tried: DirectShow playback (quartz, which now also has GStreamer to
 use), and a game.
 
+## Raft and Cities: Skylines acceptance, launcher still open (#40)
+
+On an M4 with 16 GB RAM and macOS 27.0.1, the player confirmed Raft and Cities: Skylines
+working on 2026-10-16. Raft's preceding world-load log completed at 10878 MB physical
+footprint and 2021 MB additional swap, with warning rather than critical pressure.
+The watchdog policy/accounting work is proposed separately in PR #77; this entry does not
+attribute acceptance to the alternate-entry feature or claim faster startup.
+
+Cities works through Steam with the player's explicit `HADRON_GAME_EXE=Cities.exe` preference.
+The normal Paradox Launcher remains unresolved: GPU/renderer failures and visibly displaced
+click targets were observed. The direct route is a requested opt-in workaround, not evidence
+that the launcher is fixed. No title-specific setting is shipped in Hadron's defaults.
+Steam integration and the existing save prefix/watchdog remain active.
+See [entry-point evidence and limitations](fixes/steam-direct-entry.md).
+The accepted local runtime also contained diagnostic Wine/DXMT changes; these reports do not
+establish acceptance of a packaged current-main release or isolate each component's contribution.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
