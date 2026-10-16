@@ -1366,17 +1366,10 @@ per-present notification), removing 0012's special case and its edge cases (GDI 
 device is destroyed while the view survives; games mixing GDI and 3D in one window). Needs
 coordination with the mtld3d and DXMT developers.
 
-## DXMT command helpers read an uninitialized device (#41)
+## DXMT command helpers read an uninitialized device (fixed, #40)
 
-An isolated Paradox GPU process threw an Objective-C exception while creating a compute
-pipeline, with receiver 0xbaadf00dbaadf00d (Wine's uninitialized heap fill).
-`ArgumentEncodingContext` declared `device_` after `clear_uav_cmd`; that helper constructor
-calls `SimpleCommandContext::getComputePipeline`, reading the device before initialization.
-C++ member declaration order determines construction order.
-
-DXMT patch 0003 moves the device declaration and initializer ahead of dependent helpers.
-The DLL builds and a compute-backed clear/staging-readback probe succeeds, but the old DLL
-also passed that probe: it does not reproduce the poisoned allocation pattern independently.
-The player's later Raft/Cities acceptance used this DLL together with other changes. No
-standalone gameplay attribution or normal-launcher reliability is claimed. This is D3D11
-to Metal; Khronos CTS does not cover it. See [detailed evidence](fixes/dxmt-device-initialization.md).
+The Paradox Launcher's GPU process died creating a compute pipeline whose receiver was
+0xbaadf00dbaadf00d, Wine's fill for uninitialized heap memory. `ClearUAV`'s constructor compiles
+its pipelines through `ArgumentEncodingContext::device_`, which was declared, and so initialized,
+after it. Upstream DXMT fixed the order in fb4515681d (2026-09-30), after our pin; DXMT patch
+0003 is that commit, to drop when the pin moves past it. Found by Lennard Zehner (#80).
