@@ -111,7 +111,7 @@ struct ContentView: View {
                     .frame(width: 48, height: 48)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Hadron").font(.title2.weight(.semibold))
-                    Text("Windows games on your Mac · Version \(Runtime.version)")
+                    Text("Version \(Runtime.version)")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -149,7 +149,7 @@ struct ContentView: View {
                     .font(.headline)
                 Text(isSetUp
                      ? "Install and launch Windows games in Steam as usual. Hadron does not need to stay open."
-                     : "Setup briefly closes Steam, adds Hadron as a Steam Play tool, then signs Steam again. You can launch games directly from Steam afterward. The first time, macOS may ask you to allow App Management under Privacy & Security.")
+                     : "Setup briefly closes Steam and adds Hadron to it as a Steam Play tool. After that, start games from Steam as usual. The first time, macOS may ask you to allow App Management under Privacy & Security.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -210,9 +210,6 @@ struct ContentView: View {
             if hasSteam && model.state != "not-installed" {
                 Divider()
                 HStack {
-                    Text("Steam integration")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     Spacer()
                     Button("Remove from Steam") { model.perform("steam-uninstall") }
                         .buttonStyle(.link)
