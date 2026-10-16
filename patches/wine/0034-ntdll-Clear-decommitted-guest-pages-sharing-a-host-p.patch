@@ -1,0 +1,72 @@
+From ddd17a9f672743f9358e251fcc377c35044f0e54 Mon Sep 17 00:00:00 2001
+From: Lennard Zehner <127147155+Moeweneier@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 09:36:08 +0200
+Subject: [PATCH] ntdll: Clear decommitted guest pages sharing a host page.
+
+On 16K hosts, decommitting/recommitting a boundary 4K guest page
+retained stale allocator data instead of the required zeros.
+
+Clear partial boundary bytes through the existing protection path,
+then restore protections after clearing commitment. Round the host end
+consistently for whole-view decommit, including small views.
+
+The original release fails decommit-zero at offset 4096. The correction
+passes 17 cases, including read-only pages and committed neighbours.
+
+Co-Authored-By: Codex <noreply@openai.com>
+---
+ dlls/ntdll/unix/virtual.c | 28 +++++++++++++++++++++++-----
+ 1 file changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 1b2c7db6af..9a3c0716d4 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -2693,14 +2693,28 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
+  */
+ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size )
+ {
+-    char *host_end, *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
++    char *host_end, *end, *partial_end;
++    char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
+ 
+-    if (!size)
++    if (!size) size = view->size;
++    end = base + size;
++    host_end = ROUND_ADDR( end, host_page_mask );
++
++    /* A guest page can share its host page with committed neighbours. These boundary
++     * bytes survive the whole-host-page remap below, so clear them before decommitting. */
++    partial_end = min( host_start, end );
++    if (base < partial_end)
++    {
++        if (mprotect_range( base, partial_end - base, VPROT_COMMITTED | VPROT_READ | VPROT_WRITE,
++                            VPROT_EXEC | VPROT_GUARD | VPROT_WRITEWATCH )) return STATUS_ACCESS_DENIED;
++        memset( base, 0, partial_end - base );
++    }
++    if (host_end >= host_start && host_end < end)
+     {
+-        size = view->size;
+-        host_end = host_start + view->size;
++        if (mprotect_range( host_end, end - host_end, VPROT_COMMITTED | VPROT_READ | VPROT_WRITE,
++                            VPROT_EXEC | VPROT_GUARD | VPROT_WRITEWATCH )) return STATUS_ACCESS_DENIED;
++        memset( host_end, 0, end - host_end );
+     }
+-    else host_end = ROUND_ADDR( base + size, host_page_mask );
+ 
+     if (host_start < host_end) anon_mmap_fixed( host_start, host_end - host_start, PROT_NONE, 0 );
+ #ifdef WX_EXCLUSIVE_HOST
+@@ -2711,6 +2725,10 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+     }
+ #endif
+     set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );
++    if (base < partial_end && mprotect_range( base, partial_end - base, 0, 0 ))
++        return STATUS_ACCESS_DENIED;
++    if (host_end >= host_start && host_end < end && mprotect_range( host_end, end - host_end, 0, 0 ))
++        return STATUS_ACCESS_DENIED;
+     if (host_start < host_end) kernel_writewatch_register_range( view, host_start, host_end - host_start );
+     return STATUS_SUCCESS;
+ }
+-- 
+2.47.1
+
