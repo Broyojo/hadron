@@ -2,7 +2,7 @@
 # Guard the Mac while a game runs: log memory once a second and stop every Hadron process
 # (scripts/stop) before the system starts thrashing. scripts/play starts it in the background.
 #
-# Usage: scripts/watchdog <log file> <pid>
+# Usage: scripts/watchdog <log file> <pid> | --check
 #
 # <pid> is the game's launcher process (scripts/play execs into it); the watchdog exits with it.
 #
@@ -17,6 +17,8 @@ log="$1" pid="$2"
 . "$ROOT/scripts/watchdog-policy.sh"
 mode=$(watchdog_runtime_mode "$ROOT" "$HADRON_RUNTIMES")
 watchdog_limits "$(( $(sysctl -n hw.memsize) / 1048576 ))" "$mode" || exit 1
+# play checks synchronously so invalid settings cannot leave Wine unguarded.
+[ "${1:-}" != --check ] || exit 0
 
 . "$ROOT/scripts/hadron-procs.sh"
 

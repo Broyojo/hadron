@@ -90,3 +90,19 @@ if watchdog_limits 16384 invalid >/dev/null 2>&1; then
     exit 1
 fi
 echo "watchdog policy: $checks decisions and runtime/invalid-input checks passed"
+
+# The real launch path must reject invalid settings before detaching the guard or Wine.
+probe=$(mktemp -d)
+trap 'rm -rf "$probe"' EXIT HUP INT TERM
+for variable in HADRON_MEM_LIMIT_GB HADRON_SWAP_LIMIT_MB HADRON_DISK_MIN_GB; do
+    if env "$variable=abc" "$ROOT/scripts/play" 0 "$probe/game.exe" > "$probe/output" 2>&1; then
+        echo "FAIL: play accepted invalid $variable" >&2
+        exit 1
+    fi
+    grep -q 'watchdog: limits must be' "$probe/output"
+    if grep -q 'memory log in\|Mac Steam not found\|logging to' "$probe/output"; then
+        echo "FAIL: play continued after invalid $variable" >&2
+        exit 1
+    fi
+done
+echo 'watchdog startup: invalid limits rejected synchronously'
