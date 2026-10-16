@@ -1365,3 +1365,13 @@ The principled fix is to have mtld3d and DXMT present through Wine's client surf
 per-present notification), removing 0012's special case and its edge cases (GDI drawing after a
 device is destroyed while the view survives; games mixing GDI and 3D in one window). Needs
 coordination with the mtld3d and DXMT developers.
+
+## Cities II and Ready or Not gameplay in an investigation runtime (#43)
+
+On 2026-10-16 the player confirmed Cities: Skylines II (Archipelago, Low/VeryLow
+settings) and Ready or Not (the supported -dx11 renderer option) working in-game
+on an M4/16 GB/macOS 27.0.1. These are mixed investigation-runtime results, not
+unmodified-release acceptance. Exact qualifications, the intentionally stopped
+D3D12 comparison, critical-pressure stop, unresolved exception and cursor issue
+are recorded in [the test report](fixes/cities2-readyornot.md). No game-specific
+code workaround or repository default is introduced by this report.
