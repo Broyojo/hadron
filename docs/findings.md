@@ -1336,9 +1336,11 @@ a view smaller than one host page, to release its backing. Other hosts keep thei
 
 Patch 0035 makes it cheap: a host page that is already writable, the usual case, is cleared in
 place with no alias, and mprotect runs afterwards only when the host page's protection changes.
-Aliases remain for read-only, executable and no-access host pages. A partial host page with
-no other committed guest page is replaced whole instead, as a whole-view decommit is, which
-releases its backing rather than faulting it in.
+Aliases remain for read-only, executable and no-access host pages. Whole and partial decommits
+take one path: a boundary host page is replaced whole only when nothing else in it is in use (no
+committed guest page of the view, no other view), which releases its backing rather than
+faulting it in. Wine splits placeholders only at host-page boundaries, so two views do not share
+a host page today; the check does not rely on that.
 
 Decommit plus recommit, x86_64 / ARM64 on an M2 Pro (`tests/win/decommit-bench.c`): a 4K page
 inside a host page 1.2 / 0.8 us before, 5.2 / 4.7 us with aliases always, 1.3 / 0.9 us with

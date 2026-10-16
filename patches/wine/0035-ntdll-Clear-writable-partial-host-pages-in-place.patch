@@ -1,4 +1,4 @@
-From ebffbba06c7167fe56d409de025de51732a06082 Mon Sep 17 00:00:00 2001
+From 90f56a2d085deab5960699c7f66d037b733bae54 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 16 Oct 2026 16:45:40 -0400
 Subject: [PATCH] ntdll: Clear writable partial host pages in place.
@@ -9,32 +9,41 @@ protection changes, which also leaves a MAP_JIT page's backing in place
 under a neighbour that may be running. Invalidate the instruction cache
 only for executable host pages.
 
-A partial host page with no other committed guest page is replaced whole
-instead, like a whole-view decommit, also when the whole view is
-decommitted with an explicit size and at the end of a view shorter than
-its host page: writing zeros would fault in backing that decommit should
-release.
+Whole and partial decommits take the same path: a boundary host page is
+replaced whole only when nothing else in it is in use, neither a committed
+guest page of the view nor another view, and otherwise cleared page by
+page. Replacing it releases the backing that writing zeros would fault in,
+as for a view shorter than its host page.
 ---
- dlls/ntdll/unix/virtual.c | 68 +++++++++++++++++++++++++++++++--------
- 1 file changed, 55 insertions(+), 13 deletions(-)
+ dlls/ntdll/unix/virtual.c | 84 +++++++++++++++++++++++++++++----------
+ 1 file changed, 64 insertions(+), 20 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index e7b091da3d..ee940fd067 100644
+index e7b091da3d..fc1e1e3335 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -2686,25 +2686,35 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
+@@ -2686,25 +2686,44 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
  
  
  #ifdef __APPLE__
 -/* Clear partial host pages without changing permissions on committed neighbours. */
 -static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, size_t size )
-+/* Whether a guest page of the host page at host_base, outside [start, end), is committed. */
-+static BOOL host_page_committed_outside( const char *host_base, const char *start, const char *end )
++/* Whether the host page at host_base holds anything in use besides [start, end) of the view: a
++ * committed guest page of the view, or another view (split placeholders can share a host page). */
++static BOOL host_page_in_use_outside( struct file_view *view, const char *host_base,
++                                      const char *start, const char *end )
 +{
-+    const char *page;
++    const char *page, *view_start = view->base, *view_end = view_start + view->size;
 +
 +    for (page = host_base; page < host_base + host_page_size; page += page_size)
-+        if ((page < start || page >= end) && (get_page_vprot( page ) & VPROT_COMMITTED)) return TRUE;
++    {
++        if (page >= start && page < end) continue;
++        if (page < view_start || page >= view_end)
++        {
++            if (find_view( page, 0 )) return TRUE;
++        }
++        else if (get_page_vprot( page ) & VPROT_COMMITTED) return TRUE;
++    }
 +    return FALSE;
 +}
 +
@@ -64,7 +73,7 @@ index e7b091da3d..ee940fd067 100644
      partial[1].base = host_end;
      if (host_end >= host_start && host_end < end) partial[1].size = end - host_end;
  
-@@ -2717,6 +2727,9 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+@@ -2717,6 +2736,9 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
          partial[i].jit = is_jit_view( view ) && (get_host_page_vprot( host_base ) & VPROT_EXECMODE);
          if (partial[i].jit) continue;
  #endif
@@ -74,7 +83,7 @@ index e7b091da3d..ee940fd067 100644
          ret = mach_vm_remap( mach_task_self(), &partial[i].alias, host_page_size, 0, VM_FLAGS_ANYWHERE,
                               mach_task_self(), (mach_vm_address_t)host_base, FALSE,
                               &cur_prot, &max_prot, VM_INHERIT_NONE );
-@@ -2740,9 +2753,14 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+@@ -2740,9 +2762,14 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
              continue;
          }
  #endif
@@ -90,49 +99,50 @@ index e7b091da3d..ee940fd067 100644
      }
      for (i = 0; i < 2; i++)
          if (partial[i].alias) mach_vm_deallocate( mach_task_self(), partial[i].alias, host_page_size );
-@@ -2761,10 +2779,11 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+@@ -2761,23 +2788,31 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
      char *host_end, *end;
  #ifdef __APPLE__
      char *partial_end;
 +    int head_prot, tail_prot;
  #endif
      char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
++    BOOL whole = !size;
  
 -    if (!size)
-+    if (!size || (base == (char *)view->base && size == view->size))
++    if (whole) size = view->size;
++#ifdef __APPLE__
++    host_end = ROUND_ADDR( base + size, host_page_mask );
      {
-         size = view->size;
-         /* A whole view has no committed neighbour in its final host page. */
-@@ -2772,11 +2791,25 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+-        size = view->size;
+-        /* A whole view has no committed neighbour in its final host page. */
+-        host_end = (char *)ROUND_SIZE( 0, base + size, host_page_mask );
++        char *head = ROUND_ADDR( base, host_page_mask );
++        NTSTATUS status;
++
++        /* A partial host page with nothing else in use is replaced whole: that zeroes it and
++         * releases its backing, which writing zeros would instead fault in. One shared with
++         * committed pages or another view is cleared page by page, whole view or not. */
++        if (head < host_start && !host_page_in_use_outside( view, head, base, base + size ))
++            host_start = head;
++        if (host_end < base + size && !host_page_in_use_outside( view, host_end, base, base + size ))
++            host_end += host_page_size;
++        if ((status = zero_partial_host_pages( view, base, base + size, host_start, host_end )))
++            return status;
      }
-     else
-     {
-+        host_end = ROUND_ADDR( base + size, host_page_mask );
- #ifdef __APPLE__
+-    else
+-    {
+-#ifdef __APPLE__
 -        NTSTATUS status = zero_partial_host_pages( view, base, size );
 -        if (status) return status;
-+        {
-+            char *head = ROUND_ADDR( base, host_page_mask );
-+            NTSTATUS status;
-+
-+            /* A partial host page with no other committed guest page is replaced whole: that
-+             * zeroes it and releases its backing, which writing zeros would instead fault in.
-+             * As for a whole view, the part of the host page past a short view is free. */
-+            if (head < host_start && head >= (char *)view->base &&
-+                !host_page_committed_outside( head, base, base + size ))
-+                host_start = head;
-+            if (host_end < base + size && host_end >= (char *)view->base &&
-+                !host_page_committed_outside( host_end, base, base + size ))
-+                host_end += host_page_size;
-+            if ((status = zero_partial_host_pages( view, base, base + size, host_start, host_end )))
-+                return status;
-+        }
++#else
++    host_end = whole ? host_start + size : ROUND_ADDR( base + size, host_page_mask );
  #endif
 -        host_end = ROUND_ADDR( base + size, host_page_mask );
-     }
+-    }
      end = base + size;
  #ifdef __APPLE__
-@@ -2790,13 +2823,22 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+     partial_end = min( host_start, end );
+@@ -2790,13 +2825,22 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
          /* the replaced host pages are no longer MAP_JIT-backed */
          if (host_start < host_end) set_page_vprot_bits( host_start, host_end - host_start, 0, VPROT_EXECMODE );
      }
