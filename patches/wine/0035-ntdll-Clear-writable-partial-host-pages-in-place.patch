@@ -1,0 +1,173 @@
+From 2da3375d2d13eeef2e101ac2b6e4df46152c7ec8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 16 Oct 2026 16:45:40 -0400
+Subject: [PATCH] ntdll: Clear writable partial host pages in place.
+
+A host page that is already writable needs no alias: zero the decommitted
+guest pages directly. Call mprotect afterwards only when the host page's
+protection changes, which also leaves a MAP_JIT page's backing in place
+under a neighbour that may be running. Invalidate the instruction cache
+for any host page with an executable guest page, including one that is
+flipped to write mode at the moment.
+
+Whole and partial decommits take the same path: a boundary host page is
+replaced whole only when nothing else in it is in use, neither a committed
+guest page of the view nor another view, and otherwise cleared page by
+page. Replacing it releases the backing that writing zeros would fault in,
+as for a view shorter than its host page.
+---
+ dlls/ntdll/unix/virtual.c | 86 +++++++++++++++++++++++++++++----------
+ 1 file changed, 64 insertions(+), 22 deletions(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index e7b091da3d..73e4dc56ce 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -2686,25 +2686,44 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, size_t max
+ 
+ 
+ #ifdef __APPLE__
+-/* Clear partial host pages without changing permissions on committed neighbours. */
+-static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, size_t size )
++/* Whether the host page at host_base holds anything in use besides [start, end) of the view: a
++ * committed guest page of the view, or another view (split placeholders can share a host page). */
++static BOOL host_page_in_use_outside( struct file_view *view, const char *host_base,
++                                      const char *start, const char *end )
++{
++    const char *page, *view_start = view->base, *view_end = view_start + view->size;
++
++    for (page = host_base; page < host_base + host_page_size; page += page_size)
++    {
++        if (page >= start && page < end) continue;
++        if (page < view_start || page >= view_end)
++        {
++            if (find_view( page, 0 )) return TRUE;
++        }
++        else if (get_page_vprot( page ) & VPROT_COMMITTED) return TRUE;
++    }
++    return FALSE;
++}
++
++/* Clear the guest pages of [base, end) outside [host_start, host_end) without changing
++ * permissions on committed neighbours. */
++static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, char *end,
++                                         char *host_start, char *host_end )
+ {
+     struct
+     {
+         char *base;
+         size_t size;
+         mach_vm_address_t alias;
++        BYTE vprot;
+         BOOL jit;
+     } partial[2] = {{0}};
+-    char *end = base + size;
+-    char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
+-    char *host_end = ROUND_ADDR( end, host_page_mask );
+     vm_prot_t cur_prot, max_prot;
+     kern_return_t ret = KERN_SUCCESS;
+     unsigned int i;
+ 
+     partial[0].base = base;
+-    partial[0].size = min( host_start, end ) - base;
++    if (base < host_start) partial[0].size = min( host_start, end ) - base;
+     partial[1].base = host_end;
+     if (host_end >= host_start && host_end < end) partial[1].size = end - host_end;
+ 
+@@ -2717,6 +2736,9 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+         partial[i].jit = is_jit_view( view ) && (get_host_page_vprot( host_base ) & VPROT_EXECMODE);
+         if (partial[i].jit) continue;
+ #endif
++        /* A host page that is already writable is cleared in place, with no alias. */
++        partial[i].vprot = get_host_page_vprot( host_base );
++        if (get_unix_prot( partial[i].vprot ) & PROT_WRITE) continue;
+         ret = mach_vm_remap( mach_task_self(), &partial[i].alias, host_page_size, 0, VM_FLAGS_ANYWHERE,
+                              mach_task_self(), (mach_vm_address_t)host_base, FALSE,
+                              &cur_prot, &max_prot, VM_INHERIT_NONE );
+@@ -2740,9 +2762,12 @@ static NTSTATUS zero_partial_host_pages( struct file_view *view, char *base, siz
+             continue;
+         }
+ #endif
+-        memset( (char *)partial[i].alias + (partial[i].base - host_base), 0, partial[i].size );
+-        /* The original VA may retain executable instructions after an alias write. */
+-        sys_icache_invalidate( partial[i].base, partial[i].size );
++        if (partial[i].alias)
++            memset( (char *)partial[i].alias + (partial[i].base - host_base), 0, partial[i].size );
++        else
++            memset( partial[i].base, 0, partial[i].size );
++        /* An executable page may have run code from here, even one now flipped to write mode. */
++        if (partial[i].vprot & VPROT_EXEC) sys_icache_invalidate( partial[i].base, partial[i].size );
+     }
+     for (i = 0; i < 2; i++)
+         if (partial[i].alias) mach_vm_deallocate( mach_task_self(), partial[i].alias, host_page_size );
+@@ -2761,23 +2786,31 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+     char *host_end, *end;
+ #ifdef __APPLE__
+     char *partial_end;
++    int head_prot, tail_prot;
+ #endif
+     char *host_start = (char *)ROUND_SIZE( 0, base, host_page_mask );
++    BOOL whole = !size;
+ 
+-    if (!size)
++    if (whole) size = view->size;
++#ifdef __APPLE__
++    host_end = ROUND_ADDR( base + size, host_page_mask );
+     {
+-        size = view->size;
+-        /* A whole view has no committed neighbour in its final host page. */
+-        host_end = (char *)ROUND_SIZE( 0, base + size, host_page_mask );
++        char *head = ROUND_ADDR( base, host_page_mask );
++        NTSTATUS status;
++
++        /* A partial host page with nothing else in use is replaced whole: that zeroes it and
++         * releases its backing, which writing zeros would instead fault in. One shared with
++         * committed pages or another view is cleared page by page, whole view or not. */
++        if (head < host_start && !host_page_in_use_outside( view, head, base, base + size ))
++            host_start = head;
++        if (host_end < base + size && !host_page_in_use_outside( view, host_end, base, base + size ))
++            host_end += host_page_size;
++        if ((status = zero_partial_host_pages( view, base, base + size, host_start, host_end )))
++            return status;
+     }
+-    else
+-    {
+-#ifdef __APPLE__
+-        NTSTATUS status = zero_partial_host_pages( view, base, size );
+-        if (status) return status;
++#else
++    host_end = whole ? host_start + size : ROUND_ADDR( base + size, host_page_mask );
+ #endif
+-        host_end = ROUND_ADDR( base + size, host_page_mask );
+-    }
+     end = base + size;
+ #ifdef __APPLE__
+     partial_end = min( host_start, end );
+@@ -2790,13 +2823,22 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+         /* the replaced host pages are no longer MAP_JIT-backed */
+         if (host_start < host_end) set_page_vprot_bits( host_start, host_end - host_start, 0, VPROT_EXECMODE );
+     }
++#endif
++#ifdef __APPLE__
++    head_prot = get_unix_prot( get_host_page_vprot( base ) );
++    tail_prot = get_unix_prot( get_host_page_vprot( host_end ) );
+ #endif
+     set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );
+ 
+ #ifdef __APPLE__
+-    if (base < partial_end && mprotect_range( base, partial_end - base, 0, 0 ))
++    /* Committed neighbours usually keep a partial host page's protection unchanged; leaving it
++     * alone also keeps a MAP_JIT page's backing in place under a neighbour that may be running. */
++    if (base < partial_end && get_unix_prot( get_host_page_vprot( base ) ) != head_prot &&
++        mprotect_range( base, partial_end - base, 0, 0 ))
+         return STATUS_ACCESS_DENIED;
+-    if (host_end >= host_start && host_end < end && mprotect_range( host_end, end - host_end, 0, 0 ))
++    if (host_end >= host_start && host_end < end &&
++        get_unix_prot( get_host_page_vprot( host_end ) ) != tail_prot &&
++        mprotect_range( host_end, end - host_end, 0, 0 ))
+         return STATUS_ACCESS_DENIED;
+ 
+ #endif
+-- 
+2.54.0 (Apple Git-157)
+
