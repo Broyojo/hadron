@@ -99,17 +99,22 @@ struct ContentView: View {
 
     private var isSetUp: Bool { model.state == "installed" }
     private var hasSteam: Bool { model.state != "no-steam" }
+    private var needsRepair: Bool { model.state == "outdated" || model.state == "broken" }
     /// macOS asks before one app may change another; a refusal shows up as this error.
     private var blockedByMacOS: Bool { model.failed && model.output.contains("Operation not permitted") }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 14) {
-                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 3) {
                     Text("Hadron").font(.title2.weight(.semibold))
-                    Text("Version \(Runtime.version)").font(.callout).foregroundStyle(.secondary)
+                    Text("Windows games on your Mac · Version \(Runtime.version)")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
+                Spacer()
             }
 
             if let version = model.newVersion, let page = model.newVersionPage {
@@ -118,32 +123,55 @@ struct ContentView: View {
                     Text("Hadron \(version) is available.")
                     Button("Get it") { NSWorkspace.shared.open(page) }
                 }
+                .font(.subheadline)
             }
 
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 14) {
                 Image(systemName: isSetUp ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.title2)
                     .foregroundStyle(isSetUp ? .green : .orange)
-                Text(model.message)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(isSetUp ? "Ready to play" : needsRepair ? "Steam needs repair" : hasSteam ? "Set up Steam Play" : "Steam is needed")
+                        .font(.headline)
+                    Text(model.message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(isSetUp ? "Play from Steam" : "How setup works")
+                    .font(.headline)
+                Text(isSetUp
+                     ? "Install and launch Windows games in Steam as usual. Hadron does not need to stay open."
+                     : "Setup briefly closes Steam, adds Hadron as a Steam Play tool, then signs Steam again. You can launch games directly from Steam afterward. The first time, macOS may ask you to allow App Management under Privacy & Security.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Setting up closes Steam, adds Hadron to it as a Steam Play tool and signs Steam again. "
-                 + "After that, install and play Windows games from Steam as usual; Hadron does not need to stay open."
-                 + (isSetUp ? "" : "\n\nThe first time, macOS stops Hadron and asks you to allow it under Privacy & Security, App Management. Allow it there, then set up again."))
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-
-            HStack {
+            HStack(spacing: 10) {
                 if hasSteam {
-                    Button(isSetUp || model.state == "not-installed" ? (isSetUp ? "Repair" : "Set up Steam") : "Repair") {
-                        model.perform("steam-install")
-                    }
-                    .keyboardShortcut(isSetUp ? nil : .defaultAction)
-                    Button("Uninstall") { model.perform("steam-uninstall") }
-                        .disabled(model.state == "not-installed")
                     if isSetUp {
                         Button("Open Steam") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Steam.app")) }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                        Button("Repair") { model.perform("steam-install") }
+                    } else {
+                        Button(model.state == "not-installed" ? "Set up Steam" : "Repair") {
+                            model.perform("steam-install")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
                     }
                 } else {
                     Button("Get Steam") { NSWorkspace.shared.open(URL(string: "https://store.steampowered.com/about/")!) }
+                        .buttonStyle(.borderedProminent)
                     Button("Check again") { model.refresh() }
                 }
                 Spacer()
@@ -178,9 +206,23 @@ struct ContentView: View {
                 Button("Add the hadron command for Terminal…") { model.installCommand() }
                     .buttonStyle(.link).font(.callout).disabled(model.busy)
             }
+
+            if hasSteam && model.state != "not-installed" {
+                Divider()
+                HStack {
+                    Text("Steam integration")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Remove from Steam") { model.perform("steam-uninstall") }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .disabled(model.busy)
+                }
+            }
         }
-        .padding(20)
-        .frame(width: 520)
+        .padding(24)
+        .frame(width: 560)
         .onAppear {
             model.refresh()
             // A released app updates itself; any other build only says that there is a newer one.
