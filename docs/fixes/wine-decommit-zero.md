@@ -20,3 +20,12 @@ Build with llvm-mingw's x86_64/i686 compilers, then run through scripts/play wit
 This corrects memory semantics, not a game default or fabricated platform capability.
 The initial runtime tests included unrelated experimental Wine/DXMT changes; the patch queue
 is checked independently against current main and no dependency on those experiments is proposed.
+
+## Independent PR build verification (2026-10-16)
+
+Applied current main's Wine patches 0030–0033 to the prior pinned queue, then applied only
+this patch as 0034. Built `ntdll.so` from that tree, without the experimental executable-ASLR
+or foreign-swapchain source changes. Installed only this ntdll in the guarded diagnostic
+runtime. Both x86_64 and i386 runs again pass all 17 cases (10:45 and 10:46).
+The remaining runtime components were retained from the diagnostic copy; this verifies the
+independent memory implementation, not a fully packaged current-main release.
