@@ -14,3 +14,8 @@ xcrun clang -O2 -Wall -Wextra -o "$icon.new" "$ROOT/launcher/hadron-icon.c" \
     -framework ImageIO -framework CoreGraphics -framework CoreFoundation
 mv -f "$icon.new" "$icon"
 log "built $icon"
+
+memory="$DIST/bin/hadron-memory"
+xcrun clang -O2 -Wall -Wextra -o "$memory.new" "$ROOT/launcher/hadron-memory.c"
+mv -f "$memory.new" "$memory"
+log "built $memory"

@@ -8,8 +8,8 @@
 # HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis.
 # FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
-# A watchdog stops the game before memory use can make the Mac thrash; HADRON_MEM_LIMIT_GB
-# (default half of RAM) and HADRON_SWAP_LIMIT_MB (default 2048) set its limits.
+# A watchdog warns at half of RAM and stops at critical pressure or an emergency limit.
+# HADRON_MEM_LIMIT_GB and HADRON_SWAP_LIMIT_MB set explicit hard limits.
 # Scrolling sends whole wheel notches, which every game handles; HADRON_PRECISE_SCROLLING=1 sends
 # fractions for smooth scrolling, for applications that scale by the wheel delta.
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
@@ -105,8 +105,8 @@ mkdir -p "$HADRON_LOGS"
 if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
     memlog="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).mem.log"
     echo "watchdog: memory log in $memlog" >&2
-    # $$ is this script's PID, which the exec below hands to Wine.
-    nohup "$ROOT/scripts/watchdog" "$memlog" $$ >/dev/null 2>&1 &
+    # Steam keeps its outer session alive through launcher exits; a manual run uses this PID.
+    nohup "$ROOT/scripts/watchdog" "$memlog" "${HADRON_SESSION_PID:-$$}" >/dev/null 2>&1 &
 fi
 if [ -n "$HADRON_LOG" ]; then
     log="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).log"

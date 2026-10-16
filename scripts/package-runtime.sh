@@ -29,6 +29,7 @@ for lib in FREETYPE GNUTLS SDL2 VULKAN; do
 done
 
 [[ -x "$DIST/bin/wine" ]] || die "no runtime in $DIST: build it first"
+[[ -x "$DIST/bin/hadron-memory" ]] || die "no memory helper in $DIST: run scripts/build-launcher.sh"
 [[ -f "$BUILD/notproton/notproton.dylib" && -f "$BUILD/notproton/overlay-shim.dylib" && -x "$BUILD/notproton/activation-request" ]] ||
     die "missing a Steam integration library or activation requester, run scripts/build-steam-play.sh"
 
@@ -86,7 +87,7 @@ for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ win
 done
 
 mkdir -p "$OUT/scripts" "$OUT/steam" "$OUT/licenses" "$EXT"
-for script in hadron-procs.sh mtld3d-prefix paths.sh play report runtime-versions.sh shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
+for script in hadron-procs.sh mtld3d-prefix paths.sh play report runtime-versions.sh shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog watchdog-policy.sh; do
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -R "$ROOT/config" "$OUT/config"
