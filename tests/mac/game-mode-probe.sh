@@ -14,7 +14,16 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 pgrep -x wineserver >/dev/null && { echo "a Wine program is running; quit it first" >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/hadron-game-mode.XXXXXX") || exit 1
-trap 'WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -k 2>/dev/null; rm -rf "$work"' EXIT
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+# Whatever happens, the probe's Wine ends and its bundles leave LaunchServices with its folder.
+cleanup() {
+    WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -k 2>/dev/null
+    WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -w 2>/dev/null
+    for app in "$work"/*.app; do [ -d "$app" ] && "$lsregister" -u "$app" 2>/dev/null; done
+    rm -rf "$work"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 "$ROOT/toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang" -O2 -o "$work/fsmode.exe" \
     "$ROOT/tests/win/fsmode.c" -luser32 -lgdi32 || exit 1
 echo "making a prefix"
@@ -23,7 +32,6 @@ if ! WINEPREFIX="$work/prefix" "$ROOT/scripts/wine-run" wineboot -i > "$work/win
     tail -20 "$work/wineboot.log" >&2
     exit 1
 fi
-lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 launcher="Z:$(printf '%s' "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" | tr '/' '\\')"
 exe="Z:$(printf '%s' "$work/fsmode.exe" | tr '/' '\\')"
 # The primary display's desktop size, in points: what Wine reports as \\.\DISPLAY1's mode.
@@ -75,6 +83,8 @@ EOF
     if [ -z "$window_pid" ]; then
         echo "$how: the program did not start within a minute; no result" >&2
         WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -k 2>/dev/null
+        WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -w 2>/dev/null
+        "$lsregister" -u "$app" 2>/dev/null
         continue
     fi
     sleep 3
@@ -98,7 +108,8 @@ EOF
     note=
     [ "$after" -gt "$before" ] && note=" (asking for the front started another process: ignore this line)"
     echo "$how: RunningBoard sees the window's process (pid ${window_pid:-?}) as ${who:-nothing: RunningBoard has no record of it}; in front: ${front:-?}; $mode$note"
+    # The next route starts only once this one's Wine has ended.
     WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -k 2>/dev/null
+    WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -w 2>/dev/null
     "$lsregister" -u "$app" 2>/dev/null
-    sleep 3
 done
