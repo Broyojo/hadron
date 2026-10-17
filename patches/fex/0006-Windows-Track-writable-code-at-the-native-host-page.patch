@@ -1,0 +1,195 @@
+From 3c109d01b6456eda50f34c51fbe0a61a7f9a6eb1 Mon Sep 17 00:00:00 2001
+From: Lennard Zehner <127147155+Moeweneier@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 23:35:06 +0200
+Subject: [PATCH] Windows: Track writable code at the native host page
+ granularity.
+
+Query the native page size through an optional output of the existing
+JIT support call, so older PE modules and helpers retain their ABI.
+Protect tracked writable code across the complete host page and invalidate
+its translations together before restoring write access. Remove stale
+writable-code intervals after real read-only protection changes.
+
+Downstream Hadron patch. Coarse page protections otherwise leave translated
+code stale on macOS when several Windows pages share a host page.
+
+Co-authored-by: Codex <noreply@openai.com>
+---
+ Source/Windows/Common/FEXUnixLib.cpp          | 11 ++++++++
+ Source/Windows/Common/FEXUnixLib.h            |  3 ++
+ Source/Windows/Common/InvalidationTracker.cpp | 28 +++++++++++--------
+ Source/Windows/Common/InvalidationTracker.h   |  1 +
+ Source/Windows/UnixLib/FEXUnixLib.cpp         |  2 ++
+ Source/Windows/UnixLib/FEXUnixLib.h           |  6 ++++
+ 6 files changed, 39 insertions(+), 12 deletions(-)
+
+diff --git a/Source/Windows/Common/FEXUnixLib.cpp b/Source/Windows/Common/FEXUnixLib.cpp
+index d59f1782f..6925af7ce 100644
+--- a/Source/Windows/Common/FEXUnixLib.cpp
++++ b/Source/Windows/Common/FEXUnixLib.cpp
+@@ -215,6 +215,17 @@ void* MapFile(HANDLE FileHandle, uint64_t MapSize) {
+   return nullptr;
+ }
+ 
++uint32_t GetHostPageSize() {
++  FEXUnixLib_HostMemoryInfo Args {};
++  Call(FEXUnixLibFunctions::JITWriteProtectSupported, &Args);
++  if (Args.PageSize >= 4096 && Args.PageSize <= 65536 && !(Args.PageSize & (Args.PageSize - 1))) {
++    return Args.PageSize;
++  }
++  SYSTEM_INFO Info {};
++  GetSystemInfo(&Info);
++  return Info.dwPageSize;
++}
++
+ uint32_t GetPID() {
+   if (Available()) {
+     FEXUnixLib_GetPID Args {};
+diff --git a/Source/Windows/Common/FEXUnixLib.h b/Source/Windows/Common/FEXUnixLib.h
+index 8a2b2faf6..0b2ed4d2c 100644
+--- a/Source/Windows/Common/FEXUnixLib.h
++++ b/Source/Windows/Common/FEXUnixLib.h
+@@ -60,4 +60,7 @@ void* MapFile(HANDLE FileHandle, uint64_t MapSize);
+ // Or returns the process ID otherwise.
+ uint32_t GetPID();
+ 
++// Native memory protections may cover several Windows pages.
++uint32_t GetHostPageSize();
++
+ } // namespace FEX::Windows::UnixLib
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index 155403d35..03e68e897 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -7,6 +7,7 @@
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include "InvalidationTracker.h"
++#include "FEXUnixLib.h"
+ #include <windef.h>
+ #include <winternl.h>
+ 
+@@ -14,6 +15,7 @@ namespace FEX::Windows {
+ InvalidationTracker::InvalidationTracker(FEXCore::Context::Context& CTX, const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads)
+   : CTX {CTX}
+   , Threads {Threads} {
++  HostPageSize = UnixLib::GetHostPageSize();
+   FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
+   SMCDetectionDisabled = (SMCChecks == FEXCore::Config::CONFIG_SMC_NONE);
+ 
+@@ -61,6 +63,8 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
+       if (EffectiveRWX) {
+         LogMan::Msg::DFmt("Add SMC interval: {:X} - {:X}", AlignedBase, AlignedBase + AlignedSize);
+         RWXIntervals.Insert(ProtInterval);
++      } else {
++        RWXIntervals.Remove(ProtInterval);
+       }
+       if (DEPDisabled && !HasExec) {
+         DEPPromotedIntervals.Insert(ProtInterval);
+@@ -213,16 +217,18 @@ void InvalidationTracker::InvalidateAlignedInterval(uint64_t Address, uint64_t S
+ }
+ 
+ void InvalidationTracker::ReprotectRWXIntervals(uint64_t Address, uint64_t Size) {
+-  ProtectRWXIntervalsInternal(Address, Size, false);
++  const auto Base = Address & ~(HostPageSize - 1);
++  const auto Length = (Address - Base + Size + HostPageSize - 1) & ~(HostPageSize - 1);
++  ProtectRWXIntervalsInternal(Base, Length, false);
+ }
+ 
+ bool InvalidationTracker::HandleRWXAccessViolation(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPc, uint64_t FaultAddress) {
+-  const auto [NeedsInvalidate, UntrapProt] = [&](uint64_t Address) -> std::pair<bool, ULONG> {
++  const auto NeedsInvalidate = [&](uint64_t Address) {
+     std::shared_lock Lock(IntervalsLock);
+     if (!RWXIntervals.Query(Address).Enclosed) {
+-      return {false, 0};
++      return false;
+     }
+-    return {true, GetUntrapProt(Address)};
++    return true;
+   }(FaultAddress);
+ 
+   if (NeedsInvalidate) {
+@@ -230,13 +236,10 @@ bool InvalidationTracker::HandleRWXAccessViolation(FEXCore::Core::InternalThread
+     {
+       std::scoped_lock Lock(CTX.GetCodeInvalidationMutex());
+ 
+-      InvalidateIntervalInternalLocked(FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE);
+-
+-      // Invalidate, then unprotect the faulting page with the compilation lock held to ensure that any racing invalidations are not dropped.
+-      ULONG TmpProt;
+-      void* TmpAddress = reinterpret_cast<void*>(FaultAddress);
+-      SIZE_T TmpSize = 1;
+-      NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, UntrapProt, &TmpProt);
++      // A writable subpage makes the entire native page writable. Invalidate and
++      // restore every tracked writable code interval it contains before releasing the lock.
++      const auto Base = FaultAddress & ~(HostPageSize - 1);
++      ProtectRWXIntervalsInternal(Base, HostPageSize, true);
+     }
+     DetectMonoBackpatcherBlock(Thread, HostPc);
+     return true;
+@@ -339,6 +342,7 @@ void InvalidationTracker::InvalidateIntervalInternalLocked(uint64_t Address, uin
+ }
+ 
+ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t Size, bool ForWriteLocked) {
++  const auto Begin = Address;
+   const auto End = Address + Size;
+   std::shared_lock Lock(IntervalsLock);
+ 
+@@ -356,7 +360,7 @@ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t
+           // applied and the invalidation mutex must be locked throughout.
+           // Do this lazily only when an RWX region is actually hit.
+           // NOTE: This assumes CodeInvalidationMutex is locked by the caller
+-          InvalidateIntervalInternalLocked(Address, Size);
++          InvalidateIntervalInternalLocked(Begin, Size);
+         }
+         HitRWXInterval = true;
+       }
+diff --git a/Source/Windows/Common/InvalidationTracker.h b/Source/Windows/Common/InvalidationTracker.h
+index d2a80bcaa..eb3fbb991 100644
+--- a/Source/Windows/Common/InvalidationTracker.h
++++ b/Source/Windows/Common/InvalidationTracker.h
+@@ -63,6 +63,7 @@ private:
+   std::shared_mutex IntervalsLock;
+   FEXCore::Context::Context& CTX;
+   const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads;
++  uint64_t HostPageSize {4096};
+   bool SMCDetectionDisabled {false};                    // Protected by IntervalsLock
+   bool DEPDisabled {false};                             // Protected by IntervalsLock
+   FEXCore::IntervalList<uint64_t> DEPPromotedIntervals; // Protected by IntervalsLock
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index 632e98a6d..a78aba1b2 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -220,6 +220,7 @@ static NTSTATUS FEXUnixLib_GetPIDHandler(void* _Args) {
+ // Wine backs FEX's code buffers with MAP_JIT memory on macOS (MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT),
+ // which is writable or executable per thread. FEX switches the calling thread around code writes.
+ static NTSTATUS FEXUnixLib_JITWriteProtectSupportedHandler(void* _Args) {
++  if (_Args) reinterpret_cast<FEXUnixLib_HostMemoryInfo*>(_Args)->PageSize = getpagesize();
+   return pthread_jit_write_protect_supported_np() ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
+ }
+ 
+@@ -229,6 +230,7 @@ static NTSTATUS FEXUnixLib_JITWriteProtectHandler(void* _Args) {
+ }
+ #else
+ static NTSTATUS FEXUnixLib_JITWriteProtectSupportedHandler(void* _Args) {
++  if (_Args) reinterpret_cast<FEXUnixLib_HostMemoryInfo*>(_Args)->PageSize = getpagesize();
+   return STATUS_NOT_SUPPORTED;
+ }
+ 
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.h b/Source/Windows/UnixLib/FEXUnixLib.h
+index 20e242f4a..8c5277a56 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.h
++++ b/Source/Windows/UnixLib/FEXUnixLib.h
+@@ -72,3 +72,9 @@ struct FEXUnixLib_JITWriteProtect {
+   bool Protect;
+ };
+ static_assert(sizeof(FEXUnixLib_JITWriteProtect) == 1);
++
++// Optional output of JITWriteProtectSupported; older helpers leave it untouched.
++struct FEXUnixLib_HostMemoryInfo {
++  uint32_t PageSize;
++};
++static_assert(sizeof(FEXUnixLib_HostMemoryInfo) == 4, "host memory query ABI");
+-- 
+2.47.1
+
