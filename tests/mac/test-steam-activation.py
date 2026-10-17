@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix='hadron-route-') as temporary:
     runtime = base / 'runtime with spaces'
     scripts = runtime / 'scripts'
     scripts.mkdir(parents=True)
-    for name in ('steam-run', 'paths.sh', 'runtime-versions.sh'):
+    for name in ('steam-run', 'paths.sh', 'retina.sh', 'runtime-versions.sh'):
         shutil.copy2(root / 'scripts' / name, scripts / name)
     # No BUILD-ID: runtime management cannot select/copy a real installation.
     events = base / 'events.jsonl'
