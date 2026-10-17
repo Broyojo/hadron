@@ -279,13 +279,21 @@ keep_watching() {
     exec 8>"$STEAM_COMPAT_DATA_PATH/.hadron-watchdog-lock"
     lockf -s -t 10 8 || { exec 8>&-; return 0; }
     # One such watchdog per session: programs share the prefix, and each that returns would add one.
-    # The recorded process counts only while it still is that watchdog: a PID can be reused.
-    _watching=$(cat "$WINEPREFIX/.hadron-session-watchdog" 2>/dev/null)
-    case "$(ps -o args= -p "${_watching:-0}" 2>/dev/null)" in *"/scripts/watchdog "*-after.mem.log*) exec 8>&-; return 0 ;; esac
+    # A recorded watchdog counts only while it still is one (a PID can be reused) and its waiter,
+    # which ends with the session it watches, still runs: one left from a session that just ended
+    # does not cover the new one.
+    read -r _watching _waiter < "$WINEPREFIX/.hadron-session-watchdog" 2>/dev/null
+    case "$(ps -o args= -p "${_watching:-0}" 2>/dev/null)" in
+        *"/scripts/watchdog "*-after.mem.log*)
+            case "$(ps -o args= -p "${_waiter:-0}" 2>/dev/null)" in
+                *wineserver*-w*) exec 8>&-; return 0 ;;
+            esac ;;
+    esac
     "$wineserver" -w >/dev/null 2>&1 8>&- &
-    nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" $! \
+    _waiter=$!
+    nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" "$_waiter" \
         >/dev/null 2>&1 8>&- &
-    echo $! > "$WINEPREFIX/.hadron-session-watchdog"
+    echo "$! $_waiter" > "$WINEPREFIX/.hadron-session-watchdog"
     exec 8>&-
 }
 # A program shares its prefix with other programs: stopping it stops its own process, not the
