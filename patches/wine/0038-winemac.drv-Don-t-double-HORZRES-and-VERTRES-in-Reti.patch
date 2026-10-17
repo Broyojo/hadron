@@ -1,0 +1,32 @@
+From 4f5afb1a98b48c6299e66a8bd274f7b83871a5e8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 17 Oct 2026 01:19:31 -0400
+Subject: [PATCH 38/38] winemac.drv: Don't double HORZRES and VERTRES in Retina
+ mode.
+
+In Retina mode the display's rectangle is already in pixels, and win32u's
+fallback returns its size, so doubling it reported twice the screen width:
+HORZRES 6048 against SM_CXSCREEN 3024 on a 3024x1964 display.
+---
+ dlls/winemac.drv/gdi.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/dlls/winemac.drv/gdi.c b/dlls/winemac.drv/gdi.c
+index 69a0aa7faf..145c9d3ec8 100644
+--- a/dlls/winemac.drv/gdi.c
++++ b/dlls/winemac.drv/gdi.c
+@@ -216,10 +216,7 @@ static INT macdrv_GetDeviceCaps(PHYSDEV dev, INT cap)
+     default:
+         pthread_mutex_unlock(&device_data_mutex);
+         dev = GET_NEXT_PHYSDEV( dev, pGetDeviceCaps );
+-        ret = dev->funcs->pGetDeviceCaps( dev, cap );
+-        if ((cap == HORZRES || cap == VERTRES) && retina_on)
+-            ret *= 2;
+-        return ret;
++        return dev->funcs->pGetDeviceCaps( dev, cap );
+     }
+ 
+     TRACE("cap %d -> %d\n", cap, ret);
+-- 
+2.54.0 (Apple Git-157)
+
