@@ -4,8 +4,10 @@
 #
 # Retina mode has to be the same in every process of a prefix. It is always passed on, 0 or 1, so
 # that a RetinaMode left in a prefix's registry (CrossOver's "High Resolution") does not turn it on
-# unasked. A launch that finds a Wine session running in the prefix takes the session's setting,
-# whatever its own HADRON_RETINA says. One launch decides at a time: the first records its setting
+# unasked. A launch that finds a Wine session running in the prefix takes the session's setting.
+# A launch that asks for the other setting (HADRON_RETINA set) first waits a little for that session
+# to end: Steam runs a helper in the prefix just before the game, without the game's launch options,
+# and its session can still be closing when the game starts. One launch decides at a time: the first records its setting
 # and starts the prefix's wineserver before letting the next look, so two launches into an idle
 # prefix do not both decide.
 #
@@ -31,6 +33,11 @@ retina_decide() {
     if ! lockf -s -t 60 6; then
         echo "another launch has held $PREFIX/.hadron-retina.lock for a minute; not starting" >&2
         exit 1
+    fi
+    if [ -n "${HADRON_RETINA:-}" ] && retina_session_running &&
+        [ "$(cat "$PREFIX/.hadron-retina" 2>/dev/null)" != "$_requested" ]; then
+        _wait=15
+        while [ "$_wait" -gt 0 ] && retina_session_running; do sleep 1; _wait=$((_wait - 1)); done
     fi
     if retina_session_running; then
         _joined=$(cat "$PREFIX/.hadron-retina" 2>/dev/null)

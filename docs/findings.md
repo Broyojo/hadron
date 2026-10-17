@@ -1499,6 +1499,11 @@ and winemac reads that first (Wine patch 0038; patch 0037 lets Unix libraries as
 prefix's path, which every process of it knows), then `HADRON_RETINA`, then the registry.
 `HADRON_RETINA=1` in a game's launch options turns it on for that game. Off by default: four times
 the pixels cost frame rate, and older games get tiny menus.
+Steam runs a helper (`iscriptevaluator.exe`) in the prefix just before some games, without their launch
+options, so its session was in points when Teardown started and Teardown joined it. A launch that asks
+for the other setting now waits up to 15 seconds for such a session to end: a helper's ends about 3
+seconds after it exits, and the game then starts in pixels. A session still running after that is
+joined as before.
 It is always passed on, 0 or 1, so a `RetinaMode` left in a prefix's registry (CrossOver's "High
 Resolution", in a prefix NotProton made) does not turn it on unasked: with `RetinaMode=y` in the
 registry and no launch option, the report shows points.
