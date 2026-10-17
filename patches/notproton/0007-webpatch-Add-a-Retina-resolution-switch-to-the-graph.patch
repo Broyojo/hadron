@@ -1,0 +1,117 @@
+From 875b91d66122a1cb8297a093f3acd71e68185d63 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 17 Oct 2026 11:40:40 -0400
+Subject: [PATCH] webpatch: Add a Retina resolution switch to the graphics
+ options
+
+Hadron's launcher reads HADRON_RETINA=1 from a game's launch options and
+shows the game the display's real pixels instead of points. Offer it as a
+checkbox beside the Metal HUD, writing the same launch option. CrossOver's
+high-resolution word, NOTPROTON_RETINA, stays unread and does not show
+the box as checked.
+---
+ dylib/feats/webpatch.c                  |  6 ++++--
+ dylib/tests/panel-behavior/behavior.js  | 21 ++++++++++++++++-----
+ dylib/tests/panel-behavior/switching.js |  6 ++++++
+ 3 files changed, 26 insertions(+), 7 deletions(-)
+
+diff --git a/dylib/feats/webpatch.c b/dylib/feats/webpatch.c
+index cc4d246..8d0dc7d 100644
+--- a/dylib/feats/webpatch.c
++++ b/dylib/feats/webpatch.c
+@@ -105,7 +105,8 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
+ }
+ 
+ // Graphics options panel: the options Hadron's renderers read. CrossOver's backend choice,
+-// DLSS, AVX2 for Rosetta, MSync and its high-resolution switch have no effect there.
++// DLSS, AVX2 for Rosetta, MSync and its high-resolution switch have no effect there; Hadron's
++// own Retina switch is HADRON_RETINA.
+ #define NP_CX_OPTIONS_CSS \
+     "\".MSCXPanel{margin-top:10px}" \
+     ".MSCXPanel .MSCXRow{display:flex;flex-direction:row;padding:9px;margin:0;" \
+@@ -136,7 +137,8 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
+     "return(0," RT ".jsx)(\"div\",{className:\"MSCXPanel\",children:(0," RT ".jsxs)(" RT ".Fragment,{children:[" \
+     "(0," RT ".jsx)(\"style\",{children:" NP_CX_OPTIONS_CSS "})," \
+     "(0," RT ".jsxs)(" BARREL ".XY,{label:\"Graphics\",children:[" \
+-    "T([\"MTL_HUD_ENABLED\"],\"Metal HUD\",\"1\")" \
++    "T([\"MTL_HUD_ENABLED\"],\"Metal HUD\",\"1\")," \
++    "T([\"HADRON_RETINA\"],\"Retina resolution (the display's real pixels: sharper, slower)\",\"1\")" \
+     "]},\"gfx\")," \
+     "(0," RT ".jsx)(" BARREL ".XY," \
+     "{label:\"MetalFX Upscaling (Direct3D 10 and 11 games. Samples from the resolution the game is set to)\"," \
+diff --git a/dylib/tests/panel-behavior/behavior.js b/dylib/tests/panel-behavior/behavior.js
+index d9855cb..0269b8e 100644
+--- a/dylib/tests/panel-behavior/behavior.js
++++ b/dylib/tests/panel-behavior/behavior.js
+@@ -5,6 +5,8 @@ const { panel, walk, details, runner, FORMS } = require('./harness');
+ const emit = process.argv[2];
+ if (!emit) { console.error('usage: behavior.js <emit>'); process.exit(2); }
+ 
++const RETINA = "Retina resolution (the display's real pixels: sharper, slower)";
++
+ let failed = 0;
+ for (const form of Object.keys(FORMS)) {
+   const { render: P, written } = panel(emit, form);
+@@ -21,20 +23,29 @@ for (const form of Object.keys(FORMS)) {
+        'a shortcut renders the panel before a tool name reaches the page');
+ 
+   let r = nodes('');
+-  t.ok(toggles(r).join(',') === 'Metal HUD' && sections(r).length === 2,
+-       `only the Metal HUD toggle, in two sections (${toggles(r).join(',')})`);
++  t.ok(toggles(r).join(',') === 'Metal HUD,' + RETINA && sections(r).length === 2,
++       `the Metal HUD and Retina toggles, in two sections (${toggles(r).join(',')})`);
+   t.ok(r.filter(x => x.type === 'Dropdown').length === 1, 'one dropdown: the upscaler');
+   // CrossOver's options that nothing in Hadron reads stay off the page, whatever the
+   // launch options already hold.
+   r = nodes('CX_GRAPHICS_BACKEND=dxmt DXMT_ENABLE_NVEXT=1 WINEMSYNC=1 NOTPROTON_RETINA=1');
+-  t.ok(toggles(r).join(',') === 'Metal HUD' && r.filter(x => x.type === 'Dropdown').length === 1,
+-       'no backend, DLSS, AVX2, MSync or high-resolution control, even when set');
++  t.ok(toggles(r).join(',') === 'Metal HUD,' + RETINA && r.filter(x => x.type === 'Dropdown').length === 1,
++       'no backend, DLSS, AVX2, MSync or CrossOver high-resolution control, even when set');
++  // CrossOver's high-resolution word is not Hadron's: it leaves the Retina toggle off.
++  t.ok(r.find(x => x.props.label === RETINA).props.checked === false,
++       'NOTPROTON_RETINA=1 does not show the Retina toggle as on');
+ 
+   t.ok(nodes('MTL_HUD_ENABLED=1').find(x => x.props.label === 'Metal HUD').props.checked === true,
+        'a toggle reads as on from its argument');
+   written.length = 0;
+   nodes('').find(x => x.props.label === 'Metal HUD').props.onChange(true);
+   t.ok(last() === 'MTL_HUD_ENABLED=1', `the HUD toggle writes its argument (${last()})`);
++  t.ok(nodes('HADRON_RETINA=1').find(x => x.props.label === RETINA).props.checked === true,
++       'the Retina toggle reads as on from HADRON_RETINA=1');
++  nodes('').find(x => x.props.label === RETINA).props.onChange(true);
++  t.ok(last() === 'HADRON_RETINA=1', `the Retina toggle writes its argument (${last()})`);
++  nodes('HADRON_RETINA=1 %command%').find(x => x.props.label === RETINA).props.onChange(false);
++  t.ok(last() === '%command%', `turning Retina off removes its argument (${last()})`);
+ 
+   nodes('').find(x => x.type === 'Dropdown').props.onChange({ data: '2.0' });
+   t.ok(last().includes('DXMT_METALFX_SPATIAL_SWAPCHAIN=1') && last().includes('metalSpatialUpscaleFactor=2.0'),
+@@ -54,7 +65,7 @@ for (const form of Object.keys(FORMS)) {
+   const root = P({ details: details('') });
+   t.ok(root.props.className === 'MSCXPanel', 'the panel root carries its own class');
+   const classes = nodes('').filter(x => x.type === 'Toggle').map(x => x.props.className);
+-  t.ok(classes.length === 1 && classes.every(c => c === 'MSCXRow'), 'every checkbox carries the row class');
++  t.ok(classes.length === 2 && classes.every(c => c === 'MSCXRow'), 'every checkbox carries the row class');
+   const css = nodes('').filter(x => x.type === 'style');
+   t.ok(css.length === 1 && css[0].props.children.includes('.MSCXPanel .MSCXRow{'),
+        'the panel carries one stylesheet defining the row rule');
+diff --git a/dylib/tests/panel-behavior/switching.js b/dylib/tests/panel-behavior/switching.js
+index f3d37d0..55ca21f 100644
+--- a/dylib/tests/panel-behavior/switching.js
++++ b/dylib/tests/panel-behavior/switching.js
+@@ -22,6 +22,12 @@ const CASES = [
+   { what: 'HUD off', from: 'MTL_HUD_ENABLED=1 ' + OTHERS.join(' ') + ' %command%',
+     act: ns => ns.find(x => x.props.label === 'Metal HUD').props.onChange(false),
+     gone: ['MTL_HUD_ENABLED'], set: [] },
++  { what: 'Retina on', from: OTHERS.join(' ') + ' %command%',
++    act: ns => ns.find(x => x.type === 'Toggle' && x.props.label.indexOf('Retina') === 0).props.onChange(true),
++    gone: [], set: ['HADRON_RETINA=1'] },
++  { what: 'Retina off', from: 'HADRON_RETINA=1 ' + OTHERS.join(' ') + ' %command%',
++    act: ns => ns.find(x => x.type === 'Toggle' && x.props.label.indexOf('Retina') === 0).props.onChange(false),
++    gone: ['HADRON_RETINA'], set: [] },
+ ];
+ 
+ let failed = 0;
+-- 
+2.54.0 (Apple Git-157)
+

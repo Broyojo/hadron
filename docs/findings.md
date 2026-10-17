@@ -1497,8 +1497,9 @@ enough either: a program can start another with an environment block of its own.
 launchers decide the mode for a whole Wine session and record it in the prefix (`.hadron-retina`),
 and winemac reads that first (Wine patch 0038; patch 0037 lets Unix libraries ask ntdll for the
 prefix's path, which every process of it knows), then `HADRON_RETINA`, then the registry.
-`HADRON_RETINA=1` in a game's launch options turns it on for that game. Off by default: four times
-the pixels cost frame rate, and older games get tiny menus.
+`HADRON_RETINA=1` in a game's launch options turns it on for that game, and so does the "Retina
+resolution" checkbox on its Compatibility page, which writes that option (NotProton patch 0007). Off
+by default: four times the pixels cost frame rate, and older games get tiny menus.
 Steam runs a helper (`iscriptevaluator.exe`) in the prefix just before some games, without their launch
 options, so its session was in points when Teardown started and Teardown joined it. A launch that asks
 for the other setting now waits up to 15 seconds for such a session to end: a helper's ends about 3
