@@ -1484,3 +1484,28 @@ which `hadron-steam.exe` starting the game as a child does not allow as it is. L
 also changes the plumbing: the environment goes through `open --env`, output through
 `--stdout`/`--stderr`, and Steam's process tracking and Stop no longer reach the game's
 processes as children, so `scripts/steam-run` has to wait for and stop them itself.
+
+## Native resolution on Retina displays (#45)
+
+A game used to see a Retina display at its size in points, 1512×982 for a MacBook's built-in
+3024×1964 panel, and macOS scaled its picture up 2× (issue #71). Windows shows a high-density
+display at its pixels and lets a game pick a lower mode, so Hadron does too: Wine's Mac driver has
+a Retina mode, read from the `RetinaMode` value of `HKCU\Software\Wine\Mac Driver`, and Wine patch
+0037 makes it the default. A game that draws at the desktop's size now draws four times the pixels;
+its own resolution setting goes back to 1512×982 or lower, and MetalFX upscaling (Direct3D 10 and
+11) is another way back. `RetinaMode=n` in a prefix's registry still gives points.
+
+Wine requires every process of a prefix to agree on the mode, which is why it is not a per-game
+setting. A first version (`HADRON_RETINA=1` in a game's launch options) needed the launchers to
+decide the mode for a whole Wine session and record it in the prefix, and still came out in points
+for Teardown: Steam runs a helper (`iscriptevaluator.exe`) in the prefix just before the game,
+without the game's launch options, and the game joined its session. A fixed default has none of
+that.
+
+With it, `tests/win/display-report.c` reports the built-in display as 3024×1964 everywhere a game
+looks (monitor rectangle, current mode, mode list up to 3024×1964, `SM_CXSCREEN`), against 1512×982
+with `RetinaMode=n`. `HORZRES` reported 6048: winemac doubled the size win32u returns, a 2018 change
+from when that size was in points, which it no longer is in Retina mode (upstream too). Wine patch
+0038 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL (Zink) run
+in both modes at 120 fps (2026-10-17). A windowed game is half as
+large on screen as before, since its pixels are now the display's.

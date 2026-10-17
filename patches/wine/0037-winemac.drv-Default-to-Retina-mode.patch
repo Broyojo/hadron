@@ -1,0 +1,30 @@
+From 051e1f8fc467601d3c9d7ca774461da7de2e42b4 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 17 Oct 2026 12:04:06 -0400
+Subject: [PATCH 37/38] winemac.drv: Default to Retina mode.
+
+Show programs a Retina display at its pixels rather than at its size in
+points, as Windows shows a high-density display. A program that wants
+fewer pixels picks a lower display mode, as on Windows. RetinaMode=n
+in the registry still selects points.
+---
+ dlls/winemac.drv/macdrv_main.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+index a647bc8147..fb20525788 100644
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -55,7 +55,8 @@ bool use_precise_scrolling = false;
+ bool scroll_momentum = false;
+ bool accelerate_scroll_wheel = false;
+ int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
+-bool retina_enabled = false;
++/* Games get the display's pixels, as on Windows; RetinaMode=n in the registry gives points. */
++bool retina_enabled = true;
+ bool enable_app_nap = false;
+ 
+ pthread_key_t macdrv_thread_data_key = 0;
+-- 
+2.54.0 (Apple Git-157)
+
