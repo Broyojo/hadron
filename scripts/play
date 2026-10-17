@@ -42,6 +42,30 @@ winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
 . "$ROOT/scripts/paths.sh"
 PREFIX="${WINEPREFIX:-$HADRON_PREFIX}"
 
+# Retina mode has to be the same in every process of a prefix (findings #45): a launch that joins a
+# Wine session already running there takes the session's setting, whatever its own says.
+prefix_session_running() {
+    servers=$(pgrep -x wineserver) || return 1
+    session="server-$(stat -f '%Xd-%Xi' "$PREFIX" 2>/dev/null | tr 'A-F' 'a-f')"
+    for server in $servers; do
+        case "$(lsof -a -p "$server" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')" in
+            */"$session") return 0 ;;
+        esac
+    done
+    return 1
+}
+if [ -d "$PREFIX" ]; then
+    if prefix_session_running; then
+        joined=$(cat "$PREFIX/.hadron-retina" 2>/dev/null)
+        if [ "${joined:-0}" != "${HADRON_RETINA:-0}" ]; then
+            echo "HADRON_RETINA=${joined:-0}: the Wine session already running in this prefix has it" >&2
+            HADRON_RETINA="${joined:-0}"
+        fi
+    else
+        printf '%s\n' "${HADRON_RETINA:-0}" > "$PREFIX/.hadron-retina"
+    fi
+fi
+
 # Hadron's own DLLs aren't Wine builtins, so the prefix has no placeholders for them and Wine
 # can't find them by name. Install copies into the system directories (Wine still loads the
 # builtin from dist/ because they carry the builtin signature).

@@ -1496,6 +1496,11 @@ which then report the display in points while the game gets pixels. Wine patch 0
 environment decide instead, as `HADRON_PRECISE_SCROLLING` does, and `scripts/play` passes
 `HADRON_RETINA` on: `HADRON_RETINA=1` in a game's launch options turns it on for that game. Off
 by default: four times the pixels cost frame rate, and older games get tiny menus.
+A launch that joins a Wine session already running in its prefix takes that session's setting
+(`scripts/play` keeps it in the prefix's `.hadron-retina`), so a changed launch option takes effect
+with the next session rather than mixing points and pixels in one; tested by starting a report
+with `HADRON_RETINA=1` while a triangle test ran without it: it reported points, and pixels once
+the session had ended.
 
 With it on, `tests/win/display-report.c` reports the built-in display as 3024×1964 everywhere a
 game looks (monitor rectangle, current mode, mode list up to 3024×1964, `SM_CXSCREEN`), against
