@@ -1496,6 +1496,9 @@ which then report the display in points while the game gets pixels. Wine patch 0
 environment decide instead, as `HADRON_PRECISE_SCROLLING` does, and `scripts/play` passes
 `HADRON_RETINA` on: `HADRON_RETINA=1` in a game's launch options turns it on for that game. Off
 by default: four times the pixels cost frame rate, and older games get tiny menus.
+It is always passed on, 0 or 1, so a `RetinaMode` left in a prefix's registry (CrossOver's "High
+Resolution", in a prefix NotProton made) does not turn it on unasked: with `RetinaMode=y` in the
+registry and no launch option, the report shows points.
 A launch that joins a Wine session already running in its prefix takes that session's setting
 (`scripts/play` keeps it in the prefix's `.hadron-retina`), so a changed launch option takes effect
 with the next session rather than mixing points and pixels in one; tested by starting a report

@@ -42,8 +42,11 @@ winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
 . "$ROOT/scripts/paths.sh"
 PREFIX="${WINEPREFIX:-$HADRON_PREFIX}"
 
-# Retina mode has to be the same in every process of a prefix (findings #45): a launch that joins a
-# Wine session already running there takes the session's setting, whatever its own says.
+# Retina mode has to be the same in every process of a prefix (findings #45), and is always passed
+# on, 0 or 1, so that a RetinaMode left in a prefix's registry (CrossOver's "High Resolution") does
+# not turn it on unasked. A launch that joins a Wine session already running there takes the
+# session's setting, whatever its own says.
+case "${HADRON_RETINA:-0}" in [1yYtT]*) HADRON_RETINA=1 ;; *) HADRON_RETINA=0 ;; esac
 prefix_session_running() {
     servers=$(pgrep -x wineserver) || return 1
     session="server-$(stat -f '%Xd-%Xi' "$PREFIX" 2>/dev/null | tr 'A-F' 'a-f')"
@@ -57,12 +60,12 @@ prefix_session_running() {
 if [ -d "$PREFIX" ]; then
     if prefix_session_running; then
         joined=$(cat "$PREFIX/.hadron-retina" 2>/dev/null)
-        if [ "${joined:-0}" != "${HADRON_RETINA:-0}" ]; then
+        if [ "${joined:-0}" != "$HADRON_RETINA" ]; then
             echo "HADRON_RETINA=${joined:-0}: the Wine session already running in this prefix has it" >&2
             HADRON_RETINA="${joined:-0}"
         fi
     else
-        printf '%s\n' "${HADRON_RETINA:-0}" > "$PREFIX/.hadron-retina"
+        printf '%s\n' "$HADRON_RETINA" > "$PREFIX/.hadron-retina"
     fi
 fi
 
@@ -281,7 +284,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     ${HADRON_DISABLE_LSTEAMCLIENT:+HADRON_DISABLE_LSTEAMCLIENT=$HADRON_DISABLE_LSTEAMCLIENT} \
     ${HADRON_HARDWARE_TSO:+HADRON_HARDWARE_TSO=$HADRON_HARDWARE_TSO} \
     ${HADRON_PRECISE_SCROLLING:+HADRON_PRECISE_SCROLLING=$HADRON_PRECISE_SCROLLING} \
-    ${HADRON_RETINA:+HADRON_RETINA=$HADRON_RETINA} \
+    HADRON_RETINA="$HADRON_RETINA" \
     ${FEX_BLOCKJITNAMING:+FEX_BLOCKJITNAMING=$FEX_BLOCKJITNAMING} \
     STEAM_DYLD_INSERT_LIBRARIES="$STEAM_DYLD_INSERT_LIBRARIES" \
     ${SteamOverlayGameId:+SteamOverlayGameId=$SteamOverlayGameId} \
