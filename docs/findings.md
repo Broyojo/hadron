@@ -1442,8 +1442,11 @@ private data between instances, which is worse.
 
 `tests/win/shared-section.c` covers both: built at 4 KB section alignment it loads, reads and
 writes its section, and a second instance sees the initial value; built at 16 KB alignment the
-second instance sees the first one's write. Both pass as 32-bit and 64-bit programs; main fails
-to load the 4 KB build. ROAM's runner now loads and asks for a Direct3D 9Ex
+second instance sees the first one's write. Linked with `.idata` merged into the section, the import table lies
+inside it (`-Xlink=-merge:.idata=.shr`); the private copy skips the private remapping of the import
+directory that only a shared mapping needs, whose host-page rounding would otherwise start before
+the section and read from the wrong place in the shared-section file. All pass as 32-bit and
+64-bit programs, from a folder with a space in its path; main fails to load the 4 KB build. ROAM's runner now loads and asks for a Direct3D 9Ex
 device, which mtld3d does not implement yet ("Failed to create Direct3D 9ex device"). With
 `HADRON_D3D9=wined3d` (Wine's D3D9 on Zink) the game plays, at a somewhat low frame rate that
 got much worse after switching to another app and back (2026-10-16).

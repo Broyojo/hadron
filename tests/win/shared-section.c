@@ -3,6 +3,7 @@
  * 16 KB section alignment the section is shared (exit 0); at the usual 4 KB it gets a private copy
  * on a 16 KB host (exit 2). Build:
  *   i686-w64-mingw32-clang -O2 shared-section.c -Xlinker -Xlink=-section:.shr,RWS [-Wl,--section-alignment,0x4000]
+ * Linked with -Xlink=-merge:.idata=.shr as well, the import table is inside the shared section.
  * Usage: shared-section.exe */
 #include <windows.h>
 #include <stdio.h>
@@ -23,8 +24,9 @@ int main(int argc, char **argv)
     shared_value = 0x5678;
     if (shared_value != 0x5678) { printf("FAIL write\n"); return 1; }
 
-    GetModuleFileNameA(NULL, cmd, MAX_PATH);
-    strcat(cmd, " child");
+    cmd[0] = '"';
+    GetModuleFileNameA(NULL, cmd + 1, MAX_PATH);
+    strcat(cmd, "\" child");
     if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
     { printf("FAIL CreateProcess %lu\n", GetLastError()); return 1; }
     WaitForSingleObject(pi.hProcess, INFINITE);

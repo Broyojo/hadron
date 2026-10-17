@@ -1,4 +1,4 @@
-From c92eb5b1da7884fb472c6e9a6aa67c818c349282 Mon Sep 17 00:00:00 2001
+From 9187e812cd03114bb3d304c51d2ef34cf5d9d766 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 16 Oct 2026 18:05:36 -0400
 Subject: [PATCH] ntdll: Map unaligned shared image sections as private copies.
@@ -8,16 +8,18 @@ which needs whole host pages. With host pages larger than the image's (16 KB
 on Apple silicon), a section that shares its host pages with other sections,
 or sits at an unaligned offset in that file, cannot be mapped shared, and the
 image failed to load. Map a private copy of such a section instead: correct
-for one process, but not shared with other instances of the image.
+for one process, but not shared with other instances of the image. A private
+copy also skips the private remapping of an import directory inside the
+section, which only a shared mapping needs.
 ---
- dlls/ntdll/unix/virtual.c | 17 +++++++++++++++--
- 1 file changed, 15 insertions(+), 2 deletions(-)
+ dlls/ntdll/unix/virtual.c | 22 ++++++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 73e4dc56ce..a6a34babf7 100644
+index 73e4dc56ce..b1d805dd25 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3509,12 +3509,25 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3509,19 +3509,33 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
          if ((sec[i].Characteristics & IMAGE_SCN_MEM_SHARED) &&
              (sec[i].Characteristics & IMAGE_SCN_MEM_WRITE))
          {
@@ -45,6 +47,16 @@ index 73e4dc56ce..a6a34babf7 100644
              {
                  ERR_(module)( "Could not map %s shared section %.8s\n", debugstr_us(nt_name), sec[i].Name );
                  goto done;
+             }
+ 
+-            /* check if the import directory falls inside this section */
+-            if (imports && imports->VirtualAddress >= sec[i].VirtualAddress &&
++            /* check if the import directory falls inside this section; a private copy needs no
++             * private remapping of it */
++            if ((shared_vprot & VPROT_WRITE) && imports && imports->VirtualAddress >= sec[i].VirtualAddress &&
+                 imports->VirtualAddress < sec[i].VirtualAddress + map_size)
+             {
+                 UINT_PTR base = imports->VirtualAddress & ~host_page_mask;
 -- 
 2.54.0 (Apple Git-157)
 
