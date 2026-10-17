@@ -1,5 +1,5 @@
 #!/bin/sh
-# Does macOS turn Game Mode on for a Wine window? Runs tests/win/fsmode.c full screen for 20 seconds
+# Does macOS turn Game Mode on for a Wine window? Runs tests/win/fsmode.c full screen until it is read
 # from a bundle built like scripts/play's per-game bundles and declared a game, through
 # hadron-steam.exe as a game is (the full-screen window belongs to the child it starts), started
 # two ways:
@@ -26,7 +26,8 @@ fi
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 launcher="Z:$(printf '%s' "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" | tr '/' '\\')"
 exe="Z:$(printf '%s' "$work/fsmode.exe" | tr '/' '\\')"
-size=$(system_profiler SPDisplaysDataType 2>/dev/null | awk '/Main Display: Yes/ { print prev } { prev = $0 }' | grep -oE '[0-9]+ x [0-9]+' | head -1)
+# The primary display's desktop size, in points: what Wine reports as \\.\DISPLAY1's mode.
+size=$(osascript -l JavaScript -e 'ObjC.import("AppKit"); var f = $.NSScreen.screens.objectAtIndex(0).frame; Math.round(f.size.width) + " x " + Math.round(f.size.height)')
 width=${size%% x *} height=${size##* x }
 
 for how in ${@:-exec open}; do
@@ -57,27 +58,43 @@ EOF
     if [ "$how" = open ]; then
         "$@" open -n -a "$app" --env "WINEPREFIX=$work/prefix" --env WINEDEBUG=-all \
             --env WINEDLLOVERRIDES=mshtml= --env "WINELOADER=$app/Contents/MacOS/$name" \
-            --args "$launcher" "$exe" '\\.\DISPLAY1' "$width" "$height" 20
+            --args "$launcher" "$exe" '\\.\DISPLAY1' "$width" "$height" 90
     else
         "$@" WINEPREFIX="$work/prefix" WINEDEBUG=-all WINEDLLOVERRIDES=mshtml= \
             WINELOADER="$app/Contents/MacOS/$name" \
-            "$app/Contents/MacOS/$name" "$launcher" "$exe" '\\.\DISPLAY1' "$width" "$height" 20 >/dev/null 2>&1 &
+            "$app/Contents/MacOS/$name" "$launcher" "$exe" '\\.\DISPLAY1' "$width" "$height" 90 >/dev/null 2>&1 &
     fi
-    sleep 6
+    # Wait (at most a minute) for the program's own process: the one whose Windows command line starts
+    # with the program, not hadron-steam.exe, which names it among its arguments. Paths may hold spaces.
+    window_pid= waited=0
+    while [ -z "$window_pid" ] && [ "$waited" -lt 60 ]; do
+        sleep 2; waited=$((waited + 2))
+        window_pid=$(ps -axo pid=,args= | awk '{ pid = $1; sub(/^ *[0-9]+ /, "") }
+            /^[A-Z]:\\.*fsmode\.exe( |$)/ && !/hadron-steam\.exe/ { print pid; exit }')
+    done
+    if [ -z "$window_pid" ]; then
+        echo "$how: the program did not start within a minute; no result" >&2
+        WINEPREFIX="$work/prefix" "$ROOT/dist/bin/wineserver" -k 2>/dev/null
+        continue
+    fi
+    sleep 3
     # Ask for the front only when the bundle is already running: activate would start it otherwise.
     before=$(pgrep -f "$app/Contents/MacOS/" | wc -l | tr -d " ")
     if [ -n "$(lsappinfo find bundleid="$id" 2>/dev/null)" ]; then
         osascript -e "tell application id \"$id\" to activate" >/dev/null 2>&1
     fi
-    sleep 6
+    # Then give the window up to half a minute to be in front before Game Mode is read.
+    front= waited=0
+    while [ "$front" != "$name" ] && [ "$waited" -lt 30 ]; do
+        sleep 2; waited=$((waited + 2))
+        front=$(lsappinfo info -only name "$(lsappinfo front)" 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)
+    done
+    sleep 3
     after=$(pgrep -f "$app/Contents/MacOS/" | wc -l | tr -d " ")
-    front=$(lsappinfo info -only name "$(lsappinfo front)" 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)
     mode=$(xcrun gamepolicyctl game-mode status 2>&1 | head -1 | sed 's/\x1b\[[0-9;]*m//g')
-    # The program's own process: hadron-steam.exe, which started it, names it among its arguments.
-    window_pid=$(ps -axo pid=,args= | awk '$2 ~ /fsmode\.exe$/ { print $1; exit }')
-    sleep 12
+    sleep 6
     who=$(/usr/bin/log show --start "$since" --process gamepolicyd --info --debug --style compact 2>/dev/null |
-          grep -oE "(anon|app)<[^]]*:${window_pid:-none}\\]" | sed 's/:[0-9]*]$//' | sort | uniq -c | sort -rn | head -1 | awk '{ print $2 }')
+          grep -oE "(anon|app)<[^]]*:${window_pid}\\]" | sed 's/:[0-9]*]$//' | sort | uniq -c | sort -rn | head -1 | awk '{ print $2 }')
     note=
     [ "$after" -gt "$before" ] && note=" (asking for the front started another process: ignore this line)"
     echo "$how: RunningBoard sees the window's process (pid ${window_pid:-?}) as ${who:-nothing: RunningBoard has no record of it}; in front: ${front:-?}; $mode$note"
