@@ -1501,10 +1501,11 @@ Resolution", in a prefix NotProton made) does not turn it on unasked: with `Reti
 registry and no launch option, the report shows points.
 A launch that joins a Wine session already running in its prefix takes that session's setting
 (`scripts/play` keeps it in the prefix's `.hadron-retina`), so a changed launch option takes effect
-with the next session rather than mixing points and pixels in one; a lock lets one launch at a
-time decide, and the first starts the prefix's wineserver before the next looks, so two launches
-into an idle prefix agree too (six races of a launch with `HADRON_RETINA=1` against one without:
-both reported the same display every time); tested by starting a report
+with the next session rather than mixing points and pixels in one; the decision is made right before Wine
+starts, one launch at a time under a lock, and the first starts the prefix's wineserver before
+the next looks, so two launches into an idle or a not yet existing prefix agree too, and a
+session that ends meanwhile is not joined (races of a launch with `HADRON_RETINA=1` against one
+without, on an existing and a new prefix: both reported the same display every time); tested by starting a report
 with `HADRON_RETINA=1` while a triangle test ran without it: it reported points, and pixels once
 the session had ended.
 
