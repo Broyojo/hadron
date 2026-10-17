@@ -4,7 +4,7 @@
 # hadron-steam.exe as a game is (the full-screen window belongs to the child it starts), started
 # two ways:
 #   exec  as scripts/play starts games today: RunningBoard sees an anonymous process ("anon<wine>")
-#   open  through LaunchServices: RunningBoard sees the bundle as an app
+#   open  through LaunchServices: RunningBoard sees the first process as the bundle's app
 # and prints, for each, how RunningBoard identifies the process that owns the window, which app is
 # in front and whether Game Mode is on. Both start from the same clean environment. Run it with the
 # screen awake and unlocked: macOS lets the probe bring its window to the front only then (findings
@@ -73,7 +73,8 @@ EOF
     after=$(pgrep -f "$app/Contents/MacOS/" | wc -l | tr -d " ")
     front=$(lsappinfo info -only name "$(lsappinfo front)" 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)
     mode=$(xcrun gamepolicyctl game-mode status 2>&1 | head -1 | sed 's/\x1b\[[0-9;]*m//g')
-    window_pid=$(pgrep -f 'fsmode\.exe' | head -1)
+    # The program's own process: hadron-steam.exe, which started it, names it among its arguments.
+    window_pid=$(ps -axo pid=,args= | awk '$2 ~ /fsmode\.exe$/ { print $1; exit }')
     sleep 12
     who=$(/usr/bin/log show --start "$since" --process gamepolicyd --info --debug --style compact 2>/dev/null |
           grep -oE "(anon|app)<[^]]*:${window_pid:-none}\\]" | sed 's/:[0-9]*]$//' | sort | uniq -c | sort -rn | head -1 | awk '{ print $2 }')

@@ -1465,19 +1465,22 @@ eligible: `gamepolicyd` follows processes through RunningBoard, and RunningBoard
 process as an app when LaunchServices started it. Hadron starts a game by exec'ing the loader
 through the bundle's link, from Steam's tool and the launch scripts, so RunningBoard sees
 `anon<wine>`, the same as for any program started from a shell. The same bundle started with
-`open` (LaunchServices) is `app<application.com.broyojo.hadron...>` instead, and so is the child
-process `hadron-steam.exe` starts, which owns the game's window; started by exec, RunningBoard has
-no record of that child at all (2026-10-17, with `tests/mac/game-mode-probe.sh`, which runs
-`tests/win/fsmode.c` full screen through `hadron-steam.exe` both ways, from the same clean
-environment).
+`open` (LaunchServices) is `app<application.com.broyojo.hadron...>` instead. That identity is the
+first process's only: a game runs as a child process `hadron-steam.exe` starts, and that child,
+which owns the game's window, is `anon<wine>` either way (2026-10-17, with
+`tests/mac/game-mode-probe.sh`, which runs `tests/win/fsmode.c` full screen through
+`hadron-steam.exe` both ways, from the same clean environment, and reports the identity of the
+process whose executable is the program).
 
-That is not enough either. With the Mac unattended the probe got its window in front both ways,
-full screen over the built-in display, and Game Mode stayed off both ways; also without
-`LSUIElement`, which only made the bundle a regular app ("Hadron Loader" in front). What is left is
-full screen itself: Hadron's is a borderless window over the display, not a full-screen Space
-(#72), and macOS likely counts only the latter. Not tried: putting the probe's window in a
-Space, which needs Accessibility permission to toggle (or #72). If that turns Game Mode on,
-starting games through LaunchServices is the other change to make: the environment then goes
-through `open --env`, output through `--stdout`/`--stderr`, and Steam's process tracking and Stop
-no longer reach the game's processes as children, so `scripts/steam-run` has to wait for and
-stop them itself.
+Identity and the games category are not enough either. Started directly, so that the window's
+own process was the app, the program got its window in front, full screen over the built-in
+display, and Game Mode stayed off; also without `LSUIElement`, which only made the bundle a
+regular app ("Hadron Loader" in front). What is left is full screen itself: Hadron's is a
+borderless window over the display, not a full-screen Space (#72), and macOS likely counts only
+the latter. Not tried: putting the window in a Space, which needs Accessibility permission to
+toggle (or #72). If that turns Game Mode on, two more changes follow: starting games through
+LaunchServices, and making the process that owns the window the one LaunchServices started,
+which `hadron-steam.exe` starting the game as a child does not allow as it is. LaunchServices
+also changes the plumbing: the environment goes through `open --env`, output through
+`--stdout`/`--stderr`, and Steam's process tracking and Stop no longer reach the game's
+processes as children, so `scripts/steam-run` has to wait for and stop them itself.
