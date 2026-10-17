@@ -78,14 +78,42 @@ enum Runtime {
     }
 
     /// Start a Windows program that is not a Steam game (scripts/program-run) and leave it running:
-    /// it outlives the window. Returns why it could not start, if it could not.
-    static func start(program: URL) -> String? {
+    /// it outlives the window, and logs to Hadron's logs folder. Returns why it could not start, if
+    /// it could not; `failed` is told later if the runner gives up before the program runs.
+    static func start(program: URL, failed: @escaping @Sendable (String) -> Void) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [root.appendingPathComponent("scripts/program-run").path, program.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HADRON_LOG"] = "1"
+        process.environment = environment
+        let errors = Pipe()
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errors
+        // Once the program runs, its output goes to its log; what the runner says before that
+        // (a missing file, a prefix that could not be made) arrives here.
+        process.terminationHandler = { finished in
+            let said = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .split(separator: "\n")
+                .filter { !$0.hasPrefix("watchdog: memory log in") && !$0.hasPrefix("logging to ") }
+            if finished.terminationStatus != 0 && !said.isEmpty {
+                failed(said.joined(separator: "\n"))
+            }
+        }
         do { try process.run() } catch { return error.localizedDescription }
         return nil
+    }
+
+    /// Run one of the runtime's scripts on this terminal: its output, and the program's, stay here.
+    static func runAttached(_ script: String, _ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [root.appendingPathComponent("scripts/\(script)").path] + arguments
+        do { try process.run() } catch {
+            FileHandle.standardError.write(Data("hadron: cannot run \(script): \(error.localizedDescription)\n".utf8))
+            return 127
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 }

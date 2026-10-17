@@ -52,8 +52,9 @@ case "$ROOT" in
 esac
 
 # Settings given as NAME=value launch options (a game's Properties, or the Compatibility page) arrive
-# in argv: export them, and keep the rest as the command.
+# in argv: export them, and keep the rest as the command. A program's arguments are its own.
 argc=$#
+[ -n "${HADRON_PROGRAM:-}" ] && argc=0
 while [ "$argc" -gt 0 ]; do
     arg="$1"; shift; argc=$((argc - 1))
     case "$arg" in
@@ -105,8 +106,9 @@ wineserver="$ROOT/dist/bin/wineserver"
 PREFIX="$WINEPREFIX" WINESERVER="$wineserver"
 . "$ROOT/scripts/retina.sh"
 
-# One launch at a time checks, makes and updates the prefix, so two first launches never both make
-# it, nor one delete what the other is making. The lock is on a file outside the prefix that this
+# One launch at a time checks, makes and updates the prefix, so two first launches (of a game, or of
+# programs that are not on Steam, which share one) never both make it, nor one delete what the other
+# is making. The lock is on a file outside the prefix that this
 # shell holds open; what is started meanwhile is not handed it (7>&-), since the wineserver
 # outlives this part.
 exec 7>"$STEAM_COMPAT_DATA_PATH/.hadron-prefix-lock"
@@ -261,7 +263,7 @@ if [ -z "${HADRON_PROGRAM:-}" ]; then
     "$ROOT/scripts/shortcut-icon" >> "$log" 2>&1
 fi
 # Keep a Wine log of every Steam launch while the integration is new (build/logs/<appid>-*.log).
-export HADRON_LOG="${HADRON_LOG:-1}"
+[ -n "${HADRON_PROGRAM:-}" ] || export HADRON_LOG="${HADRON_LOG:-1}"
 # The working directory stays the one Steam started this in: the game's launch entry names it
 # (the install folder unless it says otherwise), and a game started as "jre\bin\javaw.exe -jar
 # desktop-1.0.jar" finds its files only from there.
@@ -270,6 +272,9 @@ export HADRON_LOG="${HADRON_LOG:-1}"
 trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
 HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" &
 wait $!
+status=$?
+# A program shares its prefix with other programs: wait for it alone, and return its status.
+[ -n "${HADRON_PROGRAM:-}" ] && exit "$status"
 # A launcher that starts the real game and exits returns early: stay until the prefix's whole Wine
 # session has ended, so Steam shows the game running (and can stop it) until then. Waited on in the
 # background, so Stop's SIGTERM still interrupts.

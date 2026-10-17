@@ -1543,10 +1543,22 @@ neither needs Mac Steam nor loads the Steam bridge. All such programs share one 
 `~/Library/Application Support/Hadron/programs/pfx`, so an installer and the program it installs
 meet there; each program folder gets its own Dock bundle (`program-<hash of the folder>`).
 
+A program is not a game, and program mode differs from a Steam launch where that matters: the
+program starts by itself, not through `hadron-steam.exe`, so nothing registers a running Steam
+in the prefix; its arguments are its own, not settings (`FOO=bar` reaches it); `steam-run` waits
+for it alone, not for the whole shared prefix, and returns its exit status; it logs to a file
+only when the app starts it, so `hadron run` keeps a console program's output in the terminal;
+a program installed in the prefix starts from its `C:` path; and a lock on the prefix keeps two
+programs opened together on the first launch from both making it (also for Steam launches).
+
 The app declares `com.microsoft.windows-executable` (the system's type for `.exe`) at rank
 Alternate: it shows up under Open With without taking `.exe` files over. `.msi` has no system
 type and is left out. Tested 2026-10-17 with `tests/win/hello.c`: from a checkout
 (`scripts/program-run`), from an app build with `hadron run`, and by opening the `.exe` with that
 app through LaunchServices; each made or reused the programs prefix and ran the program from a
-runtime copy. Not done: remembering programs once installed (an installed program is found in
+runtime copy. A test program that prints its path, arguments and Steam's registered process, and
+exits with 7: arguments `FOO=bar` and `two words` intact, no Steam process, status 7, and
+`C:\Program Files\Test\args.exe` when copied into the prefix; a second program returned after
+1 s while another kept running; two programs opened together on a fresh prefix both ran, and the
+prefix was made once. Not done: remembering programs once installed (an installed program is found in
 the prefix's `drive_c` for now), and adding them to Steam as non-Steam games.

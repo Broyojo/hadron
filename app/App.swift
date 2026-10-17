@@ -52,12 +52,19 @@ enum Programs {
 
     static func start(_ urls: [URL]) {
         for url in urls {
-            guard let problem = Runtime.start(program: url) else { continue }
-            let alert = NSAlert()
-            alert.messageText = "Hadron could not start \(url.lastPathComponent)."
-            alert.informativeText = problem
-            alert.runModal()
+            let name = url.lastPathComponent
+            let problem = Runtime.start(program: url) { problem in
+                Task { @MainActor in report(name, problem) }
+            }
+            if let problem { report(name, problem) }
         }
+    }
+
+    private static func report(_ name: String, _ problem: String) {
+        let alert = NSAlert()
+        alert.messageText = "Hadron could not start \(name)."
+        alert.informativeText = problem
+        alert.runModal()
     }
 }
 
