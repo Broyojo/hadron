@@ -53,6 +53,13 @@ Everything the window does is also a command: `hadron setup`, `hadron uninstall`
 (`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's
 window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
 
+**Windows programs that are not on Steam.** Open an `.exe` with Hadron (right-click it, **Open
+With**, **Hadron**; or drop it on Hadron's icon, or use **File, Open a Windows Program…**), or run
+`hadron run program.exe`. Steam is not needed for these. They all share one Wine prefix in
+`~/Library/Application Support/Hadron/programs`, so a program an installer puts there runs from
+there too. Hadron does not make itself the app for `.exe` files; **Get Info**, **Open with**,
+**Change All…** does that.
+
 **Updating.** Hadron updates itself. When you open its window and a newer version exists, it
 shows what is new and asks; **Hadron, Check for Updates…** looks at once, and `hadron update`
 does the same from a terminal. The download is checked against a signature before anything is

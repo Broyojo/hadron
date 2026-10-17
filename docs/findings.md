@@ -1509,3 +1509,40 @@ from when that size was in points, which it no longer is in Retina mode (upstrea
 0038 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL (Zink) run
 in both modes at 120 fps (2026-10-17). A windowed game is half as
 large on screen as before, since its pixels are now the display's.
+
+## Windows programs that are not on Steam (#46)
+
+Hadron ran only what Steam started (issue #75). `scripts/program-run <program.exe>` now runs any
+Windows program, and Hadron.app does it for an `.exe` opened with it (Open With, a drop on its
+icon, File, Open a Windows Program…) and for `hadron run`. It goes through `scripts/steam-run`
+with `HADRON_PROGRAM=1` rather than a launcher of its own, so a program gets what a game gets: the
+runtime copy (an installed app's build, as for a Steam launch), a prefix made and updated by the
+same code, the profile layout, logs and the watchdog. In that mode `steam-run` skips what asks
+Steam for something (NotProton's activation request, Steam's shortcut icons) and `scripts/play`
+neither needs Mac Steam nor loads the Steam bridge. All such programs share one prefix,
+`~/Library/Application Support/Hadron/programs/pfx`, so an installer and the program it installs
+meet there; each program gets its own Dock bundle (`program-<hash of its path>`).
+
+A program is not a game, and program mode differs from a Steam launch where that matters: the
+program starts by itself, not through `hadron-steam.exe`, so nothing registers a running Steam
+in the prefix, and gets none of Steam's variables (`SteamAppId` and the rest); its arguments are its own, not settings (`FOO=bar` reaches it); `steam-run` waits
+for it alone, not for the whole shared prefix, returns its exit status, and on Ctrl-C or Stop
+ends that program's own process, not the prefix's whole session; when it returns while what it
+started still runs (a launcher, an installer), a watchdog stays with the prefix's Wine session; it logs to a file
+only when the app starts it, so `hadron run` keeps a console program's output in the terminal;
+a program installed in the prefix starts from its `C:` path; and a lock on the prefix keeps two
+programs opened together on the first launch from both making it (also for Steam launches).
+
+The app declares `com.microsoft.windows-executable` (the system's type for `.exe`) at rank
+Alternate: it shows up under Open With without taking `.exe` files over. `.msi` has no system
+type and is left out. Tested 2026-10-17 with `tests/win/hello.c`: from a checkout
+(`scripts/program-run`), from an app build with `hadron run`, and by opening the `.exe` with that
+app through LaunchServices; each made or reused the programs prefix and ran the program from a
+runtime copy. A test program that prints its path, arguments and Steam's registered process, and
+exits with 7: arguments `FOO=bar` and `two words` intact, no Steam process, status 7, and
+`C:\Program Files\Test\args.exe` when copied into the prefix; a second program returned after
+1 s while another kept running; two programs opened together on a fresh prefix both ran, and the
+prefix was made once; two programs from one folder ran side by side, each with its bundle; a
+launcher that starts a 20-second program and exits returned in 2 s, and the watchdog that took
+over logged the program to its end and then ended too. Not done: remembering programs once installed (an installed program is found in
+the prefix's `drive_c` for now), and adding them to Steam as non-Steam games.

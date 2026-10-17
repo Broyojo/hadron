@@ -1,0 +1,25 @@
+#!/bin/sh
+# Run a Windows program that does not come from Steam: Hadron.app's Open, an .exe opened with
+# Hadron, `hadron run`.
+#   scripts/program-run <program.exe> [args...]
+#
+# It goes through scripts/steam-run with HADRON_PROGRAM=1, so it gets what a Steam game gets (the
+# runtime copy, a prefix made and kept up to date, the watchdog, logs) without Steam: all such
+# programs share one prefix in ~/Library/Application Support/Hadron/programs, where an installer
+# puts what it installs and the installed program finds it again. Each program gets a bundle of its
+# own, so the Dock shows the program's name and icon (scripts/play).
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+[ $# -ge 1 ] || { echo "usage: $0 <program.exe> [args...]" >&2; exit 1; }
+[ -f "$1" ] || { echo "program-run: no such file: $1" >&2; exit 1; }
+exe="$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"; shift
+. "$ROOT/scripts/paths.sh"
+
+dir=$(dirname "$exe")
+export HADRON_PROGRAM=1
+export STEAM_COMPAT_DATA_PATH="$HADRON_SUPPORT/programs"
+export STEAM_COMPAT_INSTALL_PATH="$dir"
+export STEAM_COMPAT_APP_ID="program-$(printf '%s' "$exe" | /sbin/md5 -q | cut -c1-12)"
+export HADRON_APP_NAME="${HADRON_APP_NAME:-$(basename "$exe" .exe)}"
+# A program starts in its own folder, as Explorer starts it on Windows.
+cd "$dir" || exit 1
+exec "$ROOT/scripts/steam-run" waitforexitandrun "$exe" "$@"

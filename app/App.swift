@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The window: how the Steam setup stands, and the few things to do about it. Hadron is not
 /// needed while playing, so the app quits with its window.
@@ -11,6 +12,12 @@ struct HadronApp: App {
             ContentView()
         }
         .windowResizability(.contentSize)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Open a Windows Program…") { Programs.choose() }
+                    .keyboardShortcut("o")
+            }
+        }
         #if SPARKLE
         .commands {
             CommandGroup(after: .appInfo) {
@@ -24,6 +31,41 @@ struct HadronApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// An .exe opened with Hadron: double-clicked once Hadron is its app, dropped on the icon, or Open With.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        Programs.start(urls)
+    }
+}
+
+/// Windows programs that are not Steam games (scripts/program-run). They run on their own: Hadron can
+/// quit while they do.
+@MainActor
+enum Programs {
+    static func choose() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType("com.microsoft.windows-executable") ?? .executable]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a Windows program to run."
+        if panel.runModal() == .OK { start(panel.urls) }
+    }
+
+    static func start(_ urls: [URL]) {
+        for url in urls {
+            let name = url.lastPathComponent
+            let problem = Runtime.start(program: url) { problem in
+                Task { @MainActor in report(name, problem) }
+            }
+            if let problem { report(name, problem) }
+        }
+    }
+
+    private static func report(_ name: String, _ problem: String) {
+        let alert = NSAlert()
+        alert.messageText = "Hadron could not start \(name)."
+        alert.informativeText = problem
+        alert.runModal()
+    }
 }
 
 @MainActor
@@ -201,6 +243,9 @@ struct ContentView: View {
                 .padding(8)
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
             }
+
+            Button("Open a Windows program that is not on Steam…") { Programs.choose() }
+                .buttonStyle(.link).font(.callout)
 
             if model.command == .missing {
                 Button("Add the hadron command for Terminal…") { model.installCommand() }

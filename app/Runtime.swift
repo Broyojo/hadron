@@ -76,4 +76,65 @@ enum Runtime {
         run("steam-status") { lines.append($0) }
         return (lines.first ?? "unknown", lines.count > 1 ? lines[1] : "")
     }
+
+    /// Start a Windows program that is not a Steam game (scripts/program-run) and leave it running:
+    /// it outlives the window, and logs to Hadron's logs folder. Returns why it could not start, if
+    /// it could not; `failed` is told later if the runner gives up before the program runs.
+    static func start(program: URL, failed: @escaping @Sendable (String) -> Void) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [root.appendingPathComponent("scripts/program-run").path, program.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HADRON_LOG"] = "1"
+        process.environment = environment
+        // What the runner says before the program runs (a missing file, a prefix that could not be
+        // made) goes to a file, not a pipe: closing the window ends this app, and a pipe with no
+        // reader would kill the runner at its next message. Once the program runs, its output goes
+        // to its log.
+        let messages = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hadron-program-run-\(UUID().uuidString).txt")
+        FileManager.default.createFile(atPath: messages.path, contents: nil)
+        guard let errors = try? FileHandle(forWritingTo: messages),
+              let reader = try? FileHandle(forReadingFrom: messages) else { return "cannot write \(messages.path)" }
+        // The file goes at once: the runner writes and this app reads through what they have open,
+        // so nothing is left behind if Hadron quits first.
+        try? FileManager.default.removeItem(at: messages)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = errors
+        process.terminationHandler = { finished in
+            let said = String(decoding: reader.readDataToEndOfFile(), as: UTF8.self)
+                .split(separator: "\n")
+                .filter { !$0.hasPrefix("watchdog: memory log in") && !$0.hasPrefix("logging to ") }
+            try? reader.close()
+            if finished.terminationStatus != 0 && !said.isEmpty {
+                failed(said.joined(separator: "\n"))
+            }
+        }
+        defer { try? errors.close() }
+        do { try process.run() } catch { return error.localizedDescription }
+        return nil
+    }
+
+    /// Run one of the runtime's scripts on this terminal: its output, and the program's, stay here.
+    static func runAttached(_ script: String, _ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [root.appendingPathComponent("scripts/\(script)").path] + arguments
+        do { try process.run() } catch {
+            FileHandle.standardError.write(Data("hadron: cannot run \(script): \(error.localizedDescription)\n".utf8))
+            return 127
+        }
+        // A signal sent to this process alone (a supervisor's, kill's) goes on to the runner, which
+        // stops the program; a terminal's Ctrl-C reaches both anyway.
+        let forwarders = [SIGTERM, SIGINT, SIGHUP].map { number -> DispatchSourceSignal in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { kill(process.processIdentifier, number) }
+            source.resume()
+            return source
+        }
+        process.waitUntilExit()
+        forwarders.forEach { $0.cancel() }
+        return process.terminationStatus
+    }
 }
