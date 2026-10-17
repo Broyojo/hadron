@@ -30,6 +30,9 @@ ls -t "$HOME/Library/Application Support/Steam/steamapps/compatdata"/*/hadron-ru
         appid=$(basename "$(dirname "$f")")
         tail -n 400 "$f" > "$dir/logs/$appid-hadron-run.log"
     done
+# And for Windows programs that are not on Steam (scripts/program-run), which share one prefix.
+programs_log="$HADRON_SUPPORT/programs/hadron-run.log"
+[ -f "$programs_log" ] && tail -n 400 "$programs_log" > "$dir/logs/programs-hadron-run.log"
 # The newest shaders Metal's compiler refused, which is a driver bug each time.
 ls -t "$HADRON_LOGS/failed-msl"/*.metal 2>/dev/null | head -4 | while IFS= read -r f; do cp "$f" "$dir/shaders/"; done
 

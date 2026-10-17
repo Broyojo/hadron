@@ -42,9 +42,14 @@ else
     pgrep -q steam_osx || echo "warning: Mac Steam doesn't seem to be running" >&2
 fi
 
-winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
 . "$ROOT/scripts/paths.sh"
 PREFIX="${WINEPREFIX:-$HADRON_PREFIX}"
+# The program's Windows path: a program installed in the prefix is on C:, as its installer saw it.
+drive_c="$(/bin/realpath "$PREFIX" 2>/dev/null)/drive_c/"
+case "$exe" in
+    "$drive_c"*) winexe="C:\\$(printf '%s' "${exe#"$drive_c"}" | tr '/' '\\')" ;;
+    *) winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')" ;;
+esac
 
 # Hadron's own DLLs aren't Wine builtins, so the prefix has no placeholders for them and Wine
 # can't find them by name. Install copies into the system directories (Wine still loads the
@@ -180,7 +185,13 @@ fi
 
 # Renderer and translator settings (a game's Steam launch options, or the caller's environment) pass
 # through by name; the variables set explicitly below keep their computed values.
-set -- "$wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
+# A game starts through hadron-steam.exe, Steam's stand-in; a program that is not on Steam
+# starts by itself, so that nothing tells it Steam is running.
+if [ -n "${HADRON_PROGRAM:-}" ]; then
+    set -- "$wine" "$winexe" "$@"
+else
+    set -- "$wine" "$ROOT/dist/lib/wine/aarch64-windows/hadron-steam.exe" "$winexe" "$@"
+fi
 for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|MESA)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
     case "$var" in
         WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|WINE_MAC_OPENGL|MESA_LOADER_DRIVER_OVERRIDE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;

@@ -19,7 +19,7 @@ func runCommand(_ arguments: [String]) -> Int32 {
             FileHandle.standardError.write(Data("usage: hadron run <program.exe> [arguments...]\n".utf8))
             return 2
         }
-        return Runtime.run("program-run", Array(arguments.dropFirst()), line: print)
+        return Runtime.runAttached("program-run", Array(arguments.dropFirst()))
     case "update":
         return update()
     case "version", "--version":
