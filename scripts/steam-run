@@ -280,8 +280,18 @@ HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:
 launched=$!
 wait $launched
 status=$?
-# A program shares its prefix with other programs: wait for it alone, and return its status.
-[ -n "${HADRON_PROGRAM:-}" ] && exit "$status"
+# A program shares its prefix with other programs: wait for it alone, and return its status. One
+# that started others and returned (a launcher, an installer) leaves them running, so a watchdog
+# stays with the prefix's Wine session for as long as that lasts: the one scripts/play started ends
+# with this runner.
+if [ -n "${HADRON_PROGRAM:-}" ]; then
+    if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
+        "$wineserver" -w >/dev/null 2>&1 &
+        nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" $! \
+            >/dev/null 2>&1 &
+    fi
+    exit "$status"
+fi
 # A launcher that starts the real game and exits returns early: stay until the prefix's whole Wine
 # session has ended, so Steam shows the game running (and can stop it) until then. Waited on in the
 # background, so Stop's SIGTERM still interrupts.
