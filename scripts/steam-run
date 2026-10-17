@@ -12,6 +12,9 @@
 # Steam starts this through the link ~/Library/Application Support/Hadron/runtime. A game runs
 # from the real folder behind it, so that the link can move to a newer copy of the runtime
 # while the game runs (scripts/runtime-versions.sh).
+#
+# scripts/program-run starts Windows programs that do not come from Steam through here too, with
+# HADRON_PROGRAM=1: they share one prefix, and nothing that asks Steam for something runs.
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 verb="$1"; shift
 
@@ -232,7 +235,7 @@ esac
 # A checkout and a packaged runtime keep the requester beside their Steam library.
 activation="$ROOT/steam/activation-request"
 [ ! -d "$ROOT/src/notproton" ] || activation="$ROOT/build/notproton/activation-request"
-if [ -x "$activation" ]; then
+if [ -z "${HADRON_PROGRAM:-}" ] && [ -x "$activation" ]; then
     "$activation" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" >> "$log" 2>&1
 fi
 
@@ -246,8 +249,10 @@ if [ -z "${HADRON_APP_NAME:-}" ]; then
 fi
 # Steam's shortcuts, which Spotlight finds, get the games' own icons: this game's from the
 # executable Steam launched, then any other installed game's that still has Steam's icon.
-"$ROOT/scripts/shortcut-icon" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" >> "$log" 2>&1
-"$ROOT/scripts/shortcut-icon" >> "$log" 2>&1
+if [ -z "${HADRON_PROGRAM:-}" ]; then
+    "$ROOT/scripts/shortcut-icon" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" >> "$log" 2>&1
+    "$ROOT/scripts/shortcut-icon" >> "$log" 2>&1
+fi
 # Keep a Wine log of every Steam launch while the integration is new (build/logs/<appid>-*.log).
 export HADRON_LOG="${HADRON_LOG:-1}"
 # The working directory stays the one Steam started this in: the game's launch entry names it
