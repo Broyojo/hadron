@@ -87,19 +87,26 @@ enum Runtime {
         var environment = ProcessInfo.processInfo.environment
         environment["HADRON_LOG"] = "1"
         process.environment = environment
-        let errors = Pipe()
+        // What the runner says before the program runs (a missing file, a prefix that could not be
+        // made) goes to a file, not a pipe: closing the window ends this app, and a pipe with no
+        // reader would kill the runner at its next message. Once the program runs, its output goes
+        // to its log.
+        let messages = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hadron-program-run-\(UUID().uuidString).txt")
+        FileManager.default.createFile(atPath: messages.path, contents: nil)
+        guard let errors = try? FileHandle(forWritingTo: messages) else { return "cannot write \(messages.path)" }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = errors
-        // Once the program runs, its output goes to its log; what the runner says before that
-        // (a missing file, a prefix that could not be made) arrives here.
         process.terminationHandler = { finished in
-            let said = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            let said = ((try? String(contentsOf: messages, encoding: .utf8)) ?? "")
                 .split(separator: "\n")
                 .filter { !$0.hasPrefix("watchdog: memory log in") && !$0.hasPrefix("logging to ") }
+            try? FileManager.default.removeItem(at: messages)
             if finished.terminationStatus != 0 && !said.isEmpty {
                 failed(said.joined(separator: "\n"))
             }
         }
+        defer { try? errors.close() }
         do { try process.run() } catch { return error.localizedDescription }
         return nil
     }

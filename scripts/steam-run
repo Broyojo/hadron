@@ -262,10 +262,21 @@ fi
 # desktop-1.0.jar" finds its files only from there.
 # Stay in the foreground: Steam tracks this process, and its Stop button sends it SIGTERM, which
 # has to end the game's whole Wine session rather than just the launcher.
+# What a program started keeps running after it returns or is stopped (a launcher, an installer):
+# a watchdog stays with the prefix's Wine session for as long as that lasts, since the one
+# scripts/play started ends with this runner.
+keep_watching() {
+    [ "${HADRON_WATCHDOG:-1}" != 0 ] || return 0
+    "$wineserver" -w >/dev/null 2>&1 &
+    nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" $! \
+        >/dev/null 2>&1 &
+}
 # A program shares its prefix with other programs: stopping it stops its own process, not the
 # prefix's whole session.
 if [ -n "${HADRON_PROGRAM:-}" ]; then
-    trap 'kill "$launched" 2>/dev/null; wait; exit 143' TERM INT HUP
+    # Wine takes SIGTERM as the end of one thread, not of its process: SIGKILL follows, as
+    # wineserver -k sends for a game.
+    trap 'kill "$launched" 2>/dev/null; sleep 2; kill -KILL "$launched" 2>/dev/null; wait; keep_watching; exit 143' TERM INT HUP
 else
     trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
 fi
@@ -273,16 +284,9 @@ HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:
 launched=$!
 wait $launched
 status=$?
-# A program shares its prefix with other programs: wait for it alone, and return its status. One
-# that started others and returned (a launcher, an installer) leaves them running, so a watchdog
-# stays with the prefix's Wine session for as long as that lasts: the one scripts/play started ends
-# with this runner.
+# A program shares its prefix with other programs: wait for it alone, and return its status.
 if [ -n "${HADRON_PROGRAM:-}" ]; then
-    if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
-        "$wineserver" -w >/dev/null 2>&1 &
-        nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" $! \
-            >/dev/null 2>&1 &
-    fi
+    keep_watching
     exit "$status"
 fi
 # A launcher that starts the real game and exits returns early: stay until the prefix's whole Wine
