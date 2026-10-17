@@ -1529,3 +1529,24 @@ Wine patch 0039 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 
 (Zink) run in both modes at 120 fps (2026-10-17); nobody has looked at the picture yet. Still to
 check by eye: sharpness, a windowed game's size on screen (half as large: its pixels are now the
 display's), the cursor, and fullscreen on an external display.
+
+## Windows programs that are not on Steam (#46)
+
+Hadron ran only what Steam started (issue #75). `scripts/program-run <program.exe>` now runs any
+Windows program, and Hadron.app does it for an `.exe` opened with it (Open With, a drop on its
+icon, File, Open a Windows Program…) and for `hadron run`. It goes through `scripts/steam-run`
+with `HADRON_PROGRAM=1` rather than a launcher of its own, so a program gets what a game gets: the
+runtime copy (an installed app's build, as for a Steam launch), a prefix made and updated by the
+same code, the profile layout, logs and the watchdog. In that mode `steam-run` skips what asks
+Steam for something (NotProton's activation request, Steam's shortcut icons) and `scripts/play`
+neither needs Mac Steam nor loads the Steam bridge. All such programs share one prefix,
+`~/Library/Application Support/Hadron/programs/pfx`, so an installer and the program it installs
+meet there; each program folder gets its own Dock bundle (`program-<hash of the folder>`).
+
+The app declares `com.microsoft.windows-executable` (the system's type for `.exe`) at rank
+Alternate: it shows up under Open With without taking `.exe` files over. `.msi` has no system
+type and is left out. Tested 2026-10-17 with `tests/win/hello.c`: from a checkout
+(`scripts/program-run`), from an app build with `hadron run`, and by opening the `.exe` with that
+app through LaunchServices; each made or reused the programs prefix and ran the program from a
+runtime copy. Not done: remembering programs once installed (an installed program is found in
+the prefix's `drive_c` for now), and adding them to Steam as non-Steam games.

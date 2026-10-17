@@ -76,4 +76,16 @@ enum Runtime {
         run("steam-status") { lines.append($0) }
         return (lines.first ?? "unknown", lines.count > 1 ? lines[1] : "")
     }
+
+    /// Start a Windows program that is not a Steam game (scripts/program-run) and leave it running:
+    /// it outlives the window. Returns why it could not start, if it could not.
+    static func start(program: URL) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [root.appendingPathComponent("scripts/program-run").path, program.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return error.localizedDescription }
+        return nil
+    }
 }

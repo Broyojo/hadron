@@ -35,8 +35,14 @@ if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
 fi
 
 MAC_STEAM="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
-[ -f "$MAC_STEAM/steamclient.dylib" ] || { echo "Mac Steam not found at $MAC_STEAM" >&2; exit 1; }
-pgrep -q steam_osx || echo "warning: Mac Steam doesn't seem to be running" >&2
+# A program that does not come from Steam (scripts/program-run) runs without it, and without the
+# Steam bridge.
+if [ -n "${HADRON_PROGRAM:-}" ]; then
+    export HADRON_DISABLE_LSTEAMCLIENT="${HADRON_DISABLE_LSTEAMCLIENT:-1}"
+else
+    [ -f "$MAC_STEAM/steamclient.dylib" ] || { echo "Mac Steam not found at $MAC_STEAM" >&2; exit 1; }
+    pgrep -q steam_osx || echo "warning: Mac Steam doesn't seem to be running" >&2
+fi
 
 winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
 . "$ROOT/scripts/paths.sh"

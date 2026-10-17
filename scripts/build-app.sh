@@ -68,6 +68,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleExecutable</key>
     <string>Hadron</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Windows program</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.microsoft.windows-executable</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleIconFile</key>
     <string>Hadron</string>
     <key>CFBundleIdentifier</key>

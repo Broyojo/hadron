@@ -14,6 +14,12 @@ func runCommand(_ arguments: [String]) -> Int32 {
         return status.state == "installed" ? 0 : 1
     case "report":
         return Runtime.run("report", Array(arguments.dropFirst()), line: print)
+    case "run":
+        guard arguments.count >= 2 else {
+            FileHandle.standardError.write(Data("usage: hadron run <program.exe> [arguments...]\n".utf8))
+            return 2
+        }
+        return Runtime.run("program-run", Array(arguments.dropFirst()), line: print)
     case "update":
         return update()
     case "version", "--version":
@@ -46,6 +52,7 @@ usage: hadron <command>
   uninstall   take Hadron out of Steam again
   status      say whether Steam is set up
   report      save a report file for a GitHub issue (optionally: hadron report <file.zip>)
+  run         run a Windows program that is not a Steam game: hadron run <program.exe> [arguments]
   update      install the latest version of Hadron, if this is not it
   version     print Hadron's version
 
