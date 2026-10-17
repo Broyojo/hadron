@@ -1525,7 +1525,7 @@ meet there; each program gets its own Dock bundle (`program-<hash of its path>`)
 
 A program is not a game, and program mode differs from a Steam launch where that matters: the
 program starts by itself, not through `hadron-steam.exe`, so nothing registers a running Steam
-in the prefix; its arguments are its own, not settings (`FOO=bar` reaches it); `steam-run` waits
+in the prefix, and gets none of Steam's variables (`SteamAppId` and the rest); its arguments are its own, not settings (`FOO=bar` reaches it); `steam-run` waits
 for it alone, not for the whole shared prefix, returns its exit status, and on Ctrl-C or Stop
 ends that program's own process, not the prefix's whole session; when it returns while what it
 started still runs (a launcher, an installer), a watchdog stays with the prefix's Wine session; it logs to a file

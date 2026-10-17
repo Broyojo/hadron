@@ -256,7 +256,8 @@ fi
 
 # Steam's own variables are a game's only: a program that is not on Steam must not take itself for one.
 [ -n "${HADRON_PROGRAM:-}" ] ||
-    set -- "SteamAppId=$appid" "SteamGameId=$appid" "STEAM_COMPAT_CLIENT_INSTALL_PATH=$MAC_STEAM" "$@"
+    set -- "SteamAppId=$appid" "SteamGameId=$appid" "STEAM_COMPAT_CLIENT_INSTALL_PATH=$MAC_STEAM" \
+        "STEAM_DYLD_INSERT_LIBRARIES=$STEAM_DYLD_INSERT_LIBRARIES" "$@"
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     TMPDIR="${TMPDIR:-/tmp}" \
     WINEPREFIX="$PREFIX" \
@@ -274,7 +275,6 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     ${HADRON_HARDWARE_TSO:+HADRON_HARDWARE_TSO=$HADRON_HARDWARE_TSO} \
     ${HADRON_PRECISE_SCROLLING:+HADRON_PRECISE_SCROLLING=$HADRON_PRECISE_SCROLLING} \
     ${FEX_BLOCKJITNAMING:+FEX_BLOCKJITNAMING=$FEX_BLOCKJITNAMING} \
-    STEAM_DYLD_INSERT_LIBRARIES="$STEAM_DYLD_INSERT_LIBRARIES" \
     ${SteamOverlayGameId:+SteamOverlayGameId=$SteamOverlayGameId} \
     ${SteamClientLaunch:+SteamClientLaunch=$SteamClientLaunch} ${SteamEnv:+SteamEnv=$SteamEnv} \
     "$@"
