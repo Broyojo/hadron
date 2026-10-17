@@ -1521,13 +1521,14 @@ same code, the profile layout, logs and the watchdog. In that mode `steam-run` s
 Steam for something (NotProton's activation request, Steam's shortcut icons) and `scripts/play`
 neither needs Mac Steam nor loads the Steam bridge. All such programs share one prefix,
 `~/Library/Application Support/Hadron/programs/pfx`, so an installer and the program it installs
-meet there; each program folder gets its own Dock bundle (`program-<hash of the folder>`).
+meet there; each program gets its own Dock bundle (`program-<hash of its path>`).
 
 A program is not a game, and program mode differs from a Steam launch where that matters: the
 program starts by itself, not through `hadron-steam.exe`, so nothing registers a running Steam
 in the prefix; its arguments are its own, not settings (`FOO=bar` reaches it); `steam-run` waits
 for it alone, not for the whole shared prefix, returns its exit status, and on Ctrl-C or Stop
-ends that program's own process, not the prefix's whole session; it logs to a file
+ends that program's own process, not the prefix's whole session; when it returns while what it
+started still runs (a launcher, an installer), a watchdog stays with the prefix's Wine session; it logs to a file
 only when the app starts it, so `hadron run` keeps a console program's output in the terminal;
 a program installed in the prefix starts from its `C:` path; and a lock on the prefix keeps two
 programs opened together on the first launch from both making it (also for Steam launches).
@@ -1541,5 +1542,7 @@ runtime copy. A test program that prints its path, arguments and Steam's registe
 exits with 7: arguments `FOO=bar` and `two words` intact, no Steam process, status 7, and
 `C:\Program Files\Test\args.exe` when copied into the prefix; a second program returned after
 1 s while another kept running; two programs opened together on a fresh prefix both ran, and the
-prefix was made once. Not done: remembering programs once installed (an installed program is found in
+prefix was made once; two programs from one folder ran side by side, each with its bundle; a
+launcher that starts a 20-second program and exits returned in 2 s, and the watchdog that took
+over logged the program to its end and then ended too. Not done: remembering programs once installed (an installed program is found in
 the prefix's `drive_c` for now), and adding them to Steam as non-Steam games.
