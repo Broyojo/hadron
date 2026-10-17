@@ -1414,10 +1414,44 @@ per-present notification), removing 0012's special case and its edge cases (GDI 
 device is destroyed while the view survives; games mixing GDI and 3D in one window). Needs
 coordination with the mtld3d and DXMT developers.
 
-## DXMT command helpers read an uninitialized device (fixed, #40)
+## DXMT command helpers read an uninitialized device (fixed, #41)
 
 The Paradox Launcher's GPU process died creating a compute pipeline whose receiver was
 0xbaadf00dbaadf00d, Wine's fill for uninitialized heap memory. `ClearUAV`'s constructor compiles
 its pipelines through `ArgumentEncodingContext::device_`, which was declared, and so initialized,
 after it. Upstream DXMT fixed the order in fb4515681d (2026-09-30), after our pin; DXMT patch
 0003 is that commit, to drop when the pin moves past it. Found by Lennard Zehner (#80).
+
+## Writable shared sections on 16 KB pages (fixed, #43)
+
+A GameMaker game shipped as a self-extracting `.exe` (issue #74) failed with "Error creating
+process": its runner, `GameMaker C++ Core Runner`, has a writable shared section `.mydata` at
+0xa71000, and Wine maps such a section `MAP_SHARED` from wineserver's shared-section file. That
+needs whole host pages. On Apple silicon a host page is 16 KB, and 0xa71000 shares its host page
+with the end of `.data`, so `map_file_into_view` refused ("unaligned shared mapping") and the
+image did not load. Any image or DLL with a writable shared section whose address, or whose
+offset in the shared-section file, is not a multiple of 16 KB failed the same way.
+
+Wine patch 0036 maps such a section as a private copy, with a FIXME in the log, and keeps the
+real shared mapping wherever the section lines up with host pages. One process sees exactly
+what Windows gives it. Two instances of the image do not share the section's data: a second
+one starts from the section's initial contents. A correct general answer is not possible at
+16 KB pages, since the host page also holds the neighbouring section's private data and the
+image's code addresses the section where it is. Sharing the whole host page would leak that
+private data between instances, which is worse.
+
+`tests/win/shared-section.c` covers both: built at 4 KB section alignment it loads, reads and
+writes its section, and a second instance sees the initial value; built at 16 KB alignment the
+second instance sees the first one's write. Linked with `.idata` merged into the section, the import table lies
+inside it (`-Xlink=-merge:.idata=.shr`); the private copy skips the private remapping of the import
+directory that only a shared mapping needs, whose host-page rounding would otherwise start before
+the section and read from the wrong place in the shared-section file. All pass as 32-bit and
+64-bit programs, from a folder with a space in its path; main fails to load the 4 KB build. ROAM's runner now loads and asks for a Direct3D 9Ex
+device, which mtld3d does not implement yet ("Failed to create Direct3D 9ex device"). With
+`HADRON_D3D9=wined3d` (Wine's D3D9 on Zink) the game plays, at a somewhat low frame rate that
+got much worse after switching to another app and back (2026-10-16).
+
+Once in five fresh prefixes during this testing, wineboot's 32-bit `Wow64Install` step hung
+while a test program ran at the same time; four further fresh prefixes, three of them with
+the same sequence, did not. No image loaded by that step has a shared section, so it is
+unlikely to involve this patch, but it is recorded here in case it turns up again.
