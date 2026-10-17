@@ -94,14 +94,18 @@ enum Runtime {
         let messages = FileManager.default.temporaryDirectory
             .appendingPathComponent("hadron-program-run-\(UUID().uuidString).txt")
         FileManager.default.createFile(atPath: messages.path, contents: nil)
-        guard let errors = try? FileHandle(forWritingTo: messages) else { return "cannot write \(messages.path)" }
+        guard let errors = try? FileHandle(forWritingTo: messages),
+              let reader = try? FileHandle(forReadingFrom: messages) else { return "cannot write \(messages.path)" }
+        // The file goes at once: the runner writes and this app reads through what they have open,
+        // so nothing is left behind if Hadron quits first.
+        try? FileManager.default.removeItem(at: messages)
         process.standardOutput = FileHandle.nullDevice
         process.standardError = errors
         process.terminationHandler = { finished in
-            let said = ((try? String(contentsOf: messages, encoding: .utf8)) ?? "")
+            let said = String(decoding: reader.readDataToEndOfFile(), as: UTF8.self)
                 .split(separator: "\n")
                 .filter { !$0.hasPrefix("watchdog: memory log in") && !$0.hasPrefix("logging to ") }
-            try? FileManager.default.removeItem(at: messages)
+            try? reader.close()
             if finished.terminationStatus != 0 && !said.isEmpty {
                 failed(said.joined(separator: "\n"))
             }

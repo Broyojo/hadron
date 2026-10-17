@@ -104,9 +104,8 @@ wineserver="$ROOT/dist/bin/wineserver"
 
 # One launch at a time checks, makes and updates the prefix, so two first launches (of a game, or of
 # programs that are not on Steam, which share one) never both make it, nor one delete what the other
-# is making. The lock is on a file outside the prefix that this
-# shell holds open; what is started meanwhile is not handed it (7>&-), since the wineserver
-# outlives this part.
+# is making. The lock is on a file outside the prefix that this shell holds open; what is started
+# meanwhile is not handed it (7>&-), since the wineserver outlives this part.
 exec 7>"$STEAM_COMPAT_DATA_PATH/.hadron-prefix-lock"
 if ! lockf -s -t 600 7; then
     echo "steam-run: another launch has been making or updating this prefix for ten minutes; not starting" | tee -a "$log" >&2
@@ -267,21 +266,30 @@ fi
 # scripts/play started ends with this runner.
 keep_watching() {
     [ "${HADRON_WATCHDOG:-1}" != 0 ] || return 0
+    # Programs finishing together choose one watchdog: the check and the start happen under a lock.
+    exec 8>"$STEAM_COMPAT_DATA_PATH/.hadron-watchdog-lock"
+    lockf -s -t 10 8 || { exec 8>&-; return 0; }
     # One such watchdog per session: programs share the prefix, and each that returns would add one.
     # The recorded process counts only while it still is that watchdog: a PID can be reused.
     _watching=$(cat "$WINEPREFIX/.hadron-session-watchdog" 2>/dev/null)
-    case "$(ps -o args= -p "${_watching:-0}" 2>/dev/null)" in *"/scripts/watchdog "*-after.mem.log*) return 0 ;; esac
-    "$wineserver" -w >/dev/null 2>&1 &
+    case "$(ps -o args= -p "${_watching:-0}" 2>/dev/null)" in *"/scripts/watchdog "*-after.mem.log*) exec 8>&-; return 0 ;; esac
+    "$wineserver" -w >/dev/null 2>&1 8>&- &
     nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" $! \
-        >/dev/null 2>&1 &
+        >/dev/null 2>&1 8>&- &
     echo $! > "$WINEPREFIX/.hadron-session-watchdog"
+    exec 8>&-
 }
 # A program shares its prefix with other programs: stopping it stops its own process, not the
 # prefix's whole session.
 if [ -n "${HADRON_PROGRAM:-}" ]; then
-    # Wine takes SIGTERM as the end of one thread, not of its process: SIGKILL follows, as
+    # A Wine process does not end on SIGTERM (seen with a program in Sleep): SIGKILL follows, as
     # wineserver -k sends for a game.
-    trap 'kill "$launched" 2>/dev/null; sleep 2; kill -KILL "$launched" 2>/dev/null; wait; keep_watching; exit 143' TERM INT HUP
+    stop_program() {  # <exit status>
+        kill "$launched" 2>/dev/null; sleep 2; kill -KILL "$launched" 2>/dev/null; wait; keep_watching; exit "$1"
+    }
+    trap 'stop_program 143' TERM
+    trap 'stop_program 130' INT
+    trap 'stop_program 129' HUP
 else
     trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
 fi
