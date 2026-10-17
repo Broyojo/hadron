@@ -1455,3 +1455,25 @@ Once in five fresh prefixes during this testing, wineboot's 32-bit `Wow64Install
 while a test program ran at the same time; four further fresh prefixes, three of them with
 the same sequence, did not. No image loaded by that step has a shared section, so it is
 unlikely to involve this patch, but it is recorded here in case it turns up again.
+
+## Writable x86 code shared a native protection page (fixed, #45)
+
+On an M4 with 16K native pages, FEX protected one 4K Windows code page while its
+writable neighbours kept the native page writable. A subsequent patch went unnoticed:
+a small x86 test read the new byte but still executed its old return value. A 4K-only
+view and an explicit cache-flush control passed. Electron 42.7.0 reproduced incorrect
+RegExp replacements in an ES module; interpreting RegExp passed. V8's x64 cache-flush
+implementation deliberately relies on x86 code coherence.
+
+FEX patch 0006 queries the native page size, protects tracked writable code throughout
+that page, and invalidates its translations together before restoring write access.
+Genuine read-only transitions remove stale writable-code intervals. The existing Unix
+helper query gains optional output; old callers and helpers keep their ABI. Cost: a
+write can invalidate neighbouring code and cause additional recompilation. This fixes
+tracked writable-code neighbours; mixed non-executable writable data is not covered.
+
+The x86_64 and i386 regression tests cover updates, sibling invalidation, a crossing
+instruction, protection metadata and a small view. The Electron replacement probe
+passes without JIT-disabling flags. With the tested Wine decommit fix (#79) and this FEX change,
+normal dowser startup reaches Paradox Launcher 2026.12's Play/Resume page (28.4 s);
+mouse alignment and gameplay through that launcher still need player acceptance.
