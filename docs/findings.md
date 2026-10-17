@@ -1455,3 +1455,11 @@ Once in five fresh prefixes during this testing, wineboot's 32-bit `Wow64Install
 while a test program ran at the same time; four further fresh prefixes, three of them with
 the same sequence, did not. No image loaded by that step has a shared section, so it is
 unlikely to involve this patch, but it is recorded here in case it turns up again.
+
+## Native cursor reappears at the bottom screen edge (backport under test, #44)
+
+A Ready or Not gameplay test on 2026-10-16 exposed a native cursor over the crosshair
+after touching the bottom screen edge. A reduced Windows cursor/clip probe reproduced
+the visibility transition without changing Wine's hidden-cursor request. The cursor-only
+patch from Wine MR 11799 v4 is backported with its original author; native builds pass,
+while final visual acceptance remains pending. See [evidence and test instructions](fixes/cursor-visibility.md).
