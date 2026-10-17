@@ -7,7 +7,7 @@
 # unasked. A launch that finds a Wine session running in the prefix takes the session's setting,
 # whatever its own HADRON_RETINA says. One launch decides at a time: the first records its setting
 # and starts the prefix's wineserver before letting the next look, so two launches into an idle
-# prefix do not both decide. The lock is not handed to the wineserver (6>&-), which outlives this.
+# prefix do not both decide.
 #
 # Uses PREFIX and WINESERVER; sets HADRON_RETINA.
 
@@ -40,7 +40,9 @@ retina_decide() {
     else
         HADRON_RETINA=$_requested
         printf '%s\n' "$HADRON_RETINA" > "$PREFIX/.hadron-retina"
-        WINEPREFIX="$PREFIX" "$WINESERVER" 6>&-
+        # No launcher lock goes to the wineserver, which outlives the launcher: this one's (6), nor
+        # one its caller holds (steam-run's prefix lock is 7, the runtime lock 9).
+        WINEPREFIX="$PREFIX" "$WINESERVER" 6>&- 7>&- 8>&- 9>&-
     fi
     exec 6>&-
 }

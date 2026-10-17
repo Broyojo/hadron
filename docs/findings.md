@@ -1510,7 +1510,8 @@ the next looks, so two launches into an idle or a not yet existing prefix agree 
 session that ends meanwhile is not joined (races of a launch with `HADRON_RETINA=1` against one
 without, on an existing and a new prefix: both reported the same display every time).
 `scripts/retina.sh` holds this, and `scripts/wine-run` and `scripts/steam-run` (prefix creation
-and updates, and the helpers Steam runs) follow it too. A child a program starts with an
+and updates, and the helpers Steam runs) follow it too; `steam-run` makes and updates a prefix
+under a lock outside it, so two first launches of a game never both make it. A child a program starts with an
 environment of its own that leaves out `HADRON_RETINA` reported the session's mode; tested by starting a report
 with `HADRON_RETINA=1` while a triangle test ran without it: it reported points, and pixels once
 the session had ended.
