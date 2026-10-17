@@ -165,7 +165,6 @@ if [ "$stamp" != disable ] && [ "$stamp" != "$(stat -f %m "$ROOT/dist/share/wine
         exit 1
     fi
 fi
-exec 7>&-
 
 # The profile Steam Cloud expects, as Proton lays it out: users/steamuser, its Documents, Desktop and
 # so on real folders inside the prefix (Wine links a shell folder to the Mac user's only when it
@@ -202,6 +201,9 @@ if [ ! -f "$WINEPREFIX/.hadron-profile-v1" ]; then
     touch "$WINEPREFIX/.hadron-profile-v1"
     echo "laid out the steamuser profile" >> "$log"
 fi
+# The prefix lock is held through the profile's one-time layout too: two programs using the shared
+# prefix for the first time must not both move its folders around.
+exec 7>&-
 
 # Valve's Windows client DLLs, fetched from Valve's CDN (never redistributed): the game's
 # steam_api loads them from the Steam directory hadron-steam.exe registers, and Wine redirects
