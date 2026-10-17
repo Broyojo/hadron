@@ -8,8 +8,11 @@
 # HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis.
 # FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
-# A watchdog stops the game before memory use can make the Mac thrash; HADRON_MEM_LIMIT_GB
-# (default half of RAM) and HADRON_SWAP_LIMIT_MB (default 2048) set its limits.
+# The watchdog warns once at half of RAM footprint, 2–4 GB swap growth or elevated pressure.
+# Installed runtimes under Hadron/runtimes stop only at critical pressure or below 1 GB free disk.
+# Checkouts stop above half of RAM footprint, 2 GB swap growth or below 5 GB free disk.
+# HADRON_MEM_LIMIT_GB, HADRON_SWAP_LIMIT_MB and HADRON_DISK_MIN_GB override these defaults
+# as hard limits in either mode. Footprint includes compressed and graphics memory.
 # Scrolling sends whole wheel notches, which every game handles; HADRON_PRECISE_SCROLLING=1 sends
 # fractions for smooth scrolling, for applications that scale by the wheel delta.
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
@@ -23,6 +26,11 @@ appid="$1"; exe="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2
 # Steam starts a game in the working directory its launch entry names, and scripts/steam-run
 # keeps it. Run by hand, the game starts in its own directory.
 [ -n "${STEAM_COMPAT_DATA_PATH:-}" ] || cd "$(dirname "$exe")" || exit 1
+
+# Reject invalid watchdog settings before any prefix changes or Wine startup.
+if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
+    "$ROOT/scripts/watchdog" --check || exit 1
+fi
 
 MAC_STEAM="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
 [ -f "$MAC_STEAM/steamclient.dylib" ] || { echo "Mac Steam not found at $MAC_STEAM" >&2; exit 1; }
@@ -105,8 +113,8 @@ mkdir -p "$HADRON_LOGS"
 if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
     memlog="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).mem.log"
     echo "watchdog: memory log in $memlog" >&2
-    # $$ is this script's PID, which the exec below hands to Wine.
-    nohup "$ROOT/scripts/watchdog" "$memlog" $$ >/dev/null 2>&1 &
+    # Steam keeps its outer session alive through launcher exits; a manual run uses this PID.
+    nohup "$ROOT/scripts/watchdog" "$memlog" "${HADRON_SESSION_PID:-$$}" >/dev/null 2>&1 &
 fi
 if [ -n "$HADRON_LOG" ]; then
     log="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).log"

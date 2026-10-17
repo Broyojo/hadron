@@ -1323,6 +1323,38 @@ mscoree logs that a registry key is missing until Wine next updates the prefix a
 support package. A new prefix records .NET 4.8.1 as installed, so Steam's install scripts skip
 the .NET redistributable. Not tried: Fable itself, which is not installed here, and any game in
 it; whether Fable's mixed native and .NET code runs on Wine Mono is the next question.
+
+## macOS partial decommit retained stale guest data (#42)
+
+On a 16K host, decommitting/recommitting a 4K boundary page retained old bytes.
+Wine patch 0034 clears partial host pages through temporary writable aliases,
+without relaxing committed neighbours' protections; MAP_JIT uses per-thread write
+mode. Both aliases are prepared before clearing, so preparation failure leaves
+contents intact. Alias writes invalidate the original instruction-cache range too.
+Whole-view decommit still remaps the rounded host range, including
+a view smaller than one host page, to release its backing. Other hosts keep their prior behaviour.
+
+Patch 0035 makes it cheap: a host page that is already writable, the usual case, is cleared in
+place with no alias, and mprotect runs afterwards only when the host page's protection changes.
+Aliases remain for read-only, executable and no-access host pages. Whole and partial decommits
+take one path: a boundary host page is replaced whole only when nothing else in it is in use (no
+committed guest page of the view, no other view), which releases its backing rather than
+faulting it in. Wine splits placeholders only at host-page boundaries, so two views do not share
+a host page today; the check does not rely on that.
+
+Decommit plus recommit, x86_64 / ARM64 on an M2 Pro (`tests/win/decommit-bench.c`): a 4K page
+inside a host page 1.2 / 0.8 us before, 5.2 / 4.7 us with aliases always, 1.3 / 0.9 us with
+0035; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12 and 2.1 / 1.7 us; a 4K page alone
+in its host page 3.2 / 2.9 us with 0035, the cost of a whole host page.
+`tests/win/decommit-neighbours.c` covers the alias path (read-only, executable and no-access
+neighbours), which main fails, and a decommit at the end of a view shorter than its host page.
+
+The zero/preservation regression covers 19 cases on x86_64 and i386, including a
+whole 4K views with RW, read-only and RX protections. The Windows ARM64 concurrent read-only/RX-neighbour tests reject
+protected writes and preserve adjacent data/code; a delayed old RW-protection build
+reproduced the race. A native MAP_JIT mechanism probe passes; full Wine JIT-view integration is not covered.
+Subnautica, Teardown and Portal 2 played normally on 0034 (2026-10-16).
+
 ## Media Foundation could not play anything: no GStreamer (fixed, #38)
 
 A game that plays a video or sound file through Media Foundation, the usual path on Windows for
@@ -1354,6 +1386,22 @@ Vorbis; Windows' own Media Foundation needs an add-on for WebM too. winegstreame
 did not affect decoding. Not tried: DirectShow playback (quartz, which now also has GStreamer to
 use), and a game.
 
+## Watchdog footprint and runtime-specific guards (#40)
+
+An investigation Raft load stopped at 8,206 MB; a later completed load peaked at
+10,878 MB footprint and 2,021 MB swap growth with elevated, not critical, pressure.
+RSS misses compressed/graphics allocations. The native helper reads proc_pid_rusage
+physical footprint, falling back per unavailable process to RSS. The Steam runner
+keeps the watchdog alive across launcher exits; free space is checked on both runtime
+and home volumes. These measurements are not stock-release game acceptance.
+
+Installed runtime copies stop at critical pressure or below 1 GB free disk, with a
+single high-memory warning and no fixed memory/swap caps. Checkouts retain hard
+half-RAM, 2 GB swap-growth and 5 GB disk guards. Explicit HADRON_* limits are hard
+in both modes. Policy replays cover mode/path selection, recorded loads, pressure,
+disk boundaries, explicit limits and invalid values; native helper tests cover live
+footprint and per-process fallback. No allocation or startup-speed improvement is claimed.
+
 ## Future cleanup: Metal renderers and Wine's client surfaces
 
 Wine patches 0007 and 0012 attach mtld3d/DXMT to a window through the CrossOver-style
@@ -1365,6 +1413,48 @@ The principled fix is to have mtld3d and DXMT present through Wine's client surf
 per-present notification), removing 0012's special case and its edge cases (GDI drawing after a
 device is destroyed while the view survives; games mixing GDI and 3D in one window). Needs
 coordination with the mtld3d and DXMT developers.
+
+## DXMT command helpers read an uninitialized device (fixed, #41)
+
+The Paradox Launcher's GPU process died creating a compute pipeline whose receiver was
+0xbaadf00dbaadf00d, Wine's fill for uninitialized heap memory. `ClearUAV`'s constructor compiles
+its pipelines through `ArgumentEncodingContext::device_`, which was declared, and so initialized,
+after it. Upstream DXMT fixed the order in fb4515681d (2026-09-30), after our pin; DXMT patch
+0003 is that commit, to drop when the pin moves past it. Found by Lennard Zehner (#80).
+
+## Writable shared sections on 16 KB pages (fixed, #43)
+
+A GameMaker game shipped as a self-extracting `.exe` (issue #74) failed with "Error creating
+process": its runner, `GameMaker C++ Core Runner`, has a writable shared section `.mydata` at
+0xa71000, and Wine maps such a section `MAP_SHARED` from wineserver's shared-section file. That
+needs whole host pages. On Apple silicon a host page is 16 KB, and 0xa71000 shares its host page
+with the end of `.data`, so `map_file_into_view` refused ("unaligned shared mapping") and the
+image did not load. Any image or DLL with a writable shared section whose address, or whose
+offset in the shared-section file, is not a multiple of 16 KB failed the same way.
+
+Wine patch 0036 maps such a section as a private copy, with a FIXME in the log, and keeps the
+real shared mapping wherever the section lines up with host pages. One process sees exactly
+what Windows gives it. Two instances of the image do not share the section's data: a second
+one starts from the section's initial contents. A correct general answer is not possible at
+16 KB pages, since the host page also holds the neighbouring section's private data and the
+image's code addresses the section where it is. Sharing the whole host page would leak that
+private data between instances, which is worse.
+
+`tests/win/shared-section.c` covers both: built at 4 KB section alignment it loads, reads and
+writes its section, and a second instance sees the initial value; built at 16 KB alignment the
+second instance sees the first one's write. Linked with `.idata` merged into the section, the import table lies
+inside it (`-Xlink=-merge:.idata=.shr`); the private copy skips the private remapping of the import
+directory that only a shared mapping needs, whose host-page rounding would otherwise start before
+the section and read from the wrong place in the shared-section file. All pass as 32-bit and
+64-bit programs, from a folder with a space in its path; main fails to load the 4 KB build. ROAM's runner now loads and asks for a Direct3D 9Ex
+device, which mtld3d does not implement yet ("Failed to create Direct3D 9ex device"). With
+`HADRON_D3D9=wined3d` (Wine's D3D9 on Zink) the game plays, at a somewhat low frame rate that
+got much worse after switching to another app and back (2026-10-16).
+
+Once in five fresh prefixes during this testing, wineboot's 32-bit `Wow64Install` step hung
+while a test program ran at the same time; four further fresh prefixes, three of them with
+the same sequence, did not. No image loaded by that step has a shared section, so it is
+unlikely to involve this patch, but it is recorded here in case it turns up again.
 
 ## Native cursor reappears at the bottom screen edge (backport under test, #44)
 

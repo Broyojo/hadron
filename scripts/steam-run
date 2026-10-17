@@ -246,7 +246,7 @@ export HADRON_LOG="${HADRON_LOG:-1}"
 # Stay in the foreground: Steam tracks this process, and its Stop button sends it SIGTERM, which
 # has to end the game's whole Wine session rather than just the launcher.
 trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
-"$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" &
+HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" &
 wait $!
 # A launcher that starts the real game and exits returns early: stay until the prefix's whole Wine
 # session has ended, so Steam shows the game running (and can stop it) until then. Waited on in the

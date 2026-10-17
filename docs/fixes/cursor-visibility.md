@@ -20,9 +20,11 @@ presentation option begins at macOS 10.11.2.
 
 ## Verification and limits
 
-- Official patch-queue verification passes: Wine 34 patches, DXMT 2 and NotProton 6.
-  Patch applies unchanged to Hadron's current Wine queue; compiled both in the local
-  investigation source and independently against the current upstream queue.
+- The earlier Wine 34 / DXMT 2 / NotProton 6 queue check passed. On 2026-10-17,
+  the unchanged cursor patch was renumbered 0037 and applied cleanly after main's
+  Wine 36-patch queue in a separate sparse source checkout. Earlier native builds
+  passed in both the investigation source and the then-current upstream queue;
+  the updated combined source has not been rebuilt or installed.
 - Native cursor-object construction succeeds. An empty-image TIFF export does not
   produce pixels and is not used as evidence that rendering is transparent.
 - Automated post-fix edge measurement was blocked by an overlapping macOS capture UI;
