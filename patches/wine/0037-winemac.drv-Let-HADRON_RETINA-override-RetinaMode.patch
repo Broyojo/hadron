@@ -1,0 +1,31 @@
+From 3c9f130ec1aa1415274b3c80f3f4d850392174ff Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 17 Oct 2026 01:15:16 -0400
+Subject: [PATCH] winemac.drv: Let HADRON_RETINA override RetinaMode.
+
+RetinaMode is read from the registry by each process when it starts, and
+must agree across a prefix. A value written by the game's first process
+comes too late for those it already started; the environment reaches them
+all.
+---
+ dlls/winemac.drv/macdrv_main.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+index a647bc8147..a680801b1d 100644
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -379,6 +379,10 @@ static void setup_options(void)
+        processes in the prefix. */
+     if (!get_config_key(hkey, NULL, "RetinaMode", buffer, sizeof(buffer)))
+         retina_enabled = IS_OPTION_TRUE(buffer[0]);
++    /* The environment reaches every process of the prefix from its start, as a registry
++       value written by the first one does not. */
++    if ((env_str = getenv("HADRON_RETINA")) && *env_str)
++        retina_enabled = IS_OPTION_TRUE(env_str[0]);
+ 
+     retina_on = retina_enabled;
+ 
+-- 
+2.54.0 (Apple Git-157)
+

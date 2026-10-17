@@ -15,6 +15,8 @@
 # as hard limits in either mode. Footprint includes compressed and graphics memory.
 # Scrolling sends whole wheel notches, which every game handles; HADRON_PRECISE_SCROLLING=1 sends
 # fractions for smooth scrolling, for applications that scale by the wheel delta.
+# Games see a Retina display at its size in points and macOS scales them up; HADRON_RETINA=1 shows
+# them its pixels instead, for native resolution at four times the pixels to draw (findings #45).
 # 32-bit games get the full 4GB address space, as under Proton; HADRON_LARGE_ADDRESS_AWARE=0
 # limits those not marked large address aware to 2GB, as on Windows.
 # D3D12 runs through vkd3d-proton on KosmicKrisp (docs/findings.md #22); HADRON_D3D12=wine uses
@@ -255,6 +257,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     ${HADRON_DISABLE_LSTEAMCLIENT:+HADRON_DISABLE_LSTEAMCLIENT=$HADRON_DISABLE_LSTEAMCLIENT} \
     ${HADRON_HARDWARE_TSO:+HADRON_HARDWARE_TSO=$HADRON_HARDWARE_TSO} \
     ${HADRON_PRECISE_SCROLLING:+HADRON_PRECISE_SCROLLING=$HADRON_PRECISE_SCROLLING} \
+    ${HADRON_RETINA:+HADRON_RETINA=$HADRON_RETINA} \
     ${FEX_BLOCKJITNAMING:+FEX_BLOCKJITNAMING=$FEX_BLOCKJITNAMING} \
     STEAM_DYLD_INSERT_LIBRARIES="$STEAM_DYLD_INSERT_LIBRARIES" \
     ${SteamOverlayGameId:+SteamOverlayGameId=$SteamOverlayGameId} \

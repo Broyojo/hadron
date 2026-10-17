@@ -1484,3 +1484,24 @@ which `hadron-steam.exe` starting the game as a child does not allow as it is. L
 also changes the plumbing: the environment goes through `open --env`, output through
 `--stdout`/`--stderr`, and Steam's process tracking and Stop no longer reach the game's
 processes as children, so `scripts/steam-run` has to wait for and stop them itself.
+
+## Native resolution on Retina displays: HADRON_RETINA (#45)
+
+A game sees a Retina display at its size in points, 1512×982 for a MacBook's built-in 3024×1964
+panel, and macOS scales its picture up 2× (issue #71). Wine's Mac driver has a Retina mode that
+shows games the pixels instead, from the `RetinaMode` value of `HKCU\Software\Wine\Mac Driver`.
+Each process reads it when it starts, and Wine requires every process of a prefix to agree: a
+value written by the game's first process comes too late for the ones Wine has already started,
+which then report the display in points while the game gets pixels. Wine patch 0037 lets the
+environment decide instead, as `HADRON_PRECISE_SCROLLING` does, and `scripts/play` passes
+`HADRON_RETINA` on: `HADRON_RETINA=1` in a game's launch options turns it on for that game. Off
+by default: four times the pixels cost frame rate, and older games get tiny menus.
+
+With it on, `tests/win/display-report.c` reports the built-in display as 3024×1964 everywhere a
+game looks (monitor rectangle, current mode, mode list up to 3024×1964, `SM_CXSCREEN`), against
+1512×982 without. `HORZRES` reported 6048: winemac doubled the size win32u returns, a 2018
+change from when that size was in points, which it no longer is in Retina mode (upstream too).
+Wine patch 0038 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL
+(Zink) run in both modes at 120 fps (2026-10-17); nobody has looked at the picture yet. Still to
+check by eye: sharpness, a windowed game's size on screen (half as large: its pixels are now the
+display's), the cursor, and fullscreen on an external display.
