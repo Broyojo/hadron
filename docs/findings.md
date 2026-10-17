@@ -1505,7 +1505,8 @@ with the next session rather than mixing points and pixels in one; the decision 
 starts, one launch at a time under a lock, and the first starts the prefix's wineserver before
 the next looks, so two launches into an idle or a not yet existing prefix agree too, and a
 session that ends meanwhile is not joined (races of a launch with `HADRON_RETINA=1` against one
-without, on an existing and a new prefix: both reported the same display every time); tested by starting a report
+without, on an existing and a new prefix: both reported the same display every time).
+`scripts/retina.sh` holds this, and `scripts/wine-run` follows it too; tested by starting a report
 with `HADRON_RETINA=1` while a triangle test ran without it: it reported points, and pixels once
 the session had ended.
 

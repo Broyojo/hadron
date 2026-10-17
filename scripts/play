@@ -42,48 +42,9 @@ winexe="Z:$(printf '%s' "$exe" | tr '/' '\\')"
 . "$ROOT/scripts/paths.sh"
 PREFIX="${WINEPREFIX:-$HADRON_PREFIX}"
 
-# Retina mode has to be the same in every process of a prefix (findings #45), and is always passed
-# on, 0 or 1, so that a RetinaMode left in a prefix's registry (CrossOver's "High Resolution") does
-# not turn it on unasked. A launch that joins a Wine session already running there takes the
-# session's setting, whatever its own says.
-case "${HADRON_RETINA:-0}" in [1yYtT]*) HADRON_RETINA=1 ;; *) HADRON_RETINA=0 ;; esac
-prefix_session_running() {
-    servers=$(pgrep -x wineserver) || return 1
-    session="server-$(stat -f '%Xd-%Xi' "$PREFIX" 2>/dev/null | tr 'A-F' 'a-f')"
-    # A wineserver works in its server folder, and for its first moments in the prefix itself.
-    prefix_real=$(/bin/realpath "$PREFIX" 2>/dev/null)
-    for server in $servers; do
-        cwd=$(lsof -a -p "$server" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
-        case "$cwd" in
-            */"$session"|"$prefix_real") return 0 ;;
-        esac
-    done
-    return 1
-}
-# Decided right before Wine starts, one launch at a time: the first records its setting and starts
-# the prefix's wineserver before letting the next look, so two launches into an idle prefix do not
-# both decide, and a session that ends meanwhile is not joined. The lock is not handed to the
-# wineserver (6>&-), which outlives this.
-retina_requested=$HADRON_RETINA
-retina_decide() {
-    mkdir -p "$PREFIX"
-    exec 6>"$PREFIX/.hadron-retina.lock"
-    if ! lockf -s -t 60 6; then
-        echo "play: another launch has held $PREFIX/.hadron-retina.lock for a minute; not starting" >&2
-        exit 1
-    fi
-    if prefix_session_running; then
-        joined=$(cat "$PREFIX/.hadron-retina" 2>/dev/null)
-        HADRON_RETINA="${joined:-0}"
-        [ "$HADRON_RETINA" = "$retina_requested" ] ||
-            echo "HADRON_RETINA=$HADRON_RETINA: the Wine session already running in this prefix has it" >&2
-    else
-        HADRON_RETINA=$retina_requested
-        printf '%s\n' "$HADRON_RETINA" > "$PREFIX/.hadron-retina"
-        WINEPREFIX="$PREFIX" "$ROOT/dist/bin/wineserver" 6>&-
-    fi
-    exec 6>&-
-}
+# Retina mode: decided right before Wine starts, as every launcher in a prefix does (scripts/retina.sh).
+. "$ROOT/scripts/retina.sh"
+WINESERVER="$ROOT/dist/bin/wineserver"
 mkdir -p "$PREFIX"
 
 # Hadron's own DLLs aren't Wine builtins, so the prefix has no placeholders for them and Wine

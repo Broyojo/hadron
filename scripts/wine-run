@@ -8,10 +8,15 @@ case "$(basename "$0")" in
     wine-dev) DIST="$ROOT/dist-dev" PREFIX="$ROOT/prefix/dev" ;;
     *)        DIST="$ROOT/dist"     PREFIX="$ROOT/prefix/release" ;;
 esac
-mkdir -p "${WINEPREFIX:-$PREFIX}"
+PREFIX="${WINEPREFIX:-$PREFIX}"
+# Retina mode has to agree with any Wine session already in the prefix (scripts/retina.sh).
+. "$ROOT/scripts/retina.sh"
+WINESERVER="$DIST/bin/wineserver"
+retina_decide
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     TMPDIR="${TMPDIR:-/tmp}" \
-    WINEPREFIX="${WINEPREFIX:-$PREFIX}" \
+    WINEPREFIX="$PREFIX" \
+    HADRON_RETINA="$HADRON_RETINA" \
     WINEDEBUG="${WINEDEBUG:-}" \
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mshtml=}" \
     DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
