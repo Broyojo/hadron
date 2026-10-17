@@ -275,8 +275,9 @@ fi
 keep_watching() {
     [ "${HADRON_WATCHDOG:-1}" != 0 ] || return 0
     # One such watchdog per session: programs share the prefix, and each that returns would add one.
+    # The recorded process counts only while it still is that watchdog: a PID can be reused.
     _watching=$(cat "$WINEPREFIX/.hadron-session-watchdog" 2>/dev/null)
-    [ -n "$_watching" ] && kill -0 "$_watching" 2>/dev/null && return 0
+    case "$(ps -o args= -p "${_watching:-0}" 2>/dev/null)" in *"/scripts/watchdog "*-after.mem.log*) return 0 ;; esac
     "$wineserver" -w >/dev/null 2>&1 &
     nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" $! \
         >/dev/null 2>&1 &
@@ -291,7 +292,9 @@ if [ -n "${HADRON_PROGRAM:-}" ]; then
 else
     trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
 fi
-HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" &
+# Its input is this script's (a background command would otherwise read nothing): hadron run's
+# console programs read the terminal or a pipe.
+HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" 0<&0 &
 launched=$!
 wait $launched
 status=$?

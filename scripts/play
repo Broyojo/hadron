@@ -39,6 +39,8 @@ MAC_STEAM="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Content
 # Steam bridge.
 if [ -n "${HADRON_PROGRAM:-}" ]; then
     export HADRON_DISABLE_LSTEAMCLIENT="${HADRON_DISABLE_LSTEAMCLIENT:-1}"
+    # Run from a shell Steam started, it may have inherited Steam's overlay and launch variables.
+    unset STEAM_DYLD_INSERT_LIBRARIES SteamOverlayGameId SteamClientLaunch SteamEnv
 else
     [ -f "$MAC_STEAM/steamclient.dylib" ] || { echo "Mac Steam not found at $MAC_STEAM" >&2; exit 1; }
     pgrep -q steam_osx || echo "warning: Mac Steam doesn't seem to be running" >&2
@@ -61,9 +63,15 @@ mkdir -p "$PREFIX"
 # Hadron's own DLLs aren't Wine builtins, so the prefix has no placeholders for them and Wine
 # can't find them by name. Install copies into the system directories (Wine still loads the
 # builtin from dist/ because they carry the builtin signature).
+# A copy goes in under a new name and is renamed over the old one: launches sharing a prefix (programs
+# that are not on Steam) must never load a DLL another launch is halfway through writing.
+install_file() {  # <source> <destination>
+    cmp -s "$1" "$2" && return 0
+    cp "$1" "$2.hadron-$$" && mv -f "$2.hadron-$$" "$2"
+}
 install_dll() {  # <dist arch dir> <prefix system dir> <dll>
     src="$ROOT/dist/lib/wine/$1/$3"; dst="$PREFIX/drive_c/windows/$2/$3"
-    if [ -f "$src" ] && [ -d "$(dirname "$dst")" ] && ! cmp -s "$src" "$dst"; then cp "$src" "$dst"; fi
+    if [ -f "$src" ] && [ -d "$(dirname "$dst")" ]; then install_file "$src" "$dst"; fi
 }
 for dll in lsteamclient.dll winemetal.dll; do
     install_dll aarch64-windows system32 "$dll"
@@ -91,7 +99,7 @@ icd="$ROOT/dist/mesa/share/vulkan/icd.d/kosmickrisp_mesa_icd.aarch64.json"
 # aren't its own (vkd3d-proton's command queues), loading it by this name.
 sys32="$PREFIX/drive_c/windows/system32"
 if [ -f "$ROOT/dist/dxvk/x64/dxgi.dll" ] && [ -d "$sys32" ]; then
-    cmp -s "$ROOT/dist/dxvk/x64/dxgi.dll" "$sys32/dxgi_dxvk.dll" || cp "$ROOT/dist/dxvk/x64/dxgi.dll" "$sys32/dxgi_dxvk.dll"
+    install_file "$ROOT/dist/dxvk/x64/dxgi.dll" "$sys32/dxgi_dxvk.dll"
 fi
 # D3D12 goes through vkd3d-proton on KosmicKrisp. Wine's own d3d12 can't make a device here: it needs
 # Wine's DXGI adapters, and DXGI is DXMT's. HADRON_D3D12=wine selects it anyway, for comparisons;
@@ -112,7 +120,7 @@ fi
 if [ "$d3d12" != wine ]; then
     for f in d3d12.dll d3d12core.dll; do
         src="$ROOT/dist/vkd3d-proton/x64/$f"
-        cmp -s "$src" "$sys32/$f" || cp "$src" "$sys32/$f"
+        install_file "$src" "$sys32/$f"
     done
     overrides="$overrides;d3d12,d3d12core=n"
     # vkd3d-proton caches pipelines in the working directory, the game's install, unless told otherwise.
