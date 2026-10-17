@@ -120,7 +120,17 @@ enum Runtime {
             FileHandle.standardError.write(Data("hadron: cannot run \(script): \(error.localizedDescription)\n".utf8))
             return 127
         }
+        // A signal sent to this process alone (a supervisor's, kill's) goes on to the runner, which
+        // stops the program; a terminal's Ctrl-C reaches both anyway.
+        let forwarders = [SIGTERM, SIGINT, SIGHUP].map { number -> DispatchSourceSignal in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { kill(process.processIdentifier, number) }
+            source.resume()
+            return source
+        }
         process.waitUntilExit()
+        forwarders.forEach { $0.cancel() }
         return process.terminationStatus
     }
 }

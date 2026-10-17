@@ -254,6 +254,9 @@ if [ -n "${STEAM_DYLD_INSERT_LIBRARIES:-}" ]; then
     set -- "DYLD_INSERT_LIBRARIES=$insert" "$@"
 fi
 
+# Steam's own variables are a game's only: a program that is not on Steam must not take itself for one.
+[ -n "${HADRON_PROGRAM:-}" ] ||
+    set -- "SteamAppId=$appid" "SteamGameId=$appid" "STEAM_COMPAT_CLIENT_INSTALL_PATH=$MAC_STEAM" "$@"
 exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     TMPDIR="${TMPDIR:-/tmp}" \
     WINEPREFIX="$PREFIX" \
@@ -267,8 +270,6 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     MTLD3D_CONFIG="$mtld3d_config" \
     ${dxmt_config:+DXMT_CONFIG=$dxmt_config} \
     ${RUST_LOG:+RUST_LOG=$RUST_LOG} \
-    SteamAppId="$appid" SteamGameId="$appid" \
-    STEAM_COMPAT_CLIENT_INSTALL_PATH="$MAC_STEAM" \
     ${HADRON_DISABLE_LSTEAMCLIENT:+HADRON_DISABLE_LSTEAMCLIENT=$HADRON_DISABLE_LSTEAMCLIENT} \
     ${HADRON_HARDWARE_TSO:+HADRON_HARDWARE_TSO=$HADRON_HARDWARE_TSO} \
     ${HADRON_PRECISE_SCROLLING:+HADRON_PRECISE_SCROLLING=$HADRON_PRECISE_SCROLLING} \
