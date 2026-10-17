@@ -274,9 +274,13 @@ fi
 # scripts/play started ends with this runner.
 keep_watching() {
     [ "${HADRON_WATCHDOG:-1}" != 0 ] || return 0
+    # One such watchdog per session: programs share the prefix, and each that returns would add one.
+    _watching=$(cat "$WINEPREFIX/.hadron-session-watchdog" 2>/dev/null)
+    [ -n "$_watching" ] && kill -0 "$_watching" 2>/dev/null && return 0
     "$wineserver" -w >/dev/null 2>&1 &
     nohup "$ROOT/scripts/watchdog" "$HADRON_LOGS/$STEAM_COMPAT_APP_ID-$(date +%Y%m%d-%H%M%S)-after.mem.log" $! \
         >/dev/null 2>&1 &
+    echo $! > "$WINEPREFIX/.hadron-session-watchdog"
 }
 # A program shares its prefix with other programs: stopping it stops its own process, not the
 # prefix's whole session.
