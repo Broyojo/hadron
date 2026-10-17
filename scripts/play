@@ -50,14 +50,22 @@ case "${HADRON_RETINA:-0}" in [1yYtT]*) HADRON_RETINA=1 ;; *) HADRON_RETINA=0 ;;
 prefix_session_running() {
     servers=$(pgrep -x wineserver) || return 1
     session="server-$(stat -f '%Xd-%Xi' "$PREFIX" 2>/dev/null | tr 'A-F' 'a-f')"
+    # A wineserver works in its server folder, and for its first moments in the prefix itself.
+    prefix_real=$(/bin/realpath "$PREFIX" 2>/dev/null)
     for server in $servers; do
-        case "$(lsof -a -p "$server" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')" in
-            */"$session") return 0 ;;
+        cwd=$(lsof -a -p "$server" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+        case "$cwd" in
+            */"$session"|"$prefix_real") return 0 ;;
         esac
     done
     return 1
 }
+# One launch decides at a time: the first records its setting and starts the prefix's wineserver
+# before letting the next look, so two launches into an idle prefix do not both decide. The lock is
+# not handed to the wineserver (6>&-), which outlives this.
 if [ -d "$PREFIX" ]; then
+    exec 6>"$PREFIX/.hadron-retina.lock"
+    lockf -s -t 30 6 || true
     if prefix_session_running; then
         joined=$(cat "$PREFIX/.hadron-retina" 2>/dev/null)
         if [ "${joined:-0}" != "$HADRON_RETINA" ]; then
@@ -66,7 +74,9 @@ if [ -d "$PREFIX" ]; then
         fi
     else
         printf '%s\n' "$HADRON_RETINA" > "$PREFIX/.hadron-retina"
+        WINEPREFIX="$PREFIX" "$ROOT/dist/bin/wineserver" 6>&-
     fi
+    exec 6>&-
 fi
 
 # Hadron's own DLLs aren't Wine builtins, so the prefix has no placeholders for them and Wine
