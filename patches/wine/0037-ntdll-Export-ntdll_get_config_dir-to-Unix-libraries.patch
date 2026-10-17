@@ -1,0 +1,50 @@
+From fb6e7d33cf441b704f1e51d0368016de688abe14 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 17 Oct 2026 03:38:13 -0400
+Subject: [PATCH] ntdll: Export ntdll_get_config_dir() to Unix libraries.
+
+The prefix's path is known in every process of it, also one started with an
+environment block that leaves out WINEPREFIX; Unix libraries can then read
+files a launcher keeps in the prefix.
+---
+ dlls/ntdll/unix/env.c  | 11 +++++++++++
+ include/wine/unixlib.h |  1 +
+ 2 files changed, 12 insertions(+)
+
+diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
+index bd888b9928..b82945699e 100644
+--- a/dlls/ntdll/unix/env.c
++++ b/dlls/ntdll/unix/env.c
+@@ -479,6 +479,17 @@ const WCHAR *ntdll_get_data_dir(void)
+ }
+ 
+ 
++/***********************************************************************
++ *           ntdll_get_config_dir  (ntdll.so)
++ *
++ * The prefix's Unix path, known in every process of it, whatever environment the process got.
++ */
++const char *ntdll_get_config_dir(void)
++{
++    return config_dir;
++}
++
++
+ /***********************************************************************
+  *           set_process_name
+  *
+diff --git a/include/wine/unixlib.h b/include/wine/unixlib.h
+index a4b9d365a1..8993861439 100644
+--- a/include/wine/unixlib.h
++++ b/include/wine/unixlib.h
+@@ -44,6 +44,7 @@ extern DECLSPEC_EXPORT const unixlib_entry_t __wine_unix_call_wow64_funcs[];
+ 
+ NTSYSAPI const WCHAR *ntdll_get_build_dir(void);
+ NTSYSAPI const WCHAR *ntdll_get_data_dir(void);
++NTSYSAPI const char *ntdll_get_config_dir(void);
+ NTSYSAPI NTSTATUS ntdll_get_dos_file_name( const char *unix_name, WCHAR **dos, UINT disposition );
+ NTSYSAPI NTSTATUS ntdll_get_unix_file_name( const WCHAR *dos, char **unix_name, UINT disposition );
+ 
+-- 
+2.54.0 (Apple Git-157)
+

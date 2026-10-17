@@ -1492,10 +1492,13 @@ panel, and macOS scales its picture up 2× (issue #71). Wine's Mac driver has a 
 shows games the pixels instead, from the `RetinaMode` value of `HKCU\Software\Wine\Mac Driver`.
 Each process reads it when it starts, and Wine requires every process of a prefix to agree: a
 value written by the game's first process comes too late for the ones Wine has already started,
-which then report the display in points while the game gets pixels. Wine patch 0037 lets the
-environment decide instead, as `HADRON_PRECISE_SCROLLING` does, and `scripts/play` passes
-`HADRON_RETINA` on: `HADRON_RETINA=1` in a game's launch options turns it on for that game. Off
-by default: four times the pixels cost frame rate, and older games get tiny menus.
+which then report the display in points while the game gets pixels. The environment alone is not
+enough either: a program can start another with an environment block of its own. So Hadron's
+launchers decide the mode for a whole Wine session and record it in the prefix (`.hadron-retina`),
+and winemac reads that first (Wine patch 0038; patch 0037 lets Unix libraries ask ntdll for the
+prefix's path, which every process of it knows), then `HADRON_RETINA`, then the registry.
+`HADRON_RETINA=1` in a game's launch options turns it on for that game. Off by default: four times
+the pixels cost frame rate, and older games get tiny menus.
 It is always passed on, 0 or 1, so a `RetinaMode` left in a prefix's registry (CrossOver's "High
 Resolution", in a prefix NotProton made) does not turn it on unasked: with `RetinaMode=y` in the
 registry and no launch option, the report shows points.
@@ -1506,7 +1509,9 @@ starts, one launch at a time under a lock, and the first starts the prefix's win
 the next looks, so two launches into an idle or a not yet existing prefix agree too, and a
 session that ends meanwhile is not joined (races of a launch with `HADRON_RETINA=1` against one
 without, on an existing and a new prefix: both reported the same display every time).
-`scripts/retina.sh` holds this, and `scripts/wine-run` follows it too; tested by starting a report
+`scripts/retina.sh` holds this, and `scripts/wine-run` and `scripts/steam-run` (prefix creation
+and updates, and the helpers Steam runs) follow it too. A child a program starts with an
+environment of its own that leaves out `HADRON_RETINA` reported the session's mode; tested by starting a report
 with `HADRON_RETINA=1` while a triangle test ran without it: it reported points, and pixels once
 the session had ended.
 
@@ -1514,7 +1519,7 @@ With it on, `tests/win/display-report.c` reports the built-in display as 3024×1
 game looks (monitor rectangle, current mode, mode list up to 3024×1964, `SM_CXSCREEN`), against
 1512×982 without. `HORZRES` reported 6048: winemac doubled the size win32u returns, a 2018
 change from when that size was in points, which it no longer is in Retina mode (upstream too).
-Wine patch 0038 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL
+Wine patch 0039 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL
 (Zink) run in both modes at 120 fps (2026-10-17); nobody has looked at the picture yet. Still to
 check by eye: sharpness, a windowed game's size on screen (half as large: its pixels are now the
 display's), the cursor, and fullscreen on an external display.

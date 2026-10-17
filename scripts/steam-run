@@ -97,6 +97,10 @@ export DYLD_FALLBACK_LIBRARY_PATH="$HADRON_LIBPATH"
 wine="$ROOT/dist/bin/wine"
 
 wineserver="$ROOT/dist/bin/wineserver"
+# Every Wine start in the prefix decides Retina mode first, as scripts/play does (scripts/retina.sh):
+# prefix creation and updates, and the helpers Steam runs, so the session's recorded mode is right.
+PREFIX="$WINEPREFIX" WINESERVER="$wineserver"
+. "$ROOT/scripts/retina.sh"
 
 # A prefix another runner made (NotProton's CrossOver, an x86-64 or Rosetta Wine) has system DLLs
 # Hadron's ARM64 runtime can't use: set it aside, saves and all, and make a new one.
@@ -120,6 +124,7 @@ if [ ! -f "$ready" ] && { [ ! -f "$WINEPREFIX/system.reg" ] || [ -f "$WINEPREFIX
     mkdir -p "$WINEPREFIX" && touch "$WINEPREFIX/.hadron-prefix-creating"
     # mshtml off, as in scripts/play: otherwise wineboot waits on the Gecko install dialog. Wine
     # Mono is in the runtime (scripts/fetch-wine-mono.sh), so mscoree sets it up without asking.
+    retina_decide; export HADRON_RETINA
     if WINEDEBUG=-all WINEDLLOVERRIDES="mshtml=" "$wine" wineboot --init >> "$log" 2>&1 &&
        WINEDEBUG=-all "$wineserver" -w &&
        "$ROOT/scripts/mtld3d-prefix" enable "$WINEPREFIX" >> "$log" 2>&1; then
@@ -140,6 +145,7 @@ touch "$ready"
 stamp=$(tr -d '\r\n' 2>/dev/null < "$WINEPREFIX/.update-timestamp")
 if [ "$stamp" != disable ] && [ "$stamp" != "$(stat -f %m "$ROOT/dist/share/wine/wine.inf" 2>/dev/null)" ]; then
     echo "updating prefix $WINEPREFIX for a new Wine build" >> "$log"
+    retina_decide; export HADRON_RETINA
     if ! WINEDEBUG=-all WINEDLLOVERRIDES="mshtml=" "$wine" wineboot --update >> "$log" 2>&1; then
         echo "steam-run: updating the prefix failed; see $log" | tee -a "$log" >&2
         "$wineserver" -k 2>/dev/null
@@ -214,6 +220,7 @@ case "$program" in
     "$install_path"/*) ;;
     *)  # a helper Steam runs outside the game (installer scripts, redistributables)
         echo "helper: $*" >> "$log"
+        retina_decide; export HADRON_RETINA
         exec "$wine" "$@" >> "$log" 2>&1 ;;
 esac
 

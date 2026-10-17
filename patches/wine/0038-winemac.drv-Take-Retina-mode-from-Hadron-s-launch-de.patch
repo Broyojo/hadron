@@ -1,0 +1,58 @@
+From 2eac507ad870e8122431bd7c073a8413809d954c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 17 Oct 2026 03:38:41 -0400
+Subject: [PATCH] winemac.drv: Take Retina mode from Hadron's launch decision.
+
+RetinaMode is read from the registry by each process when it starts, and
+must agree across a prefix. A value written by the game's first process
+comes too late for those it already started, and the environment can be
+replaced by a program starting another. Read the decision Hadron's
+launchers record in the prefix (.hadron-retina) first, then HADRON_RETINA.
+---
+ dlls/winemac.drv/macdrv_main.c | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+index a647bc8147..c082dab9cf 100644
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -25,6 +25,10 @@
+ #endif
+ 
+ #include "config.h"
++
++#include <limits.h>
++#include <stdio.h>
++
+ #include "macdrv.h"
+ 
+ #include <Security/AuthSession.h>
+@@ -379,6 +383,25 @@ static void setup_options(void)
+        processes in the prefix. */
+     if (!get_config_key(hkey, NULL, "RetinaMode", buffer, sizeof(buffer)))
+         retina_enabled = IS_OPTION_TRUE(buffer[0]);
++    /* Hadron's launchers decide Retina mode for a whole Wine session and record it in the
++       prefix, where every process of it reads the same answer: a registry value written by the
++       first process comes too late for the ones already started, and the environment can be
++       replaced by a program starting another. HADRON_RETINA covers a prefix without the file. */
++    if ((env_str = getenv("HADRON_RETINA")) && *env_str)
++        retina_enabled = IS_OPTION_TRUE(env_str[0]);
++    {
++        const char *config_dir = ntdll_get_config_dir();
++        char path[PATH_MAX], answer[4] = "";
++        FILE *file;
++
++        if (config_dir && snprintf(path, sizeof(path), "%s/.hadron-retina", config_dir) < sizeof(path) &&
++            (file = fopen(path, "r")))
++        {
++            if (fgets(answer, sizeof(answer), file) && answer[0] && answer[0] != '\n')
++                retina_enabled = IS_OPTION_TRUE(answer[0]);
++            fclose(file);
++        }
++    }
+ 
+     retina_on = retina_enabled;
+ 
+-- 
+2.54.0 (Apple Git-157)
+

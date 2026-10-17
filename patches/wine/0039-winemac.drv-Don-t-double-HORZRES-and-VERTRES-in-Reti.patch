@@ -1,4 +1,4 @@
-From 7e74127e5f556735c155593621d02d9b0b2091ea Mon Sep 17 00:00:00 2001
+From 771891bec894569a09f8721aeff8096608256839 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 17 Oct 2026 01:19:31 -0400
 Subject: [PATCH] winemac.drv: Don't double HORZRES and VERTRES in Retina mode.
