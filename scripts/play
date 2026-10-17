@@ -129,12 +129,14 @@ fi
 # Steam's name for it), and Wine starts the game's processes through that link (WINELOADER).
 # The bundle's icon is the game's own, from its executable (launcher/hadron-icon.c): the Dock
 # marks the game's minimized windows with it.
+# It is declared a game, which macOS requires before it turns Game Mode on (findings #44); a bundle
+# from before that is made again.
 name=$(printf '%s' "${HADRON_APP_NAME:-$(basename "$exe" .exe)}" | tr -d '/:<>&\n' | cut -c1-80)
 name="${name:-game}"
 loader=$(/bin/realpath "$ROOT/dist/bin/wine")
 app="$HADRON_SUPPORT/apps/$appid/$name.app"
 wine="$app/Contents/MacOS/$name"
-if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ] || ! grep -q CFBundleIconFile "$app/Contents/Info.plist" 2>/dev/null; then
+if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ] || ! grep -q LSSupportsGameMode "$app/Contents/Info.plist" 2>/dev/null; then
     rm -rf "$HADRON_SUPPORT/apps/$appid"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" && ln -s "$loader" "$wine" && cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -155,6 +157,10 @@ if [ "$(readlink "$wine" 2>/dev/null)" != "$loader" ] || ! grep -q CFBundleIconF
     <string>1</string>
     <key>NSPrincipalClass</key>
     <string>WineApplication</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.games</string>
+    <key>LSSupportsGameMode</key>
+    <true/>
     <key>LSUIElement</key>
     <true/>
 </dict>

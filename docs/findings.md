@@ -1455,3 +1455,25 @@ Once in five fresh prefixes during this testing, wineboot's 32-bit `Wow64Install
 while a test program ran at the same time; four further fresh prefixes, three of them with
 the same sequence, did not. No image loaded by that step has a shared section, so it is
 unlikely to involve this patch, but it is recorded here in case it turns up again.
+
+## Game Mode never sees a Hadron game (#44, open)
+
+macOS turns Game Mode on for an app that is declared a game (`LSApplicationCategoryType` a games
+category, `LSSupportsGameMode`), runs full screen and is in front (issue #54). Hadron's per-game
+bundles (`scripts/play`) declared neither; they now declare both. That alone does not make a game
+eligible: `gamepolicyd` follows processes through RunningBoard, and RunningBoard only knows a
+process as an app when LaunchServices started it. Hadron starts a game by exec'ing the loader
+through the bundle's link, from Steam's tool and the launch scripts, so RunningBoard sees
+`anon<wine>`, the same as for any program started from a shell. The same bundle started with
+`open` (LaunchServices) is `app<application.com.broyojo.hadron...>` instead (2026-10-17, with
+`tests/mac/game-mode-probe.sh`, which runs `tests/win/fsmode.c` full screen both ways).
+
+Not known yet: whether Game Mode then turns on. The probe's window has to be in front, and macOS
+does not let a program started in the background take the front from the app the person is using;
+the runs so far had another app in front, and Game Mode stayed off. The probe asks for the front
+and reports which app had it. If Game Mode turns on with the LaunchServices start, starting games
+through LaunchServices is the change to make: the environment then goes through `open --env`,
+output through `--stdout`/`--stderr`, and Steam's process tracking and Stop no longer reach the
+game's processes as children, so `scripts/steam-run` has to wait for and stop them itself. Whether
+Hadron's full screen (a borderless window over the display, not a full-screen Space, #72) counts
+is the other open question.
