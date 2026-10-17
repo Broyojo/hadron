@@ -1465,8 +1465,11 @@ eligible: `gamepolicyd` follows processes through RunningBoard, and RunningBoard
 process as an app when LaunchServices started it. Hadron starts a game by exec'ing the loader
 through the bundle's link, from Steam's tool and the launch scripts, so RunningBoard sees
 `anon<wine>`, the same as for any program started from a shell. The same bundle started with
-`open` (LaunchServices) is `app<application.com.broyojo.hadron...>` instead (2026-10-17, with
-`tests/mac/game-mode-probe.sh`, which runs `tests/win/fsmode.c` full screen both ways).
+`open` (LaunchServices) is `app<application.com.broyojo.hadron...>` instead, and so is the child
+process `hadron-steam.exe` starts, which owns the game's window; started by exec, RunningBoard has
+no record of that child at all (2026-10-17, with `tests/mac/game-mode-probe.sh`, which runs
+`tests/win/fsmode.c` full screen through `hadron-steam.exe` both ways, from the same clean
+environment).
 
 That is not enough either. With the Mac unattended the probe got its window in front both ways,
 full screen over the built-in display, and Game Mode stayed off both ways; also without
