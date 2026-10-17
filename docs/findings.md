@@ -1526,7 +1526,8 @@ meet there; each program folder gets its own Dock bundle (`program-<hash of the 
 A program is not a game, and program mode differs from a Steam launch where that matters: the
 program starts by itself, not through `hadron-steam.exe`, so nothing registers a running Steam
 in the prefix; its arguments are its own, not settings (`FOO=bar` reaches it); `steam-run` waits
-for it alone, not for the whole shared prefix, and returns its exit status; it logs to a file
+for it alone, not for the whole shared prefix, returns its exit status, and on Ctrl-C or Stop
+ends that program's own process, not the prefix's whole session; it logs to a file
 only when the app starts it, so `hadron run` keeps a console program's output in the terminal;
 a program installed in the prefix starts from its `C:` path; and a lock on the prefix keeps two
 programs opened together on the first launch from both making it (also for Steam launches).

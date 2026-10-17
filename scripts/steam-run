@@ -262,9 +262,16 @@ fi
 # desktop-1.0.jar" finds its files only from there.
 # Stay in the foreground: Steam tracks this process, and its Stop button sends it SIGTERM, which
 # has to end the game's whole Wine session rather than just the launcher.
-trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
+# A program shares its prefix with other programs: stopping it stops its own process, not the
+# prefix's whole session.
+if [ -n "${HADRON_PROGRAM:-}" ]; then
+    trap 'kill "$launched" 2>/dev/null; wait; exit 143' TERM INT HUP
+else
+    trap '"$wineserver" -k; wait; exit 143' TERM INT HUP
+fi
 HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:-0}}" "$program" "$@" &
-wait $!
+launched=$!
+wait $launched
 status=$?
 # A program shares its prefix with other programs: wait for it alone, and return its status.
 [ -n "${HADRON_PROGRAM:-}" ] && exit "$status"
