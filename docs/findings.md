@@ -1455,3 +1455,32 @@ Once in five fresh prefixes during this testing, wineboot's 32-bit `Wow64Install
 while a test program ran at the same time; four further fresh prefixes, three of them with
 the same sequence, did not. No image loaded by that step has a shared section, so it is
 unlikely to involve this patch, but it is recorded here in case it turns up again.
+
+## Game Mode never sees a Hadron game (#44, open)
+
+macOS turns Game Mode on for an app that is declared a game (`LSApplicationCategoryType` a games
+category, `LSSupportsGameMode`), runs full screen and is in front (issue #54). Hadron's per-game
+bundles (`scripts/play`) declared neither; they now declare both. That alone does not make a game
+eligible: `gamepolicyd` follows processes through RunningBoard, and RunningBoard only knows a
+process as an app when LaunchServices started it. Hadron starts a game by exec'ing the loader
+through the bundle's link, from Steam's tool and the launch scripts, so RunningBoard sees
+`anon<wine>`, the same as for any program started from a shell. The same bundle started with
+`open` (LaunchServices) is `app<application.com.broyojo.hadron...>` instead. That identity is the
+first process's only: a game runs as a child process `hadron-steam.exe` starts, and that child,
+which owns the game's window, is `anon<wine>` either way (2026-10-17, with
+`tests/mac/game-mode-probe.sh`, which runs `tests/win/fsmode.c` full screen through
+`hadron-steam.exe` both ways, from the same clean environment, and reports the identity of the
+process whose executable is the program).
+
+Identity and the games category are not enough either. Started directly, so that the window's
+own process was the app, the program got its window in front, full screen over the built-in
+display, and Game Mode stayed off; also without `LSUIElement`, which only made the bundle a
+regular app ("Hadron Loader" in front). What is left is full screen itself: Hadron's is a
+borderless window over the display, not a full-screen Space (#72), and macOS likely counts only
+the latter. Not tried: putting the window in a Space, which needs Accessibility permission to
+toggle (or #72). If that turns Game Mode on, two more changes follow: starting games through
+LaunchServices, and making the process that owns the window the one LaunchServices started,
+which `hadron-steam.exe` starting the game as a child does not allow as it is. LaunchServices
+also changes the plumbing: the environment goes through `open --env`, output through
+`--stdout`/`--stderr`, and Steam's process tracking and Stop no longer reach the game's
+processes as children, so `scripts/steam-run` has to wait for and stop them itself.
