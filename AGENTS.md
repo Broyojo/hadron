@@ -73,8 +73,9 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
 
 - **Logs.** Each launch from Steam: `steamapps/compatdata/<app id>/hadron-run.log` in the Steam
   library. Each game session: `build/logs/<app id>-*.log` and its `.mem.log` in a checkout,
-  `~/Library/Logs/Hadron` for the installed app. `scripts/report` (Save a report in the app)
-  packs the latest of them, with the user's name removed.
+  `~/Library/Logs/Hadron` for the installed app; past 64 MB a session's log keeps its start and its
+  end (`scripts/logcap`). `scripts/report` (Save a report in the app) packs the latest of them,
+  with the user's name removed.
 - **Settings** are environment variables, and the launch scripts start Wine with a clean
   environment: a variable reaches the game only if `scripts/play` passes it on. From Steam they
   are a game's launch options as plain `NAME=value` words. Steam on the Mac does not run launch

@@ -5,7 +5,8 @@
 # Usage: scripts/play <appid> <path/to/game.exe> [game args...]
 #
 # Only an allowlist of environment variables reaches the game: host secrets never do.
-# HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis.
+# HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis;
+# past HADRON_LOG_MAX_MB (64) a log keeps its start and its end (scripts/logcap).
 # FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
 # The watchdog warns once at half of RAM footprint, 2–4 GB swap growth or elevated pressure.
@@ -139,7 +140,13 @@ if [ -n "$HADRON_LOG" ]; then
     log="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).log"
     echo "logging to $log" >&2
     debug="${WINEDEBUG:-err+all,+loaddll}"
-    exec > "$log" 2>&1
+    # Through scripts/logcap, which keeps the log's start and end past HADRON_LOG_MAX_MB: an error
+    # repeated on every draw once wrote 323 MB in a session (#58).
+    fifo="$log.fifo"
+    rm -f "$fifo"; mkfifo "$fifo" || exit 1
+    "$ROOT/scripts/logcap" "$log" < "$fifo" &
+    exec > "$fifo" 2>&1
+    rm -f "$fifo"
 fi
 
 # The Dock and the menu bar name an application after the bundle it was started from, and every
