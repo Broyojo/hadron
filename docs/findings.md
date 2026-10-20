@@ -1510,6 +1510,15 @@ from when that size was in points, which it no longer is in Retina mode (upstrea
 in both modes at 120 fps (2026-10-17). A windowed game is half as
 large on screen as before, since its pixels are now the display's.
 
+A game's own cursor was half as large too (issue #98): winemac made the Mac cursor from its image
+at half its pixel size in points, as for windows. Wine patch 0039 makes a cursor cover a point for
+each of its pixels, as the Mac's own cursors and every cursor without Retina mode do; macOS scales
+it up on the display. `tests/win/cursor-size.c` sets a 32×32 cursor with its hot spot at (5,9) and
+`tests/mac/nscursor-log.m` logs the NSCursor made from it: 16×16 points with the hot spot at
+(2.5,4.5) before, 32×32 at (5,9) with the patch (2026-10-20). Wine still reports 96 DPI in Retina
+mode; reporting 192 (200% scaling, what Windows would use on such a panel) would change how every
+DPI-aware program sizes its interface, and is not done.
+
 ## Windows programs that are not on Steam (#46)
 
 Hadron ran only what Steam started (issue #75). `scripts/program-run <program.exe>` now runs any

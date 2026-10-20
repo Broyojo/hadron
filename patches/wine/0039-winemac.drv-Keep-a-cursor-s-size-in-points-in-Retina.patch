@@ -1,0 +1,38 @@
+From 12f3c8770be19779603131798e00dd029734ca2f Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Tue, 20 Oct 2026 02:01:40 -0400
+Subject: [PATCH] winemac.drv: Keep a cursor's size in points in Retina mode.
+
+A cursor's image covered half as many points as it has pixels in Retina
+mode, so a game's own cursor was half the size of the Mac's pointer and
+of the same cursor without Retina mode.
+---
+ dlls/winemac.drv/cocoa_app.m | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index 606cd20383..c42327430d 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -1084,14 +1084,16 @@ - (void) setCursor
+     {
+         NSDictionary* frame = cursorFrames[cursorFrame];
+         CGImageRef cgimage = (CGImageRef)frame[@"image"];
++        /* A cursor covers a point for each of its pixels, in Retina mode too, as the Mac's own
++           cursors do: halved to the display's pixels, a game's cursor is half the size of the
++           Mac's pointer and of what the game shows on a display without Retina mode. */
+         CGSize size = CGSizeMake(CGImageGetWidth(cgimage), CGImageGetHeight(cgimage));
+-        NSImage* image = [[NSImage alloc] initWithCGImage:cgimage size:NSSizeFromCGSize(cgsize_mac_from_win(size))];
++        NSImage* image = [[NSImage alloc] initWithCGImage:cgimage size:NSSizeFromCGSize(size)];
+         CFDictionaryRef hotSpotDict = (CFDictionaryRef)frame[@"hotSpot"];
+         CGPoint hotSpot;
+ 
+         if (!CGPointMakeWithDictionaryRepresentation(hotSpotDict, &hotSpot))
+             hotSpot = CGPointZero;
+-        hotSpot = cgpoint_mac_from_win(hotSpot);
+         self.cursor = [[[NSCursor alloc] initWithImage:image hotSpot:NSPointFromCGPoint(hotSpot)] autorelease];
+         [image release];
+         [self unhideCursor];
+-- 
+2.54.0 (Apple Git-157)
+
