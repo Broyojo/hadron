@@ -4,10 +4,11 @@
 # the module load addresses a crash is read against, the end what happened last.
 #
 # Usage: scripts/logcap <log> < output
-# The first half of HADRON_LOG_MAX_MB (default 64) goes to <log> as it comes. After that the
-# output goes to <log>.tail and <log>.tail.1 in turns, a quarter each, so the latest quarter to
-# half is kept, and when the input ends both are appended to <log> after a line that says how
-# much was left out. Every line is written as it arrives, so a crash loses nothing.
+# The first half of HADRON_LOG_MAX_MB (default 64) goes to <log> as it comes. After that <log>
+# says where the output goes: to <log>.tail and <log>.tail.1 in turns, a quarter each, so the
+# latest quarter to half is kept. When the input ends both are appended to <log>, after a line
+# that says how much was left out, if anything was. Every line is written as it arrives, so a
+# crash loses nothing.
 log="$1"
 max_mb="${HADRON_LOG_MAX_MB:-64}"
 case "$max_mb" in ''|*[!0-9]*|0) echo "logcap: HADRON_LOG_MAX_MB must be a positive whole number" >&2; max_mb=64 ;; esac
@@ -19,6 +20,12 @@ BEGIN { out = ENVIRON["LOGCAP_OUT"]; quarter = int(half / 2); a = out ".tail"; b
 {
     n = length($0) + 1
     if (cur == "" && head + n <= half) { print > out; fflush(out); head += n; next }
+    if (cur == "") {
+        name = out; sub(/.*\//, "", name)
+        printf "hadron: the log passed %g MB; until the game ends its latest lines are in %s.tail and %s.tail.1, then they follow here\n",
+            half / 1048576, name, name > out
+        fflush(out)
+    }
     if (cur == "" || size >= quarter) {
         if (cur != "") { close(cur); older = cur; older_size = size }
         cur = (cur == a) ? b : a
@@ -30,8 +37,11 @@ END {
     if (cur == "") exit
     close(cur)
     kept = size + (older != "" ? older_size : 0)
-    printf "hadron: the log passed %d MB; %.1f MB of it are left out here, the last %.1f MB follow\n",
-        half / 524288, (total - kept) / 1048576, kept / 1048576 >> out
+    if (total > kept)
+        printf "hadron: the log passed %d MB; %.1f MB of it are left out here, the last %.1f MB follow\n",
+            half / 524288, (total - kept) / 1048576, kept / 1048576 >> out
+    else
+        print "hadron: nothing was left out; the rest of the log follows" >> out
     if (older != "") while ((getline line < older) > 0) print line >> out
     while ((getline line < cur) > 0) print line >> out
 }'

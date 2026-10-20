@@ -138,11 +138,14 @@ if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
 fi
 if [ -n "$HADRON_LOG" ]; then
     log="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).log"
+    # Made at once and only if new (noclobber), so two launches of a game in one second each get
+    # a log of their own.
+    ( set -C; : > "$log" ) 2>/dev/null || log="${log%.log}-$$.log"
     echo "logging to $log" >&2
     debug="${WINEDEBUG:-err+all,+loaddll}"
     # Through scripts/logcap, which keeps the log's start and end past HADRON_LOG_MAX_MB: an error
     # repeated on every draw once wrote 323 MB in a session (#58).
-    fifo="$log.fifo"
+    fifo="$log.$$.fifo"
     rm -f "$fifo"; mkfifo "$fifo" || exit 1
     "$ROOT/scripts/logcap" "$log" < "$fifo" &
     exec > "$fifo" 2>&1
