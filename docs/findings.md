@@ -1519,6 +1519,23 @@ it up on the display. `tests/win/cursor-size.c` sets a 32×32 cursor with its ho
 mode; reporting 192 (200% scaling, what Windows would use on such a panel) would change how every
 DPI-aware program sizes its interface, and is not done.
 
+### Outside-player regression report: Raft (2026-10-20)
+
+On the official 0.3.1 release, M4 / 16 GB / macOS 27.0.1, a player reported
+substantial gameplay stutter and a large first-movement camera jump after leaving
+a chest/inventory. Setting the existing prefix-wide `RetinaMode` string to `n`
+under `HKCU\Software\Wine\Mac Driver` and restarting produced a large
+player-reported performance improvement, without changing runtime binaries or
+the watchdog. The camera transition still needs explicit post-change acceptance.
+
+This is not yet an equal-resolution comparison. Raft restored its own 5120x2880,
+then 3840x2160 preference after 1280x720 startup arguments; those arguments did
+not establish the rendered size. The physical render dimensions after the
+opt-out were not independently measured, and no FPS result is claimed. Restoring
+the internal SSD improved loading but did not initially remove stutter. Next:
+measure matching render sizes in both modes and trace cursor warps/queued input
+across capture changes. [Issue #101](https://github.com/Broyojo/hadron/issues/101).
+
 ## Windows programs that are not on Steam (#46)
 
 Hadron ran only what Steam started (issue #75). `scripts/program-run <program.exe>` now runs any
