@@ -1633,3 +1633,22 @@ Checked with the change, on an M2 Pro: the decommit tests of #42 as 32- and 64-b
 Creating a thread, which makes FEX reserve its stacks top-down, took 0.05 to 0.09 ms on both
 builds, and 0.15 to 0.21 ms on both with the top-down area filled (one first thread 0.74 ms on the
 new one) (`tests/win/thread-allocation.c`).
+
+## RtlIsEcCode faulted on addresses above the user space (fixed, #49, issue #95)
+
+Hogwarts Legacy (issue #95, from a reporter who runs Hadron's Wine from their own launcher) stopped
+before its window with 2,490 nested access violations and then a stack overflow. Its main thread
+jumps to 0xffff0001, which may be deliberate, and while Wine dispatches that exception the unwinder
+asks `RtlIsEcCode` whether a value it took for a return address, 0x24f24f0d7007e400, is ARM64EC
+code. `RtlIsEcCode` indexes the process's EC bitmap with any value, so it read far past the bitmap;
+that fault was dispatched the same way, and so on.
+
+The bitmap has one bit per 4 KB page up to Wine's address space limit, rounded up to a host page.
+`tests/win/is-ec-code.c` calls `RtlIsEcCode` from an x64 program: on main's Wine it answers for
+0x7ffffffff000 and faults at 1 << 47, at 0x7ffff0000000, the first byte after the bitmap. Wine
+patch 0041 sizes the bitmap for the whole 47-bit user space whatever the host's limit (4 GB of
+address space, as before on this Mac) and has `RtlIsEcCode` return FALSE above it; the test then
+passes for 1 << 47, the value from the report and all bits set. Whether Hogwarts Legacy gets
+further with this is not known yet: the reporter has to try it. The first problem in #95, the
+game's executable failing to load at its fixed base when macOS's allocator happens to sit there, is
+separate and still open.

@@ -1,0 +1,50 @@
+From 342cb56a59826c8f3896163e8261a6f188897b98 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 21 Oct 2026 09:22:23 -0400
+Subject: [PATCH] ntdll: Return FALSE from RtlIsEcCode for addresses above the
+ user space.
+
+An unwinder asks RtlIsEcCode about whatever it takes for a return
+address, and RtlIsEcCode indexed the EC code bitmap with it unchecked.
+A value past the bitmap faulted, and dispatching that fault unwound
+through the same frames and faulted again until the stack overflowed.
+
+Size the bitmap for the whole 47-bit user address space whatever the
+host's limit, and return FALSE for addresses above it.
+---
+ dlls/ntdll/signal_arm64ec.c | 3 +++
+ dlls/ntdll/unix/virtual.c   | 4 +++-
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+index beea4ecabb..45e847a105 100644
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -1394,6 +1394,9 @@ BOOLEAN WINAPI RtlIsEcCode( ULONG_PTR ptr )
+ {
+     const UINT64 *map = (const UINT64 *)NtCurrentTeb()->Peb->EcCodeBitMap;
+     ULONG_PTR page = ptr / page_size;
++
++    /* the map covers the 47-bit user address space; an unwinder can ask about any value */
++    if (ptr >> 47) return FALSE;
+     return (map[page / 64] >> (page & 63)) & 1;
+ }
+ 
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 4451a28174..8e0497e0ca 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -3197,7 +3197,9 @@ BOOL is_emulated_code( ULONG_PTR ptr )
+ static void alloc_arm64ec_map(void)
+ {
+     unsigned int status;
+-    SIZE_T size = ((ULONG_PTR)address_space_limit + page_size) >> (page_shift + 3);  /* one bit per page */
++    /* one bit per page of the 47-bit user address space, whatever the host's limit, so that
++     * RtlIsEcCode only has to check that an address is below 1 << 47 */
++    SIZE_T size = ((ULONG_PTR)1 << 47) >> (page_shift + 3);
+ 
+     size = ROUND_SIZE( 0, size, host_page_mask );
+     status = map_view( &arm64ec_view, NULL, size, MEM_TOP_DOWN, VPROT_READ | VPROT_COMMITTED, 0, 0, 0 );
+-- 
+2.54.0 (Apple Git-157)
+
