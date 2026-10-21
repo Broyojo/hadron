@@ -28,18 +28,21 @@ export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
 . "$ROOT/scripts/paths.sh"
 . "$ROOT/scripts/runtime-versions.sh"
 
-# Which copy of the runtime this launch runs from (scripts/runtime-versions.sh). The one it began
-# in is marked as in use at once. Then it may be another: the one a launch or a Wine session
-# already running in the game's prefix uses, since what starts now joins it, or the build in the
-# installed app, copied here if this is the first launch since the app was updated. That copy's
-# own steam-run takes over, once.
-case "$ROOT" in
-    "$HADRON_RUNTIMES"/*) runtime_mark "$ROOT" ;;
-esac
-if [ -z "${HADRON_RUNTIME_CHOSEN:-}" ] && [ -n "$(runtime_id "$ROOT")" ]; then
+# Which runtime folder this launch runs from (scripts/runtime-versions.sh). The one it began in
+# is marked as in use at once. Then it may be another: the one a launch or a Wine session already
+# running in the game's prefix uses, since what starts now joins it and has to be the same Wine,
+# or for a copy, the build in the installed app, copied here if this is the first launch since
+# the app was updated. A checkout, or a copy without a build id, runs itself unless it joins.
+# The chosen folder's own steam-run takes over, once.
+runtime_mark "$ROOT"
+if [ -z "${HADRON_RUNTIME_CHOSEN:-}" ]; then
     export HADRON_RUNTIME_CHOSEN=1
     chosen=$(runtime_choose "$ROOT")
-    [ -z "$chosen" ] || exec "$chosen/scripts/steam-run" "$verb" "$@"
+    if [ -n "$chosen" ]; then
+        [ -n "$(runtime_id "$ROOT")" ] ||
+            echo "steam-run: $WINEPREFIX is in use by a Wine from $chosen; this launch joins it" >&2
+        exec "$chosen/scripts/steam-run" "$verb" "$@"
+    fi
 fi
 # If there are other copies, the ones nothing needs any more go, without holding the launch up.
 case "$ROOT" in
