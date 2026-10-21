@@ -156,6 +156,44 @@ runtime_unmark "$old"; unset WINEPREFIX
 runtime_lock; runtime_prune "$HADRON_RUNTIMES/3.1-new"; runtime_unlock
 check "and deleted once that launch has gone" test ! -e "$old"
 
+echo "--- a folder without a build id: a checkout, or a copy changed for a test"
+rm -rf "$HADRON_SUPPORT"; mkdir -p "$HADRON_SUPPORT"
+app "$T/app3" 4.0-inst
+runtime_lock; inst=$(runtime_copy "$T/app3"); runtime_point "$inst"; echo "$T/app3" > "$HADRON_SUPPORT/source"; runtime_unlock
+app "$T/local" ""; rm "$T/local/BUILD-ID"
+choose_as() {  # <prefix> <folder>: what a launch that begins in the folder chooses, as another process
+    WINEPREFIX="$1" sh -c 'ROOT=x; . "$1/scripts/paths.sh"; . "$1/scripts/runtime-versions.sh"; runtime_mark "$2"; runtime_choose "$2"' sh "$REPO" "$2"
+}
+check "runs itself when nothing runs in its prefix" test -z "$(choose_as "$T/prefix-s" "$T/local")"
+check "is not moved to the installed build" test "$(readlink "$link")" = "$inst"
+# A launch for prefix S is alive on the installed copy (this shell stands in for it).
+export WINEPREFIX="$T/prefix-s"; runtime_mark "$inst"
+check "joins a live launch's copy for its prefix" test "$(choose_as "$T/prefix-s" "$T/local")" = "$inst"
+runtime_unmark "$inst"
+# The same from a mark that Hadron 0.3.1 wrote: the prefix alone, the copy in the file's name.
+printf '%s\n' "$T/prefix-s" > "$HADRON_RUNTIMES/.launches/${inst##*/}.$$"
+check "and a launch's that marked it as 0.3.1 did" test "$(choose_as "$T/prefix-s" "$T/local")" = "$inst"
+runtime_unmark "$inst"
+# A launch for prefix L is alive in the local folder; one that begins in the copy joins it.
+WINEPREFIX="$T/prefix-l" sh -c 'ROOT=x; . "$1/scripts/paths.sh"; . "$1/scripts/runtime-versions.sh"; runtime_mark "$2"; exec sleep 30' sh "$REPO" "$T/local" &
+local_launch=$!
+sleep 0.5
+check "a launch in a copy joins a live launch from the local folder" test "$(choose_as "$T/prefix-l" "$inst")" = "$T/local"
+kill $local_launch 2>/dev/null; wait $local_launch 2>/dev/null
+check "and once that launch has gone, gets its own build" test -z "$(choose_as "$T/prefix-l" "$inst")"
+# A Wine session runs in prefix W from the copy: its wineserver works in the prefix's server
+# folder. A stand-in named wineserver, in the copy's dist/bin, does the same.
+mkdir -p "$T/prefix-w"
+mkdir -p "$T/servers/server-$(stat -f '%Xd-%Xi' "$T/prefix-w" | tr 'A-F' 'a-f')"
+printf '#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n' | cc -x c -o "$inst/dist/bin/wineserver" - 2>/dev/null
+( cd "$T/servers/server-"* && exec "$inst/dist/bin/wineserver" ) &
+server=$!
+sleep 0.5
+check "joins a Wine session running in its prefix" test "$(choose_as "$T/prefix-w" "$T/local")" = "$inst"
+kill $server 2>/dev/null; wait $server 2>/dev/null
+check "and runs itself once the session has ended" test -z "$(choose_as "$T/prefix-w" "$T/local")"
+unset WINEPREFIX
+
 echo "--- the lock"
 ( runtime_lock && sleep 2 ) &
 sleep 0.5

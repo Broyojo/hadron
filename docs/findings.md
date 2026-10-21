@@ -1036,7 +1036,20 @@ replaced once more, Geometry Dash started from the new build's copy, marked it f
 and the two older copies left in the Library were deleted.
 
 A runtime without a `BUILD-ID`, a checkout or a copy somebody is changing, is run in place as
-before. Not covered: the app and the Library on different volumes (the copy is then a real
+before, but since 2026-10-20 not into another Wine's session. Until then `steam-run` skipped the
+whole choice for such a folder, so a launch from it did not join the launch or session already
+running in its prefix either. It showed while testing #99 from a test copy: the link was moved
+to the copy just as Subnautica was started, one launch started the prefix's wineserver from
+0.3.1, and the next, three seconds later from the copy, started the game with the copy's Wine
+against that server. The two builds had the same Wine and differed in one library, so nothing
+failed. Such a folder now goes through the same choice without its last step: it joins a live
+launch or a Wine session in its prefix, saying so on standard error, and otherwise runs itself,
+never the installed build. Its launches are marked too (`local.<pid>`, with the folder on the
+mark's second line; a mark that 0.3.1 wrote has only the prefix and still reads), so that a
+launch beginning in a copy joins one from a checkout. `tests/mac/test-runtime-versions.sh` covers
+the choice. End to end, with a wineserver from the 0.3.1 copy running in a scratch prefix,
+`steam-run` from the checkout ran a program there with the checkout's Wine before the change (and
+Wine printed `wineserver crashed`), and with 0.3.1's after. Not covered: the app and the Library on different volumes (the copy is then a real
 one, 1.1 GB each time); two different builds started in one prefix at the same instant; and the
 old copy's space, which is held until a launch after its last game has ended.
 

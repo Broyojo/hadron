@@ -79,32 +79,43 @@ runtime_point() {
     ln -sfn "$1" "$_link.new.$$" && mv -fh "$_link.new.$$" "$_link"
 }
 
-# A launch says which copy it runs from as soon as it knows: a file named after the copy and
-# the launch's process ID, which Steam's tool keeps for as long as its game runs, holding the
-# prefix the launch is for. Called by scripts/steam-run with the copy's folder.
+# A launch says which runtime folder it runs from as soon as it knows: a file named after the
+# copy and the launch's process ID, which Steam's tool keeps for as long as its game runs,
+# holding the prefix the launch is for and the folder. A folder that is not a copy (a checkout,
+# or a copy changed for a test, which has no build id) is marked as "local". Called by
+# scripts/steam-run with the folder.
+runtime_mark_name() {
+    case "$1" in
+        "$HADRON_RUNTIMES"/*) printf '%s\n' "$HADRON_RUNTIMES/.launches/${1##*/}.$$" ;;
+        *) printf '%s\n' "$HADRON_RUNTIMES/.launches/local.$$" ;;
+    esac
+}
+
 runtime_mark() {
     mkdir -p "$HADRON_RUNTIMES/.launches" 2>/dev/null &&
-        printf '%s\n' "${WINEPREFIX:-}" > "$HADRON_RUNTIMES/.launches/${1##*/}.$$"
+        printf '%s\n%s\n' "${WINEPREFIX:-}" "$1" > "$(runtime_mark_name "$1")"
 }
 
 runtime_unmark() {
-    rm -f "$HADRON_RUNTIMES/.launches/${1##*/}.$$"
+    rm -f "$(runtime_mark_name "$1")"
 }
 
-# The copy another launch that is still alive runs $WINEPREFIX from, if there is one: two
-# launches for one prefix have to be the same Wine, also before either has started it. The marks
-# of launches that have ended are removed on the way, so that they do not pile up. Call with the
-# lock held.
+# The runtime folder another launch that is still alive runs $WINEPREFIX from, if there is one:
+# two launches for one prefix have to be the same Wine, also before either has started it. The
+# marks of launches that have ended are removed on the way, so that they do not pile up. Call
+# with the lock held.
 runtime_of_launch() {
     for _mark in "$HADRON_RUNTIMES/.launches"/*.*; do
         [ -f "$_mark" ] || continue
         _pid=${_mark##*.}
         [ "$_pid" != "$$" ] || continue
         kill -0 "$_pid" 2>/dev/null || { rm -f "$_mark"; continue; }
-        _prefix=; IFS= read -r _prefix < "$_mark"
+        _prefix= _folder=
+        { IFS= read -r _prefix; IFS= read -r _folder; } < "$_mark"
         [ -n "$_prefix" ] && [ "$_prefix" = "${WINEPREFIX:-}" ] || continue
+        # A mark from Hadron 0.3.1 or older holds only the prefix, and names a copy.
         _name=${_mark##*/}
-        printf '%s\n' "$HADRON_RUNTIMES/${_name%.*}"
+        printf '%s\n' "${_folder:-$HADRON_RUNTIMES/${_name%.*}}"
         return 0
     done
 }
@@ -192,15 +203,17 @@ runtime_latest() {
     fi
 }
 
-# Which copy the launch that began in the runtime folder in $1 runs from, printed when it is
-# another one, which is then marked for this launch. In turn: the copy a live launch for the same
-# prefix runs from, the copy a Wine session running in the prefix runs from, the copy of the
-# build in the installed app. One launch decides at a time.
+# Which runtime folder the launch that began in the folder in $1 runs from, printed when it is
+# another one, which is then marked for this launch. In turn: the folder a live launch for the
+# same prefix runs from, the folder a Wine session running in the prefix runs from, and for a
+# copy, the copy of the build in the installed app. A folder without a build id (a checkout, or
+# a copy changed for a test) runs itself unless it would join another Wine. One launch decides
+# at a time.
 runtime_choose() {
     runtime_lock || return 0
     _chosen=$(runtime_of_launch)
     [ -n "$_chosen" ] || _chosen=$(runtime_of_session)
-    [ -n "$_chosen" ] || _chosen=$(runtime_latest "$1")
+    [ -n "$_chosen" ] || [ -z "$(runtime_id "$1")" ] || _chosen=$(runtime_latest "$1")
     if [ -n "$_chosen" ] && [ "$_chosen" != "$1" ] && [ -x "$_chosen/scripts/steam-run" ]; then
         runtime_mark "$_chosen"
         runtime_unmark "$1"
