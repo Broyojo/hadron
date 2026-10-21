@@ -1603,3 +1603,33 @@ conformance results were taken with, so it waits until they can be run again.
 
 **Still to find out for #84**, with the game: how many pipelines it creates at start, from how
 many threads, and whether a second start is fast.
+
+## Top-down allocations took the memory below 4 GB (fixed, #48, issue #105)
+
+BELOW crashed at startup in 0.3.1 (issue #105, reported with a trace and a candidate fix). Its
+LuaJIT asks for 128 MB below 2 GB (`NtAllocateVirtualMemory` with `ZeroBits` 1), gets nothing, and
+the game reads through the null state it returns. The memory below 4 GB was gone because Wine put
+large `MEM_TOP_DOWN` reservations there.
+
+Windows gives a top-down allocation the highest free address. Wine first looks in its reserved
+areas, highest first: the top-down area at 0x7ffff0000000 (208 MB on this Mac, up to the host's
+limit) and then the low area the loader claims, 64 KB to 4 GB (Wine patch 0008). A request that
+does not fit the top-down area therefore lands just below 4 GB, while the free space between 4 GB
+and the top-down area is never tried. FEX makes such requests in every x64 process: rpmalloc, its
+JIT code buffers and its call-return stacks are all top-down. The code is the same in upstream Wine
+on Linux, where the low area is about 1.6 GB.
+
+`tests/win/top-down-low-memory.c` reserves eight 512 MB blocks top-down. On main's Wine the first
+four landed at 0x8f000000, 0x5ffe0000, 0x3ffe0000 and 0x1ffe0000; the next four above 4 GB. Wine
+patch 0040 tries the range above 4 GB first, the reserved areas and then the free space, for a
+top-down request that may go there, and only then the whole range: all eight land between
+0x7ffd9f000000 and 0x7ffe9f000000. A top-down request bounded below 4 GB (`VirtualAlloc2` with
+`HighestEndingAddress`) is still placed there, and 32-bit programs, whose bound is 2 or 4 GB, are
+unchanged. The reporter's own fix, a 4 GB floor for unbounded top-down requests, moved the same
+reservations and got BELOW to its menu.
+
+Checked with the change, on an M2 Pro: the decommit tests of #42 as 32- and 64-bit programs,
+`shared-section` (#43), `hello` in all three architectures, `bench`, `d3d11tri` and `d3d9tri`.
+Creating a thread, which makes FEX reserve its stacks top-down, took 0.05 to 0.09 ms on both
+builds, and 0.15 to 0.21 ms on both with the top-down area filled (one first thread 0.74 ms on the
+new one) (`tests/win/thread-allocation.c`).
