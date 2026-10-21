@@ -1568,3 +1568,38 @@ prefix was made once; two programs from one folder ran side by side, each with i
 launcher that starts a 20-second program and exits returned in 2 s, and the watchdog that took
 over logged the program to its end and then ended too. Not done: remembering programs once installed (an installed program is found in
 the prefix's `drive_c` for now), and adding them to Steam as non-Steam games.
+
+## What a shader compile costs on KosmicKrisp (#47, for issue #84)
+
+Ready or Not on Direct3D 12 created pipelines for ten minutes without reaching its menu (issue
+#84), with a worker inside Metal's compiler while the game waited. Two parts of that path could
+be checked without the game, on an M2 Pro (12 cores) with macOS 27, on 2026-10-20.
+
+**Metal compiles in parallel, and nothing in KosmicKrisp serializes it.** KosmicKrisp makes one
+`MTL4Compiler` per Metal device, shared by its Vulkan devices, and compiles each pipeline (a
+library from MSL, then the pipeline state) on the thread that creates it, with no lock around
+the compile. `tests/mac/metal-compile-concurrency.m` compiles that way: kernels of about 800
+lines of dependent math, each run's sources different so that Metal's shader cache has none of
+them. One kernel took 1.3 to 1.5 s alone. 48 of them took 72 s from one thread, 26 s from four,
+16 s from eight and 14 s from twelve. `MTLDevice.shouldMaximizeConcurrentCompilation`, which is
+off by default and set by none of KosmicKrisp, DXMT and mtld3d, changes nothing here: the
+device reports 12 concurrent compile tasks either way, and 24 kernels from twelve threads took
+8.3 and 6.6 s with it off, 8.4 and 6.5 s with it on, in alternating runs. So the time a game
+waits is the number of pipelines it compiles times Metal's time for each, divided by the
+threads it compiles from.
+
+**Mesa's own checks are a small part.** Mesa is built `--buildtype=debugoptimized`
+(`scripts/build-vulkan.sh`), without `NDEBUG`, so it validates every shader after every
+compiler pass (`nir_validate_shader`), and its asserts are on. A `sample` of one Vulkan CTS
+process running a quarter of the GLSL tests, 20 s, with Mesa's shader cache off: 300 samples in
+KosmicKrisp's own code, of which 100 (a third) in validation; most of the process's time was
+threads waiting on Metal's compiler service. With `NIR_DEBUG=novalidate` none were in
+validation. Whole CTS runs could not show a difference: the GLSL quarter took 111, 91, 76, 66
+and 61 s in five runs that alternated validation on and off, faster with each run whatever the
+setting. A release build of Mesa would take about a third off KosmicKrisp's own compile time,
+which is small next to Metal's compiler. It would also stop Mesa printing OpenGL errors by
+default (Car Park Capital prints one per draw, issue #58), but it changes the drivers the
+conformance results were taken with, so it waits until they can be run again.
+
+**Still to find out for #84**, with the game: how many pipelines it creates at start, from how
+many threads, and whether a second start is fast.
