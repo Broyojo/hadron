@@ -1,13 +1,13 @@
 #!/bin/sh
-# Guard the Mac while a game runs: log memory once a second and stop every Hadron process
-# (scripts/stop) before the system starts thrashing. scripts/play starts it in the background.
+# Log memory once a second. Suspend the affected Wine prefix at an emergency limit;
+# never discard its unsaved state. scripts/play starts this in the background.
 #
 # Usage: scripts/watchdog <log file> <pid> | --check
 #
 # <pid> is the game's launcher process (scripts/play execs into it); the watchdog exits with it.
 #
-# Installed runtimes stop at critical pressure or less than 1 GB free disk.
-# Checkouts also stop above half of RAM footprint or 2 GB swap growth, with
+# Installed runtimes pause at critical pressure or less than 1 GB free disk.
+# Checkouts also pause above half of RAM footprint or 2 GB swap growth, with
 # 5 GB free disk required. Explicit HADRON_* limits are hard in either mode.
 # scripts/play documents the policy and warning thresholds.
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -21,6 +21,12 @@ watchdog_limits "$(( $(sysctl -n hw.memsize) / 1048576 ))" "$mode" || exit 1
 [ "${1:-}" != --check ] || exit 0
 
 . "$ROOT/scripts/hadron-procs.sh"
+. "$ROOT/scripts/watchdog-session.sh"
+umask 077
+paused=
+state="$log.paused"
+# The environment is inherited by Wine children, including a launcher's descendants.
+[ -n "${WINEPREFIX:-}" ] || { echo "watchdog: missing Wine prefix" >> "$log"; exit 1; }
 
 # Processes already classified, as pid:start keys, so lsof runs once per process rather than
 # every second; the start time keeps a reused PID from inheriting its predecessor's answer.
@@ -34,7 +40,7 @@ wine_memory() {  # sets rss, footprint (MB), and procs for this checkout's proce
         case "$others" in *" $key "*) continue ;; esac
         case "$ours" in
             *" $key "*) ;;
-            *)  if is_hadron_process "$p"; then ours="$ours$key "
+            *)  if is_hadron_process "$p" && watchdog_same_prefix "$p"; then ours="$ours$key "
                 else others="$others$key "; continue
                 fi ;;
         esac
@@ -63,7 +69,7 @@ mem_description=none swap_description=none
 [ "$swap_hard" -eq 0 ] || swap_description="${swap_limit_mb} MB"
 echo "watchdog: mode=$mode warning at ${mem_warn_mb} MB footprint or ${swap_warn_mb} MB swap growth; hard limits footprint=$mem_description swap=$swap_description from ${swap_base} MB, ${disk_min_mb} MB free disk, critical pressure" >> "$log"
 warned=0
-while kill -0 "$pid" 2>/dev/null; do
+while kill -0 "$pid" 2>/dev/null || watchdog_has_paused; do
     wine_memory
     pressure=$(sysctl -n kern.memorystatus_vm_pressure_level)
     swap=$(swap_used_mb)
@@ -77,14 +83,45 @@ while kill -0 "$pid" 2>/dev/null; do
     if [ "$warned" -eq 0 ] && [ "$warning" -eq 1 ]; then
         warned=1
         echo "watchdog: memory warning: ${footprint} MB footprint, ${swap_growth} MB swap growth, pressure ${pressure}; game continues" >> "$log"
-        osascript -e 'display notification "Memory use is high. The game keeps running; Hadron will stop it only at an emergency limit." with title "Hadron memory warning"' 2>/dev/null
+        osascript -e 'display notification "Memory use is high. The game keeps running; Hadron will pause this Wine session at an emergency limit, preserving its unsaved state." with title "Hadron memory warning"' 2>/dev/null
     fi
-    if [ -n "$reason" ]; then
-        echo "watchdog: $reason, stopping the game" | tee -a "$log" >&2
-        osascript -e "display notification \"$reason\" with title \"Hadron stopped the game\"" 2>/dev/null
-        "$ROOT/scripts/stop" >> "$log" 2>&1
-        exit 1
+    if [ -n "$reason" ] && [ -z "$paused" ]; then
+        echo "watchdog: $reason; suspending prefix, not terminating it" >> "$log"
+        paused=1
+        : > "$state"
+        printf '%s %s\n' "$$" "$(watchdog_start "$$")" > "$state.guard"
+        watchdog_suspend >> "$log" 2>&1
+    fi
+    if [ -n "$paused" ]; then
+        # Also catch a child created just before its parent received SIGSTOP.
+        watchdog_suspend >> "$log" 2>&1
+        if [ -f "$state.resume" ]; then
+            rm -f "$state.resume"
+            if [ -z "$reason" ]; then
+                watchdog_continue >> "$log" 2>&1
+                paused=
+                echo "watchdog: session resumed at user request" >> "$log"
+                continue
+            fi
+            echo "watchdog: resume refused: $reason" >> "$log"
+            pause_shown=0
+        fi
+        # A dialog remains visible even when notifications are disabled. Cancel leaves
+        # the session paused; scripts/resume can request another safety check later.
+        if [ "${pause_shown:-0}" -eq 0 ]; then
+            pause_shown=1
+            osascript - "$state" <<'APPLESCRIPT' >/dev/null 2>&1 &
+on run argv
+    set answer to display dialog "Hadron paused this game because a memory or disk safety limit was reached. Unsaved progress is still in memory. Close other apps or free disk space, then request a safety check. Pausing does not free the game's memory; macOS can still terminate it. If the check fails, the game stays paused." with title "Hadron paused the game" buttons {"Keep paused", "Check and resume"} default button "Keep paused"
+    if button returned of answer is "Check and resume" then
+        do shell script "/usr/bin/touch " & quoted form of ((item 1 of argv) & ".resume")
+    end if
+end run
+APPLESCRIPT
+        fi
     fi
 
     sleep 1
 done
+
+# A closed launcher must not strand a suspended session without its guardian.

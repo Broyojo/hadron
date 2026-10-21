@@ -1,0 +1,18 @@
+#!/bin/sh
+# Ask live watchdogs to recheck paused sessions. Never signal a game directly.
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$ROOT/scripts/paths.sh"
+. "$ROOT/scripts/watchdog-session.sh"
+found=0
+for state in "$HADRON_LOGS"/*.mem.log.paused; do
+    [ -f "$state" ] || continue
+    read -r guardian started < "$state.guard" 2>/dev/null || continue
+    [ "$(watchdog_start "$guardian")" = "$started" ] || {
+        echo "The guardian for $state has exited. The session remains paused; manual recovery is required." >&2
+        continue
+    }
+    touch "$state.resume" || exit 1
+    found=1
+done
+[ "$found" -eq 1 ] || { echo 'No paused session with a live guardian found.' >&2; exit 1; }
+echo 'Requested a safety check. Sessions remain paused if a limit is still exceeded.'

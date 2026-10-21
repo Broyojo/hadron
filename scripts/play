@@ -5,13 +5,12 @@
 # Usage: scripts/play <appid> <path/to/game.exe> [game args...]
 #
 # Only an allowlist of environment variables reaches the game: host secrets never do.
-# HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis;
-# past HADRON_LOG_MAX_MB (64) a log keeps its start and its end (scripts/logcap).
+# HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis.
 # FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
 # The watchdog warns once at half of RAM footprint, 2–4 GB swap growth or elevated pressure.
-# Installed runtimes under Hadron/runtimes stop only at critical pressure or below 1 GB free disk.
-# Checkouts stop above half of RAM footprint, 2 GB swap growth or below 5 GB free disk.
+# Installed runtimes under Hadron/runtimes pause only at critical pressure or below 1 GB free disk.
+# Checkouts pause above half of RAM footprint, 2 GB swap growth or below 5 GB free disk.
 # HADRON_MEM_LIMIT_GB, HADRON_SWAP_LIMIT_MB and HADRON_DISK_MIN_GB override these defaults
 # as hard limits in either mode. Footprint includes compressed and graphics memory.
 # Scrolling sends whole wheel notches, which every game handles; HADRON_PRECISE_SCROLLING=1 sends
@@ -127,29 +126,20 @@ mtld3d_config="${MTLD3D_CONFIG:-color.hdr.enable=false}"
 [ -n "$HADRON_VSYNC" ] && mtld3d_config="$mtld3d_config;present.vsync=$HADRON_VSYNC"
 dxmt_config="$DXMT_CONFIG"
 [ -n "$HADRON_VSYNC" ] && dxmt_config="${dxmt_config:+$dxmt_config;}dxgi.vsync=$HADRON_VSYNC"
-# The watchdog logs memory to the logs directory (scripts/paths.sh) and stops the game before it can make the Mac
+# The watchdog logs memory to the logs directory (scripts/paths.sh) and pauses its Wine session before it can make the Mac
 # thrash (see scripts/watchdog for the limits). HADRON_WATCHDOG=0 turns it off.
 mkdir -p "$HADRON_LOGS"
 if [ "${HADRON_WATCHDOG:-1}" != 0 ]; then
     memlog="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).mem.log"
     echo "watchdog: memory log in $memlog" >&2
     # Steam keeps its outer session alive through launcher exits; a manual run uses this PID.
-    nohup "$ROOT/scripts/watchdog" "$memlog" "${HADRON_SESSION_PID:-$$}" >/dev/null 2>&1 &
+    WINEPREFIX="$PREFIX" nohup "$ROOT/scripts/watchdog" "$memlog" "${HADRON_SESSION_PID:-$$}" >/dev/null 2>&1 &
 fi
 if [ -n "$HADRON_LOG" ]; then
     log="$HADRON_LOGS/$appid-$(date +%Y%m%d-%H%M%S).log"
-    # Made at once and only if new (noclobber), so two launches of a game in one second each get
-    # a log of their own.
-    ( set -C; : > "$log" ) 2>/dev/null || log="${log%.log}-$$.log"
     echo "logging to $log" >&2
     debug="${WINEDEBUG:-err+all,+loaddll}"
-    # Through scripts/logcap, which keeps the log's start and end past HADRON_LOG_MAX_MB: an error
-    # repeated on every draw once wrote 323 MB in a session (#58).
-    fifo="$log.$$.fifo"
-    rm -f "$fifo"; mkfifo "$fifo" || exit 1
-    "$ROOT/scripts/logcap" "$log" < "$fifo" &
-    exec > "$fifo" 2>&1
-    rm -f "$fifo"
+    exec > "$log" 2>&1
 fi
 
 # The Dock and the menu bar name an application after the bundle it was started from, and every
