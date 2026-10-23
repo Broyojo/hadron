@@ -1532,9 +1532,21 @@ This is not yet an equal-resolution comparison. Raft restored its own 5120x2880,
 then 3840x2160 preference after 1280x720 startup arguments; those arguments did
 not establish the rendered size. The physical render dimensions after the
 opt-out were not independently measured, and no FPS result is claimed. Restoring
-the internal SSD improved loading but did not initially remove stutter. Next:
-measure matching render sizes in both modes and trace cursor warps/queued input
-across capture changes. [Issue #101](https://github.com/Broyojo/hadron/issues/101).
+the internal SSD improved loading but did not initially remove stutter.
+
+The maintainer's requested comparison is to keep Retina enabled and lower the
+resolution in Raft's own graphics settings, rather than disable Retina for the
+whole prefix. Compare that with the opt-out at the same verified physical render
+size, in the same world with the same graphics settings and runtime. Startup
+resolution arguments alone are not sufficient. If performance matches, the
+higher rendering resolution explains the stutter; this report does not yet
+establish a defect in Retina mode. This comparison has not been run, and no
+player settings were changed as part of the review follow-up (2026-10-23).
+
+Test the inventory-to-camera transition separately in both runs: move items in
+a chest, close it, then move the mouse and report any first-movement jump. Trace
+cursor warps/queued input across capture changes if it persists at matching
+render sizes. [Issue #101](https://github.com/Broyojo/hadron/issues/101).
 
 ## Windows programs that are not on Steam (#46)
 
