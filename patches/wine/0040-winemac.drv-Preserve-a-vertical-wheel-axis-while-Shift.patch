@@ -1,0 +1,85 @@
+From 79dcebffb608ff3a803d618c5dc70a51f0571b18 Mon Sep 17 00:00:00 2001
+From: Lennard Zehner <127147155+Moeweneier@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 15:48:45 +0200
+Subject: [PATCH] winemac.drv: Preserve a vertical wheel axis while Shift is
+ held.
+
+AppKit redirects a non-continuous vertical wheel to the horizontal axis when Shift is down. Use the raw axes to identify a single-axis vertical wheel and restore its processed delta to the vertical axis. Keep continuous, horizontal, ambiguous and raw-less input unchanged.
+
+Co-Authored-By: Codex <noreply@openai.com>
+---
+ dlls/winemac.drv/cocoa_app.m |  6 ++++--
+ dlls/winemac.drv/scroll.h    | 37 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 41 insertions(+), 2 deletions(-)
+ create mode 100644 dlls/winemac.drv/scroll.h
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index c42327430d..cf65736239 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -22,6 +22,7 @@
+ #import "macdrv.h"
+ 
+ #import "cocoa_app.h"
++#import "scroll.h"
+ #import "cocoa_cursorclipping.h"
+ #import "cocoa_event.h"
+ #import "cocoa_window.h"
+@@ -1783,8 +1784,9 @@ - (void) handleScrollWheel:(NSEvent*)theEvent
+                 else
+                 {
+                     /* The non-continuous values are in units of "lines", not pixels. */
+-                    x = pixelsPerLine * [theEvent deltaX];
+-                    y = pixelsPerLine * [theEvent deltaY];
++                    macdrv_scroll_wheel_deltas(theEvent, &x, &y);
++                    x *= pixelsPerLine;
++                    y *= pixelsPerLine;
+                 }
+ 
+                 /* Mac: negative is right or down, positive is left or up.
+diff --git a/dlls/winemac.drv/scroll.h b/dlls/winemac.drv/scroll.h
+new file mode 100644
+index 0000000000..642cd0a758
+--- /dev/null
++++ b/dlls/winemac.drv/scroll.h
+@@ -0,0 +1,37 @@
++/*
++ * Scroll wheel axis conversion
++ *
++ * Copyright 2026 Lennard Zehner
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ */
++#ifndef __WINE_MACDRV_SCROLL_H
++#define __WINE_MACDRV_SCROLL_H
++
++#import <AppKit/AppKit.h>
++
++static inline void macdrv_scroll_wheel_deltas(NSEvent *event, double *x, double *y)
++{
++    CGEventRef cg = [event CGEvent];
++
++    *x = [event deltaX];
++    *y = [event deltaY];
++    /* AppKit redirects a vertical detented wheel to the horizontal axis with
++       Shift. Windows leaves the axis alone and delivers Shift independently.
++       Raw axes distinguish this from a real horizontal wheel. Keep AppKit's
++       magnitude and sign, including acceleration and natural scrolling. */
++    if (([event modifierFlags] & NSEventModifierFlagShift) &&
++        !CGEventGetIntegerValueField(cg, kCGScrollWheelEventIsContinuous) &&
++        CGEventGetDoubleValueField(cg, kCGScrollWheelEventRawDeltaAxis1) != 0 &&
++        CGEventGetDoubleValueField(cg, kCGScrollWheelEventRawDeltaAxis2) == 0 &&
++        *y == 0 && *x != 0)
++    {
++        *y = *x;
++        *x = 0;
++    }
++}
++
++#endif
+-- 
+2.47.1
+

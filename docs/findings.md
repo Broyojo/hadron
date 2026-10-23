@@ -1555,3 +1555,25 @@ prefix was made once; two programs from one folder ran side by side, each with i
 launcher that starts a 20-second program and exits returned in 2 s, and the watchdog that took
 over logged the program to its end and then ended too. Not done: remembering programs once installed (an installed program is found in
 the prefix's `drive_c` for now), and adding them to Steam as non-Steam games.
+
+## Shift and a vertical mouse wheel (#47)
+
+A player reported that Raft stopped responding to its wheel while Shift was held.
+An in-memory AppKit probe on macOS 27.0.1 reproduces a shared input-layer cause:
+a line-based vertical CGEvent with Shift becomes horizontal when converted to an
+NSEvent. Continuous scroll input is not redirected. The public raw-axis fields
+retain the original axes even after the conversion.
+
+Wine patch 0040 restores the processed delta to the vertical axis only for a
+non-continuous, single-axis vertical wheel with Shift, nonzero raw vertical input
+and zero raw horizontal input. It retains the processed magnitude and sign, and
+leaves Shift itself pressed. True horizontal wheels, continuous input, diagonal
+input and events without raw-axis evidence are left unchanged. The latter two
+cases are deliberately not guessed from Shift alone.
+
+`tests/mac/shift-wheel.m` uses the actual helper from the patched Wine source and
+constructs events without posting input. On macOS 27.0.1, 48 cases pass: both
+signs, Shift on/off, line/pixel events, vertical/horizontal/diagonal axes and raw
+fields present/absent. The native winemac driver builds successfully. No claim of
+real mouse or Raft acceptance yet; mouse utilities which rewrite or omit raw
+fields may require separate investigation.
