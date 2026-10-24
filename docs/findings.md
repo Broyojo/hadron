@@ -1720,3 +1720,31 @@ With one U.S. layout, as on this Mac, nothing changes: Wine answers SDL's keymap
 correctly (scancode 0x11 is VK 'W' and types `w`, and so on for A, S and D). Not reproduced yet:
 it needs a second layout of one language in the Mac's input sources, selected. An input source
 that is an input method (`0xe0xx`) is still treated as an IME, as on Windows.
+
+## Geometry Dash with Geode hung or crashed at startup on GD 2.209 (open, #53)
+
+After Geometry Dash updated to 2.209 (about 2026-10-21), Geode 5.11.2 runs in its forward
+compatibility mode, and warns that crashes are more likely. On 2026-10-24 about one launch in
+four or five stopped before the window: on 0.3.1 one in 8, on the batch for #108 to #119 four in
+12, so the batch did not cause it. Without Geode (Wine's own `xinput1_4` instead of Geode's
+loader, `WINEDLLOVERRIDES=...;xinput1_4=b`) the game started 15 times in 15.
+
+It stops where Geode installs its hooks, while other threads already run the game's code. Most
+launches hang. The main thread waits in FEX without a timeout while holding FEX's
+`ThreadCreationMutex` (in `xtajit64.dll`, named from the DLL's symbols); after 60 s Wine reported
+another thread waiting for it in FEX's self-modifying code handler (`ResetToConsistentStateImpl`).
+A few launches crash: a thread jumps to a garbage address from FEX's own stack, and Wine cannot
+dispatch the exception. FEX's ARM64EC frontend takes `ThreadCreationMutex` and its code
+invalidation lock in both orders: `NotifyMemoryFree` and the other memory notifications take
+`ThreadCreationMutex` and then invalidate, while `CompileBlock` holds the invalidation lock and
+its `NtProtectVirtualMemory` reaches `NotifyMemoryProtect`. Whether that is the hang was not
+shown; a build that recorded every lock holder stopped hanging, one that only reported waits
+over 5 s hung no more and reported none. Upstream FEX's two `CheckCall` fixes (`4dbb046d6`,
+`3a2b1c0b4`) are real but cannot cause this here: the bound's upper half is padding in our
+build.
+
+The pipe that `scripts/logcap` gives a game's output was suspected first and is not the cause:
+test runtimes whose `dist` linked to the checkout's had joined the checkout's Wine and run its
+scripts (steam-run follows the Wine already in the prefix). Geode is disabled on the test Mac
+(its `XInput1_4.dll` renamed) until it supports 2.209; if launches still hang then, FEX's lock
+order is the place to start.
