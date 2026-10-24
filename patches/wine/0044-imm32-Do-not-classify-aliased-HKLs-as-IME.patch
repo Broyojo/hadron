@@ -1,0 +1,68 @@
+From ca960d2da3650466b231800321deb793114cd5d6 Mon Sep 17 00:00:00 2001
+From: Marc-Aurel Zent <mzent@codeweavers.com>
+Date: Thu, 1 Oct 2026 12:49:00 +0200
+Subject: [PATCH] imm32: Do not classify aliased HKLs as IME.
+
+(cherry picked from commit a07e981c59419c9cb89e3282fcd30c35d8450f97)
+---
+ dlls/imm32/ime.c                        | 2 +-
+ dlls/winemac.drv/keyboard.c             | 2 +-
+ dlls/winewayland.drv/wayland_keyboard.c | 2 +-
+ dlls/winex11.drv/xim.c                  | 2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/imm32/ime.c b/dlls/imm32/ime.c
+index 37c4d073e1..a6663d7972 100644
+--- a/dlls/imm32/ime.c
++++ b/dlls/imm32/ime.c
+@@ -48,7 +48,7 @@ static BOOL is_ime_hkl( HKL hkl )
+     case MAKELANGID(LANG_TIGRINYA, SUBLANG_TIGRINYA_ETHIOPIA): return TRUE;
+     case MAKELANGID(LANG_VIETNAMESE, SUBLANG_VIETNAMESE_VIETNAM): return TRUE;
+     case MAKELANGID(LANG_YI, SUBLANG_YI_PRC): return TRUE;
+-    default: return (HIWORD(hkl) & 0xe000) == 0xe000;
++    default: return (HIWORD(hkl) & 0xf000) == 0xe000;
+     }
+ }
+ 
+diff --git a/dlls/winemac.drv/keyboard.c b/dlls/winemac.drv/keyboard.c
+index dfc02eaf19..c5fa53f1c5 100644
+--- a/dlls/winemac.drv/keyboard.c
++++ b/dlls/winemac.drv/keyboard.c
+@@ -59,7 +59,7 @@ static BOOL is_ime_hkl( HKL hkl )
+     case MAKELANGID(LANG_TIGRINYA, SUBLANG_TIGRINYA_ETHIOPIA): return TRUE;
+     case MAKELANGID(LANG_VIETNAMESE, SUBLANG_VIETNAMESE_VIETNAM): return TRUE;
+     case MAKELANGID(LANG_YI, SUBLANG_YI_PRC): return TRUE;
+-    default: return (HIWORD(hkl) & 0xe000) == 0xe000;
++    default: return (HIWORD(hkl) & 0xf000) == 0xe000;
+     }
+ }
+ 
+diff --git a/dlls/winewayland.drv/wayland_keyboard.c b/dlls/winewayland.drv/wayland_keyboard.c
+index 0a6eea2fa7..5154e03c24 100644
+--- a/dlls/winewayland.drv/wayland_keyboard.c
++++ b/dlls/winewayland.drv/wayland_keyboard.c
+@@ -63,7 +63,7 @@ static BOOL is_ime_hkl(HKL hkl)
+     case MAKELANGID(LANG_TIGRINYA, SUBLANG_TIGRINYA_ETHIOPIA): return TRUE;
+     case MAKELANGID(LANG_VIETNAMESE, SUBLANG_VIETNAMESE_VIETNAM): return TRUE;
+     case MAKELANGID(LANG_YI, SUBLANG_YI_PRC): return TRUE;
+-    default: return (HIWORD(hkl) & 0xe000) == 0xe000;
++    default: return (HIWORD(hkl) & 0xf000) == 0xe000;
+     }
+ }
+ 
+diff --git a/dlls/winex11.drv/xim.c b/dlls/winex11.drv/xim.c
+index 2c2049ac76..b2d2f90297 100644
+--- a/dlls/winex11.drv/xim.c
++++ b/dlls/winex11.drv/xim.c
+@@ -99,7 +99,7 @@ static BOOL is_ime_hkl( HKL hkl )
+     case MAKELANGID(LANG_TIGRINYA, SUBLANG_TIGRINYA_ETHIOPIA): return TRUE;
+     case MAKELANGID(LANG_VIETNAMESE, SUBLANG_VIETNAMESE_VIETNAM): return TRUE;
+     case MAKELANGID(LANG_YI, SUBLANG_YI_PRC): return TRUE;
+-    default: return (HIWORD(hkl) & 0xe000) == 0xe000;
++    default: return (HIWORD(hkl) & 0xf000) == 0xe000;
+     }
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+
