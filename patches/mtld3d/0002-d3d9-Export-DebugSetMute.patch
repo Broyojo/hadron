@@ -1,7 +1,7 @@
-From 6334c0da53e9e76721aef297831b849e9f6129d3 Mon Sep 17 00:00:00 2001
+From b775ea0956baa32cd0c359886eccc73296c3621c Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 10:22:47 -0400
-Subject: [PATCH] d3d9: Export DebugSetMute
+Subject: [PATCH 2/4] d3d9: Export DebugSetMute
 
 D3DX, which many games link statically, resolves DebugSetMute from
 d3d9d.dll and d3d9.dll with GetProcAddress before its debug output and
@@ -31,10 +31,10 @@ index e3f0cbe..019b3da 100644
      Direct3DCreate9Ex @17
      Direct3DShaderValidatorCreate9 @16
 diff --git a/windows/d3d9/src/lib.rs b/windows/d3d9/src/lib.rs
-index 1413208..9c71f0b 100644
+index 2524c32..3ea5404 100644
 --- a/windows/d3d9/src/lib.rs
 +++ b/windows/d3d9/src/lib.rs
-@@ -264,6 +264,17 @@ pub const extern "system" fn d3dperf_get_status() -> u32 {
+@@ -347,6 +347,17 @@ const extern "system" fn perf_get_status() -> u32 {
      0
  }
  

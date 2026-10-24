@@ -29,7 +29,7 @@
 #                                                before mtld3d was installed
 #   $DIST/lib/hadron/d3d9/mtld3d.conf, LICENSE
 #
-# Toolchain: rustup stable (1.98+) with the i686/aarch64/arm64ec windows-msvc targets
+# Toolchain: rustup's Rust $RUST (mtld3d's crates name their minimum) with the i686/aarch64/arm64ec windows-msvc targets
 # (added automatically), Homebrew lld-link >= 23 (ARM64X link), llvm-mingw (ARM64/ARM64EC
 # CRT), and the MSVC CRT + Windows SDK headers/import libs for the i686 link, splatted by
 # `xwin` into toolchains/xwin. Downloading those means accepting Microsoft's license for
@@ -55,7 +55,9 @@ MINGW="$ROOT/toolchains/llvm-mingw"
 XWIN="$ROOT/toolchains/xwin"
 XWIN_TOOL="$ROOT/toolchains/xwin-tool/bin/xwin"
 LLD_LINK="$BREW/opt/lld/bin/lld-link"
-RUST=stable
+# A fixed version rather than `stable`, so that a build doesn't depend on when rustup last updated;
+# raise it when mtld3d's crates ask for a newer one (0.15.0 needs 1.99).
+RUST=1.99.1
 PROFILE="${MTLD3D_PROFILE:-production}"
 if [[ $variant == dev ]]; then
     WINE_BUILD="$BUILD/wine-dev" PREFIX="$ROOT/dist-dev" OUT="$BUILD/mtld3d-dev"
