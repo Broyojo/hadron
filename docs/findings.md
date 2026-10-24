@@ -1807,3 +1807,51 @@ loaded 30 of 30 direct starts and 40 of 40 as a child, the way the game's bootst
 Upstream Wine's rework of the reserved areas (#120) may offer a fuller fix at the next rebase. The
 report's minor case, an x64 `infinst.exe` with base 0x100000000 from DirectX's June 2010
 redistributable, is not covered: its range starts below 4 GB, in the page zero.
+
+## Depth bounds before Apple family 10 (fixed, #57, issue #128)
+
+Metal has a depth bounds test only on Apple GPU family 10 (`setDepthTestMinBound:maxBound:`), so
+KosmicKrisp reported `depthBounds` there only. DOOM (2016) asks for it and will not create its
+device without it (#128), and vkd3d-proton tells a D3D12 game the test is missing and fails a
+pipeline that asks for it anyway with `E_INVALIDARG`. Mesa patch 0085 implements the test
+on the earlier families and reports the feature on all of them.
+
+The test needs the depth already stored in the attachment, which an Apple GPU keeps in tile
+memory during a render pass. Before a draw with the test on, the driver ends the render pass, so
+that the depth is stored, and starts it again; the fragment shader then reads the depth of each
+sample through the attachment's input view and drops the samples outside the bounds (a discard
+when none is left, the sample mask otherwise, ANDed with any mask the shader writes). A draw that
+writes depth reads a copy made just before it instead of the attachment it writes. Draws in a row
+that write no depth share one break: the pass is ended again only after a draw has written depth,
+or at the start of the rendering, whose load-op clear is not in memory yet.
+
+The test lives in a variant of the fragment shader, not in the shader itself. With it in every
+shader whose pipeline may use it, a benchmark of 200 opaque full-screen layers drawn back to
+front took 75 ms a frame where it took 1.15 ms: a discard turns off hidden surface removal, so
+every layer is shaded. Zink makes the test's enable dynamic in every pipeline, so every OpenGL
+game would have paid that. The variant is built like the one that counts fragment shader
+invocations for statistics queries (patch 0019, which 0085 generalises to the combinations of
+the two): its MSL is made with the shader, its Metal pipeline at the first draw that needs it.
+With it the benchmark takes 1.20 ms with the enable dynamic.
+
+Left out, and not reported anywhere as done: a shader with early fragment tests does not get the
+test (with early tests the depth and stencil are written before the shader runs, and a discard
+in it cannot take that back); a draw
+that writes depth and overlaps itself tests its later triangles against the depth from before
+the draw, not against what its earlier triangles wrote. Its cost, to profile in a game: a break
+stores and reloads every attachment of the pass, a draw that writes depth copies the depth
+attachment, and the first draw with the test on in a pipeline waits for a Metal compile.
+
+Checked with the Vulkan CTS: every depth bounds test that runs passes (3,821 in the lists that
+name depth bounds, which ran 1,844 before; the rest need formats Metal lacks, mesh shaders,
+pipeline libraries or shader objects), and so do 50,226 depth, stencil, multisample, extended
+dynamic state, fragment operation and statistics query tests, and a one-in-ten sample of the
+whole must-pass list (67,041 pass, nothing new beside `vk-full-r4`). OpenGL 4.6 on Zink, which
+now sees the feature, gives what `gl46-r13` gave: 15,304 pass, the one known failure (fragment
+input components) and one warning. The CTS has no depth bounds
+test on a multisampled image; `tests/mac/vk-depth-bounds-msaa.sh` is one, with depth that
+differs per sample, a draw that writes depth, a shader that writes its own sample mask, a draw
+made before the depth is stored, and the same pipelines loaded from a pipeline cache. It found
+that the MSL backend ignored the sample index of a multisampled image load (every sample read
+sample 0; the driver offers no multisampled storage images, so nothing reached it before), and
+the test reads through a texture fetch instead.
