@@ -2,8 +2,8 @@
  *
  * Games' steam_api checks HKCU\Software\Valve\Steam\ActiveProcess to decide whether Steam is
  * running and where steamclient.dll lives. Register this process there, launch the game and
- * wait for it; Wine redirects the game's steamclient.dll to lsteamclient, which talks to the
- * native Mac Steam client.
+ * wait for it and every process it starts; Wine redirects the game's steamclient.dll to
+ * lsteamclient, which talks to the native Mac Steam client.
  *
  * Usage: hadron-steam.exe <game.exe> [args...]
  */
@@ -169,6 +169,24 @@ static int forward_steam_request( int argc, WCHAR **argv )
     return -1;
 }
 
+/* Wait until no process is left in the job. The count is read before each wait, so the end
+ * is seen even when it came before the wait started. */
+static void wait_for_job( HANDLE job, HANDLE port )
+{
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info;
+    ULONG_PTR key;
+    OVERLAPPED *overlapped;
+    DWORD message;
+
+    for (;;)
+    {
+        if (QueryInformationJobObject( job, JobObjectBasicAccountingInformation, &info, sizeof(info), NULL )
+            && !info.ActiveProcesses) return;
+        if (!GetQueuedCompletionStatus( port, &message, &key, &overlapped, INFINITE )) return;
+        if (key == (ULONG_PTR)job && message == JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO) return;
+    }
+}
+
 int wmain( int argc, WCHAR **argv )
 {
     int forwarded = forward_steam_request( argc, argv );
@@ -176,6 +194,7 @@ int wmain( int argc, WCHAR **argv )
     const WCHAR *steam_dir = L"C:\\Program Files (x86)\\Steam";
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
+    HANDLE job, port;
     WCHAR *cmdline;
     DWORD exit_code = 1;
 
@@ -190,16 +209,42 @@ int wmain( int argc, WCHAR **argv )
     register_steam_process( steam_dir );
     keep_vc_runtime_versions();
 
+    /* A game may start its real executable and exit (DOOM (2016) starts DOOMx64vk.exe), and
+     * that one finds Steam through the pid registered above: stay registered until every
+     * process the game started has exited, which a job counts. Wine's desktop (explorer.exe)
+     * is started by the first process that needs a window, and in the job it would keep the
+     * game running for as long as anything in the prefix has a window (5 s after the last
+     * one in tests/win/steam-relaunch.c), so it is started from here first, outside the job. */
+    GetDesktopWindow();
+    job = CreateJobObjectW( NULL, NULL );
+    port = CreateIoCompletionPort( INVALID_HANDLE_VALUE, NULL, 0, 1 );
+    if (job && port)
+    {
+        JOBOBJECT_ASSOCIATE_COMPLETION_PORT assoc = { .CompletionKey = job, .CompletionPort = port };
+        if (!SetInformationJobObject( job, JobObjectAssociateCompletionPortInformation, &assoc, sizeof(assoc) ))
+        {
+            CloseHandle( job );
+            job = NULL;
+        }
+    }
+
     /* the game starts in the directory this was started in: Steam's working directory for the
      * launch, which is not always the executable's own */
-    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
+    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi ))
     {
         fwprintf( stderr, L"hadron-steam: failed to start %ls: error %lu\n", argv[1], GetLastError() );
         clear_steam_process();
         return 1;
     }
+    if (job && !AssignProcessToJobObject( job, pi.hProcess ))
+    {
+        CloseHandle( job );
+        job = NULL;
+    }
+    ResumeThread( pi.hThread );
     WaitForSingleObject( pi.hProcess, INFINITE );
     GetExitCodeProcess( pi.hProcess, &exit_code );
+    if (job) wait_for_job( job, port );
     clear_steam_process();
     return exit_code;
 }

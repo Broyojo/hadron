@@ -1893,3 +1893,28 @@ inside sees the buffer's data and every read past the end sees zero; with the ra
 assertion, the reads past the end see the next buffer's marker. A third of the Vulkan CTS lists for
 robustness, uniform buffers, transform feedback and descriptor binding passes with the clamp:
 52,804 pass, none fail.
+
+## A game that restarts into another executable lost Steam (fixed, #59, issue #128)
+
+DOOM (2016) started from Steam with the Vulkan renderer runs `DOOMx64.exe`, which starts
+`DOOMx64vk.exe` and exits. The second one then failed to initialise Steam (issue #128, where
+starting `DOOMx64vk.exe` directly worked around it). `hadron-steam.exe` registers itself as the
+running Steam process (`HKCU\Software\Valve\Steam\ActiveProcess\pid`), which is how `steam_api`
+decides that Steam runs, starts the game and waited for that one process: when it exited,
+`hadron-steam.exe` wrote 0 there and exited too, so the game's own child found no Steam.
+`steam-run` already waits for the whole Wine session, so Steam still showed the game running.
+
+`hadron-steam.exe` starts the game in a job now and stays registered until no process of the job
+is left; the exit status is still the first process's. Wine puts a process in its parent's job,
+and that includes Wine's desktop process, `explorer.exe`, which the first process to make a
+window starts: in the job it kept `hadron-steam.exe` waiting 5 s after the game had gone (9 s
+in all where 3.8 s is the game's own time), and would keep it as long as anything in the prefix
+had a window. So `hadron-steam.exe` starts the desktop itself first, outside the job.
+`services.exe`, and the services it starts, come from the first process of a Wine session, which
+is `hadron-steam.exe` before the job exists.
+
+`tests/win/steam-relaunch.c` is a game that starts itself again and exits; the second process
+checks the registered Steam process the way `steam_api` does, at once and a second later, with
+a window up. With the old `hadron-steam.exe` it finds pid 0; with the new one it finds the
+launcher running, the launcher returns when the second process has exited (3.8 s), and the Wine
+session ends at once after it.
