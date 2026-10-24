@@ -1,0 +1,54 @@
+From f3242c66243a5235256334f3e9aae425f5f10fb2 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 21 Oct 2026 09:22:22 -0400
+Subject: [PATCH] ntdll: Keep top-down allocations above 4GB while there is
+ room.
+
+map_view() looks in the reserved areas before free memory, highest area
+first. When a top-down request does not fit the top-down area, the next
+area down is the low one, so the request lands just below 4GB, although
+the address space between 4GB and the top-down area is free.
+
+Windows gives a top-down allocation the highest free address, and the
+space below 4GB is what programs needing 32-bit addresses depend on, such
+as LuaJIT asking for memory below 2GB with ZeroBits. FEX reserves large
+blocks top-down in every x64 process. Try the part of the range above 4GB
+first, the reserved areas and then free memory, and only then the rest.
+---
+ dlls/ntdll/unix/virtual.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index b1d805dd25..4451a28174 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -2524,6 +2524,26 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
+         if (limit_low && (void *)limit_low > start) start = (void *)limit_low;
+         if (limit_high && (void *)limit_high < end) end = (char *)limit_high + 1;
+ 
++#ifdef _WIN64
++        /* Windows gives a top-down allocation the highest free address, so it only goes below
++         * 4GB when nothing above is free. Don't let one that does not fit the top-down area
++         * fall into the low reserved area while there is room above 4GB: programs that need
++         * 32-bit addresses depend on that space. */
++        if (top_down && start < (void *)limit_4g && end > (void *)limit_4g)
++        {
++            if ((ptr = map_reserved_area( (void *)limit_4g, end, host_size, top_down, unix_prot, align_mask )))
++            {
++                TRACE( "got mem in reserved area %p-%p\n", ptr, (char *)ptr + size );
++                goto done;
++            }
++            if ((ptr = map_free_area( (void *)limit_4g, end, host_size, top_down, unix_prot, align_mask )))
++            {
++                TRACE( "got mem with map_free_area %p-%p\n", ptr, (char *)ptr + size );
++                goto done;
++            }
++        }
++#endif
++
+         if ((ptr = map_reserved_area( start, end, host_size, top_down, unix_prot, align_mask )))
+         {
+             TRACE( "got mem in reserved area %p-%p\n", ptr, (char *)ptr + size );
+-- 
+2.54.0 (Apple Git-157)
+
