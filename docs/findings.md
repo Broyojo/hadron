@@ -1693,3 +1693,24 @@ which sets them all, do not start again. Those that do: `wine` run by hand, `scr
 and the `wineboot` runs in `scripts/steam-run`. With it, Unvanquished started from bare `wine` in
 a clean environment and a new prefix gets `zink Vulkan 1.4 (Apple M2 Pro (MESA_KOSMICKRISP))` and
 shows its menu in a window.
+
+## Letter keys went to the input method with a second keyboard layout (fixed, #52, issue #111)
+
+In Unvanquished (SDL3) WASD did nothing while the arrow keys and Ctrl worked and the console took
+every letter (issue #111). Its reporter's log has `Aliased keyboard layout not yet implemented`:
+the active macOS input source had an HKL with the high bit set. The Mac driver gives a second
+keyboard layout of a language (French and French - PC, U.S. and ABC) the layout id `0xf000 | n`,
+and an input source that is not a keyboard layout `0xe000 | n`.
+
+imm32 took every layout id with `0xe000` set for an IME, the second-layout ids too. With an IME
+active, Wine sends each key except the modifiers through it: the window gets `WM_KEYDOWN` with
+`VK_PROCESSKEY`, macOS's text input turns a letter into text, and a key it does not use (an
+arrow) comes back as a normal `WM_KEYDOWN`. SDL3 drops `VK_PROCESSKEY` keys, and Daemon keeps
+SDL's text input on, so the letters arrived only as text. Upstream Wine fixed the test in
+a07e981c ("imm32: Do not classify aliased HKLs as IME", 2026-10-01): an IME layout id is
+`0xe0xx`. Wine patch 0044 is that commit.
+
+With one U.S. layout, as on this Mac, nothing changes: Wine answers SDL's keymap questions
+correctly (scancode 0x11 is VK 'W' and types `w`, and so on for A, S and D). Not reproduced yet:
+it needs a second layout of one language in the Mac's input sources, selected. An input source
+that is an input method (`0xe0xx`) is still treated as an IME, as on Windows.
