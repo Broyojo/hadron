@@ -84,7 +84,18 @@ case "${HADRON_DISABLE_LSTEAMCLIENT:-0}" in
 esac
 # D3D9 goes through mtld3d (D3D9 -> Metal), installed in the prefix by scripts/mtld3d-prefix
 # enable; HADRON_D3D9=wined3d uses Wine's own D3D9 (over OpenGL) instead, for comparisons.
-[ "${HADRON_D3D9:-mtld3d}" = mtld3d ] && overrides="$overrides;d3d9=n,b"
+# The prefix's copies are brought up to the runtime's on every launch: made once when the prefix
+# was, they would otherwise keep that build's mtld3d for good.
+if [ "${HADRON_D3D9:-mtld3d}" = mtld3d ]; then
+    overrides="$overrides;d3d9=n,b"
+    d3d9="$ROOT/dist/lib/hadron/d3d9"
+    if [ -f "$d3d9/i386/d3d9.dll" ] && [ -d "$PREFIX/drive_c/windows/syswow64" ]; then
+        install_file "$d3d9/i386/d3d9.dll" "$PREFIX/drive_c/windows/syswow64/d3d9.dll"
+        install_file "$d3d9/aarch64/d3d9.dll" "$PREFIX/drive_c/windows/system32/d3d9.dll"
+        install_file "$d3d9/markers/syswow64/mtld3d.dll" "$PREFIX/drive_c/windows/syswow64/mtld3d.dll"
+        install_file "$d3d9/markers/system32/mtld3d.dll" "$PREFIX/drive_c/windows/system32/mtld3d.dll"
+    fi
+fi
 # Vulkan goes to KosmicKrisp (Mesa's Vulkan on Metal, scripts/build-vulkan.sh); MoltenVK, which the
 # Vulkan loader would find otherwise, can't create an instance under Wine.
 icd="$ROOT/dist/mesa/share/vulkan/icd.d/kosmickrisp_mesa_icd.aarch64.json"
