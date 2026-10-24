@@ -130,8 +130,23 @@ fi
 # A prefix is complete once this marker exists: a wineboot that fails part way leaves system.reg
 # behind, and that prefix must not be reused.
 ready="$WINEPREFIX/.hadron-prefix-ready"
+# Steam syncs a game's Cloud files down before it starts the game, so on a first launch the folder
+# may already hold the player's saves under drive_c/users/steamuser. They wait outside the prefix
+# while it is made and go back into the profile once it is laid out, below. Files kept by a launch
+# that then failed stay there, and what Steam has synced since goes over them.
+steam_files="$STEAM_COMPAT_DATA_PATH/.hadron-steam-files"
 if [ ! -f "$ready" ] && { [ ! -f "$WINEPREFIX/system.reg" ] || [ -f "$WINEPREFIX/.hadron-prefix-creating" ]; }; then
     echo "creating prefix $WINEPREFIX" >> "$log"
+    if [ ! -f "$WINEPREFIX/.hadron-prefix-creating" ] && [ -d "$WINEPREFIX/drive_c/users" ]; then
+        if ! { mkdir -p "$steam_files" && cp -R "$WINEPREFIX/drive_c/users/." "$steam_files/" 2>> "$log"; }; then
+            echo "steam-run: could not keep the files in $WINEPREFIX/drive_c/users; the prefix is left as it is" | tee -a "$log" >&2
+            exit 1
+        fi
+        # Steam writes only files and folders; a link is from a prefix that was never finished
+        # (Wine's to the Mac's Desktop and so on) and would stop the files from going back.
+        find "$steam_files" -type l -delete
+        echo "kept what Steam put in drive_c/users before the prefix existed: $(find "$steam_files" -type f | wc -l | tr -d ' ') files" >> "$log"
+    fi
     rm -rf "$WINEPREFIX"
     mkdir -p "$WINEPREFIX" && touch "$WINEPREFIX/.hadron-prefix-creating"
     # mshtml off, as in scripts/play: otherwise wineboot waits on the Gecko install dialog. Wine
@@ -183,6 +198,19 @@ if [ ! -f "$WINEPREFIX/.hadron-profile-v1" ]; then
         esac
         mkdir -p "$profile/$folder"
     done
+    # Steam's files from before the prefix existed go back now that the folders are real and
+    # before the aliases are made (cp does not follow a link at its destination): the aliases'
+    # merge then moves what is under an XP-era name into the modern folder. They are the player's
+    # saves, so they win over anything Wine made. If they cannot all go back, the game does not
+    # start without them; they stay where they are, and the next launch tries again.
+    if [ -d "$steam_files" ]; then
+        if ! cp -R "$steam_files/." "$users/" 2>> "$log"; then
+            echo "steam-run: could not put Steam's files back into $users; they are kept in $steam_files" | tee -a "$log" >&2
+            exit 1
+        fi
+        rm -rf "$steam_files"
+        echo "put Steam's files back into drive_c/users" >> "$log"
+    fi
     for alias in "Local Settings/Application Data|AppData/Local|../AppData/Local" \
                  "Application Data|AppData/Roaming|AppData/Roaming" \
                  "My Documents|Documents|Documents"; do

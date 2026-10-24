@@ -1652,3 +1652,32 @@ passes for 1 << 47, the value from the report and all bits set. Whether Hogwarts
 further with this is not known yet: the reporter has to try it. The first problem in #95, the
 game's executable failing to load at its fixed base when macOS's allocator happens to sit there, is
 separate and still open.
+
+## A game's first launch deleted the Cloud saves Steam had just synced (fixed, #50, issue #113)
+
+Mewgenics and Rusted Moss started with empty saves on a Mac that had never run them, while the
+same Steam Cloud saves loaded under CrossOver and on a PC (issue #113). Three other games kept
+their saves. Steam syncs a game's Cloud files down before it starts the game, into
+`compatdata/<id>/pfx/drive_c/users/steamuser` under the names its Cloud rules use (findings #21):
+in this Mac's `cloud_log.txt` the "AC Launch, down" sync comes a second before `steam-run`
+starts. On a first launch `steam-run` found no prefix there and made one, deleting the folder
+first, saves and all. A game with an install script has its prefix made earlier, by the
+script's run, which is why Car Park Capital kept its saves; games that keep theirs through
+Steam's own storage API are not affected.
+
+`steam-run` now copies the `drive_c/users` it finds in a folder that is not a prefix yet to
+`compatdata/<id>/.hadron-steam-files`, makes the prefix, and copies the files back while it lays
+out the profile: after Wine's links to the Mac's folders become real folders and before the
+XP-era aliases are made, since `cp` does not follow a link at its destination. The aliases'
+merge then moves "Local Settings/Application Data" and the rest into the modern folders. Only
+`users` is kept, without links (Steam writes neither `windows` nor links; a prefix that was never
+finished has both). Files kept by a launch whose prefix then failed stay in the holding folder,
+and a later sync goes over them. If the files cannot be put back, the launch stops with an error
+and leaves them there, rather than starting the game without them; the next launch tries again.
+`tests/mac/test-cloud-first-launch.sh` runs three cases. A first launch with five saves where
+Steam would put them (under the XP-era names, in `Saved Games` and in `AppData/LocalLow`): with
+main's `steam-run` all five are gone, with this one all five are there under both names. A sync
+after a failed first launch: the newer file wins and the kept one stays. Files that cannot go
+back: the launch stops, the files are kept, and the profile is not marked done. Not checked yet:
+a real first launch from Steam, and whether Steam downloads the files again for a player whose
+first launch already lost them.
