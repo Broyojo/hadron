@@ -130,8 +130,16 @@ fi
 # A prefix is complete once this marker exists: a wineboot that fails part way leaves system.reg
 # behind, and that prefix must not be reused.
 ready="$WINEPREFIX/.hadron-prefix-ready"
+# Steam syncs a game's Cloud files down before it starts the game, so on a first launch the folder
+# may already hold the player's saves under drive_c/users/steamuser. They wait outside the prefix
+# while it is made and go back into the profile once it is laid out, below.
+steam_files="$STEAM_COMPAT_DATA_PATH/.hadron-steam-files"
 if [ ! -f "$ready" ] && { [ ! -f "$WINEPREFIX/system.reg" ] || [ -f "$WINEPREFIX/.hadron-prefix-creating" ]; }; then
     echo "creating prefix $WINEPREFIX" >> "$log"
+    if [ ! -f "$WINEPREFIX/.hadron-prefix-creating" ] && [ -d "$WINEPREFIX/drive_c" ] && [ ! -e "$steam_files" ]; then
+        mv "$WINEPREFIX/drive_c" "$steam_files" &&
+            echo "kept what Steam put in drive_c before the prefix existed: $(find "$steam_files" -type f | wc -l | tr -d ' ') files" >> "$log"
+    fi
     rm -rf "$WINEPREFIX"
     mkdir -p "$WINEPREFIX" && touch "$WINEPREFIX/.hadron-prefix-creating"
     # mshtml off, as in scripts/play: otherwise wineboot waits on the Gecko install dialog. Wine
@@ -183,6 +191,14 @@ if [ ! -f "$WINEPREFIX/.hadron-profile-v1" ]; then
         esac
         mkdir -p "$profile/$folder"
     done
+    # Steam's files from before the prefix existed go back now that the folders are real and
+    # before the aliases are made (cp does not follow a link at its destination): the aliases'
+    # merge then moves what is under an XP-era name into the modern folder. They are the player's
+    # saves, so they win over anything Wine made.
+    if [ -d "$steam_files" ]; then
+        cp -R "$steam_files/." "$WINEPREFIX/drive_c/" 2>> "$log" && rm -rf "$steam_files" &&
+            echo "put Steam's files back into drive_c" >> "$log"
+    fi
     for alias in "Local Settings/Application Data|AppData/Local|../AppData/Local" \
                  "Application Data|AppData/Roaming|AppData/Roaming" \
                  "My Documents|Documents|Documents"; do
