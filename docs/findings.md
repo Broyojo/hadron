@@ -1720,3 +1720,31 @@ With one U.S. layout, as on this Mac, nothing changes: Wine answers SDL's keymap
 correctly (scancode 0x11 is VK 'W' and types `w`, and so on for A, S and D). Not reproduced yet:
 it needs a second layout of one language in the Mac's input sources, selected. An input source
 that is an input method (`0xe0xx`) is still treated as an IME, as on Windows.
+
+## Geometry Dash with Geode stopped at startup when its standard output was a pipe (fixed, #53)
+
+Geometry Dash with the Geode mod loader never opened its window on the batch of 2026-10-24, two
+launches in two, while 0.3.1 started it. Both launches stopped at the same point: the log at the
+same 16,942 bytes, just before `dinput8.dll` loads, and Geode's own log (`geode/logs` in the
+game's folder) after its warning that it runs in a newer GD than it targets. A sample showed the
+main thread waiting on a lock and one of Geode's worker threads (`arc-worker-2`) running the
+game's code for the whole three seconds. Swapping parts between the two runtimes found it. 0.3.1
+with the new Wine's ntdll started the game, so not Wine patches 0040 and 0041. The batch with
+`scripts/play` writing the log the old way started it. The batch with standard output a file and
+only standard error through the pipe started it too. Since `scripts/logcap` (#58, after 0.3.1)
+the game's standard output and standard error had both gone to a pipe that logcap reads, where
+they had been a file before.
+
+Why a pipe stops it is not known. A program making the calls Geode's console setup makes (the
+standard handles, `GetFileType`, `GetConsoleMode`, `GetFinalPathNameByHandleW`, a write, its
+named pipe read through a completion port, `AttachConsole` and `AllocConsole`), started by `wine`
+and by `hadron-steam.exe` the way the game is, with standard output a file and a pipe and with
+play's `WINEDEBUG`, finished in milliseconds every time. Wine answers as Windows does there:
+`FILE_TYPE_PIPE` for a pipe.
+
+`scripts/play` now appends standard output to the log as a file, as before logcap, and sends
+only standard error, where Wine and Mesa write, through logcap. logcap appends to the log instead
+of replacing it. Standard output is not capped, and a line of standard error can reach the log a
+little after standard output's lines written just after it. `tests/mac/test-logcap.sh` checks
+that every line is kept, each stream's in order, that the log keeps its start and its end past
+`HADRON_LOG_MAX_MB`, and that standard output is not a pipe; main's `play` fails the last.

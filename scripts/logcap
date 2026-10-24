@@ -4,7 +4,8 @@
 # the module load addresses a crash is read against, the end what happened last.
 #
 # Usage: scripts/logcap <log> < output
-# The first half of HADRON_LOG_MAX_MB (default 64) goes to <log> as it comes. After that <log>
+# The first half of HADRON_LOG_MAX_MB (default 64) is appended to <log> as it comes (scripts/play
+# appends the game's standard output to the same file). After that <log>
 # says where the output goes: to <log>.tail and <log>.tail.1 in turns, a quarter each, so the
 # latest quarter to half is kept. When the input ends both are appended to <log>, after a line
 # that says how much was left out, if anything was. Every line is written as it arrives, so a
@@ -19,11 +20,11 @@ LOGCAP_OUT="$log" LC_ALL=C awk -v half="$((max_mb * 1048576 / 2))" '
 BEGIN { out = ENVIRON["LOGCAP_OUT"]; quarter = int(half / 2); a = out ".tail"; b = out ".tail.1"; cur = "" }
 {
     n = length($0) + 1
-    if (cur == "" && head + n <= half) { print > out; fflush(out); head += n; next }
+    if (cur == "" && head + n <= half) { print >> out; fflush(out); head += n; next }
     if (cur == "") {
         name = out; sub(/.*\//, "", name)
         printf "hadron: the log passed %g MB; until the game ends its latest lines are in %s.tail and %s.tail.1, then they follow here\n",
-            half / 1048576, name, name > out
+            half / 1048576, name, name >> out
         fflush(out)
     }
     if (cur == "" || size >= quarter) {

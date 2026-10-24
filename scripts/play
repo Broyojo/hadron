@@ -143,12 +143,15 @@ if [ -n "$HADRON_LOG" ]; then
     ( set -C; : > "$log" ) 2>/dev/null || log="${log%.log}-$$.log"
     echo "logging to $log" >&2
     debug="${WINEDEBUG:-err+all,+loaddll}"
-    # Through scripts/logcap, which keeps the log's start and end past HADRON_LOG_MAX_MB: an error
-    # repeated on every draw once wrote 323 MB in a session (#58).
+    # Standard error, where Wine and Mesa write, goes through scripts/logcap, which keeps the log's
+    # start and end past HADRON_LOG_MAX_MB: an error repeated on every draw once wrote 323 MB in a
+    # session (#58). Standard output stays a file, as it was before logcap: Geometry Dash with Geode
+    # stopped at startup when it was a pipe (findings #53). Both append to the log; a line of
+    # standard error can come in a little after standard output's lines written just after it.
     fifo="$log.$$.fifo"
     rm -f "$fifo"; mkfifo "$fifo" || exit 1
     "$ROOT/scripts/logcap" "$log" < "$fifo" &
-    exec > "$fifo" 2>&1
+    exec >> "$log" 2> "$fifo"
     rm -f "$fifo"
 fi
 
