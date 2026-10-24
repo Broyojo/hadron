@@ -1681,3 +1681,21 @@ after a failed first launch: the newer file wins and the kept one stays. Files t
 back: the launch stops, the files are kept, and the profile is not marked done. Not checked yet:
 a real first launch from Steam, and whether Steam downloads the files again for a player whose
 first launch already lost them.
+
+## Wine started on its own used Apple's OpenGL 4.1 (fixed, #51, issue #112)
+
+Unvanquished showed nothing in a window (issue #112) when its reporter started it with the
+runtime's `dist/bin/wine`. Hadron chooses its renderers in `scripts/play`, through the environment:
+`WINE_MAC_OPENGL=egl`, Mesa's libEGL on the library path, `MESA_LOADER_DRIVER_OVERRIDE=zink`
+and `VK_DRIVER_FILES` for KosmicKrisp. Wine started without them failed to load libEGL and the
+Vulkan loader and fell back to Apple's OpenGL 4.1, which Hadron does not otherwise use. On an
+M2 Pro the windowed game drew a black frame there; through `scripts/program-run` it reached its
+menu, windowed and fullscreen.
+
+Wine patch 0043 makes the loader set the same defaults when `WINE_MAC_OPENGL` is unset and the
+runtime's Zink is next to it, then start again, since dyld reads `DYLD_FALLBACK_LIBRARY_PATH` only
+when a process starts. Settings already in the environment are kept, so launches through `play`,
+which sets them all, do not start again. Those that do: `wine` run by hand, `scripts/wine-run`,
+and the `wineboot` runs in `scripts/steam-run`. With it, Unvanquished started from bare `wine` in
+a clean environment and a new prefix gets `zink Vulkan 1.4 (Apple M2 Pro (MESA_KOSMICKRISP))` and
+shows its menu in a window.
