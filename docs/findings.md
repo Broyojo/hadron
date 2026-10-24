@@ -1770,3 +1770,19 @@ is what limits it: for a factor near 283 the denominator can be at most about 23
 `tests/win/odd-mode-dpi.c` sets every mode each display lists, asks for its raw DPI and opens a
 window of the mode's size. On main it aborts at 1024×665 on the built-in display; with the patch
 all 243 modes on both displays, the iPad's 1025×768 among them, give a window of the right size.
+
+## A game's prefix kept the mtld3d it was made with (fixed, #55)
+
+mtld3d is not a Wine builtin: `scripts/mtld3d-prefix enable` copies its `d3d9.dll` (32-bit and
+ARM64X) and its `mtld3d.dll` markers into the prefix, and `steam-run` did that once, when it made
+the prefix. Nothing copied them again, so a game's prefix kept the mtld3d of the build that made
+it: on 2026-10-24 Portal 2's held a build from 2026-09-30, and every mtld3d fix since, those in
+0.3.0 and 0.3.1 included, had never reached it or any game launched before them. It came up while
+testing an mtld3d update, whose games ran the old copies.
+
+`scripts/play` now brings the copies up to the runtime's on every launch that uses mtld3d, the
+way it already keeps `lsteamclient.dll` and `winemetal.dll`: a file is copied only when it
+differs, under a new name renamed over the old one, so launches that share a prefix never load
+a half-written DLL. `HADRON_D3D9=wined3d` leaves them alone. `tests/mac/test-mtld3d-refresh.sh`
+makes a prefix's copies stale, starts a program through `play`, and compares: main's `play`
+leaves all four stale, this one replaces all four.
