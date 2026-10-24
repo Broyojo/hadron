@@ -1748,3 +1748,25 @@ test runtimes whose `dist` linked to the checkout's had joined the checkout's Wi
 scripts (steam-run follows the Wine already in the prefix). Geode is disabled on the test Mac
 (its `XInput1_4.dll` renamed) until it supports 2.209; if launches still hang then, FEX's lock
 order is the place to start.
+
+## A mode whose size shares no factor with the screen's aborted the game (fixed, #54)
+
+Teardown, opened on a Sidecar iPad (2628×1970), stopped as it resized its swapchain to 1025×768:
+`Assertion failed: (num / d < 65536), function make_ratio, file sysparams.c, line 330`, then
+"unable to dispatch exception" as the abort reached a FEX thread. win32u's `monitor_get_dpi`
+scales the DPI by the screen's physical size over the current mode's, as a fraction in a
+`struct ratio`, whose terms are 16 bits (it is part of the wineserver protocol). With Hadron's
+emulated mode changes the two sizes are arbitrary: 96 × 2628 / 1025 and, on a MacBook's
+3024×1964 panel, 96 × 1964 / 665 for its listed 1024×665 mode have no common factor, the terms do
+not fit, and `make_ratio` asserted. Retina mode, in which the physical size is in pixels, doubles
+the numerator and makes it likelier. Upstream Wine has the same code.
+
+Wine patch 0045 makes `make_ratio` return the closest fraction whose terms fit, from the
+continued fraction (the last convergent or the largest semiconvergent that fits, whichever is
+closer), and keeps the exact fraction whenever it fits. Over 2,424 combinations of DPI, screen
+and mode width it matched a brute-force search for the best such fraction every time; the worst
+relative error was 7.3 × 10⁻⁶, about 0.02 pixels on a 3024-pixel coordinate. The numerator's bound
+is what limits it: for a factor near 283 the denominator can be at most about 231.
+`tests/win/odd-mode-dpi.c` sets every mode each display lists, asks for its raw DPI and opens a
+window of the mode's size. On main it aborts at 1024×665 on the built-in display; with the patch
+all 243 modes on both displays, the iPad's 1025×768 among them, give a window of the right size.
