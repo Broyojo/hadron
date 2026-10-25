@@ -1918,3 +1918,43 @@ checks the registered Steam process the way `steam_api` does, at once and a seco
 a window up. With the old `hadron-steam.exe` it finds pid 0; with the new one it finds the
 launcher running, the launcher returns when the second process has exited (3.8 s), and the Wine
 session ends at once after it.
+
+## Line and point polygon modes (fixed, #60)
+
+KosmicKrisp reported no `fillModeNonSolid`, which covers drawing triangles as lines
+(`VK_POLYGON_MODE_LINE`) and as points (`VK_POLYGON_MODE_POINT`): the wireframe of D3D12, OpenGL's
+`glPolygonMode` through Zink, and a feature DXVK's dxgi requires of a GPU before it lists it
+(see the vkd3d-proton entry above). Mesa patch 0087 implements both and reports it.
+
+Lines are Metal's own: `setTriangleFillMode:MTLTriangleFillModeLines`. Metal has no point fill
+mode, so a pipeline with point mode draws its triangles through a geometry shader that emits each
+vertex as a point. The culling, which Metal would apply to the triangle, and the depth bias,
+which Metal applies to triangles only, are done in that shader: it takes the triangle's facing
+from its three positions in framebuffer coordinates, with the viewport's orientation, the front
+face (with the tessellator's winding when there is one) and the cull mode of the draw, all
+dynamic state read from the draw's root table; and its depth bias from the triangle's depth
+slope and the depth format (2^-16 for D16, 2^-24 for D24, 2^(e-23) of the triangle's largest
+depth for float). Without a geometry shader of the pipeline's own, it is a passthrough one, as
+for transform feedback. With one, that shader is rewritten before its outputs are lowered: it
+keeps the last three vertices it emitted, takes each triangle of the strip in Vulkan's order (the
+first two swapped on odd triangles), and emits the triangle's vertices as points when it is not
+culled. A point takes the size the shader wrote, so the driver now reports
+`polygonModePointSize`, and Zink draws OpenGL's point mode with it instead of its own emulation.
+
+Left out, and not reported anywhere as done: point mode with transform feedback, or with a
+geometry shader that writes more than one stream, still draws filled triangles (the points would
+change what transform feedback records, which comes before culling); a triangle clipped by the
+view volume gives points at its own vertices, not at the vertices of the clipped polygon.
+
+Checked with the Vulkan CTS: of the 109 tests that draw polygons as lines or points, all skipped
+before, the 57 that run pass (culling in both modes with every primitive and winding, large
+points, default point size, depth bias in point mode, non-line draws through a geometry shader);
+the other 52 need dynamic polygon mode, mesh shaders, or rectangular or smooth line rasterization,
+which the driver does not report. The
+rasterization, draw, depth bias, tessellation, geometry, transform feedback and feature lists
+(31,837 tests) give 11,582 pass and no new failure beside `vk-full-r4`. The CTS culling tests
+draw from a vertex shader only; `tests/mac/vk-polygon-points.sh` draws a strip of two triangles
+from a vertex shader and from a geometry shader, culling back and front faces: a geometry shader
+rewrite that took the odd triangle unswapped loses the corner only it has. OpenGL 4.6 on Zink,
+which now draws `glPolygonMode` with the driver's modes, gives what `gl46-r13` gave: 15,304 pass,
+the one known failure and one warning.
