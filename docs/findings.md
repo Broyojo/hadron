@@ -1834,11 +1834,22 @@ invocations for statistics queries (patch 0019, which 0085 generalises to the co
 the two): its MSL is made with the shader, its Metal pipeline at the first draw that needs it.
 With it the benchmark takes 1.20 ms with the enable dynamic.
 
-Left out, and not reported anywhere as done: a shader with early fragment tests does not get the
-test (with early tests the depth and stencil are written before the shader runs, and a discard
-in it cannot take that back); a draw
-that writes depth and overlaps itself tests its later triangles against the depth from before
-the draw, not against what its earlier triangles wrote. Its cost, to profile in a game: a break
+A shader with early fragment tests gets a variant without them: the depth and stencil would be
+written before the shader runs, and its discard could not take that back. Running the tests late
+gives the same result unless the shader writes memory, which it would then do for fragments that
+fail the depth or stencil test. So a shader that has early tests and writes memory gets no
+variant, and the bounds test is not applied to it. The variant for a statistics query is lowered
+for the bounds test before the invocation counter is added: the counter turns early tests on for
+a shader that has no discard and writes no depth, stencil or sample mask, which the bounds test
+then could not cut (found by the Codex review of #140; the test then drew every sample and wrote
+depth outside the bounds). With both changes the depth, stencil, multisample, dynamic state,
+fragment operation, statistics query and depth bounds lists give 50,229 pass, 0 fail and the two
+warnings they gave before.
+
+Left out, and not reported anywhere as done: the shader with early tests that writes memory
+above; and a draw that writes depth and overlaps itself tests its later triangles against the
+depth from before the draw, not against what its earlier triangles wrote (only reading the depth
+in tile memory, which Metal does not offer, would give that). Its cost, to profile in a game: a break
 stores and reloads every attachment of the pass, a draw that writes depth copies the depth
 attachment, and the first draw with the test on in a pipeline waits for a Metal compile.
 
@@ -1851,7 +1862,9 @@ now sees the feature, gives what `gl46-r13` gave: 15,304 pass, the one known fai
 input components) and one warning. The CTS has no depth bounds
 test on a multisampled image; `tests/mac/vk-depth-bounds-msaa.sh` is one, with depth that
 differs per sample, a draw that writes depth, a shader that writes its own sample mask, a draw
-made before the depth is stored, and the same pipelines loaded from a pipeline cache. It found
+made before the depth is stored, a draw that writes depth inside a statistics query and one from
+a shader with early fragment tests, a probe of the depth each case leaves, and the same pipelines
+loaded from a pipeline cache. It found
 that the MSL backend ignored the sample index of a multisampled image load (every sample read
 sample 0; the driver offers no multisampled storage images, so nothing reached it before), and
 the test reads through a texture fetch instead.

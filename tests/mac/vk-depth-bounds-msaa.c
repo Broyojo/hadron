@@ -4,7 +4,11 @@
  * and the resolved red is half (128). Three cases for the second draw: plain, writing depth (the
  * bounds test must see the depth from before the draw), and writing its own sample mask 0x5
  * (only sample 2 is left: 64); and plain again after the same draw made before the depth was
- * stored, while the depth is still the clear value 1, where it draws nothing. Runs on the first
+ * stored, while the depth is still the clear value 1, where it draws nothing; and writing depth
+ * again inside a pipeline statistics query, which counts fragment shader invocations, and from a
+ * shader that asks for early fragment tests. After each
+ * case a probe draws green at depth 0.7 with the test LESS: only sample 3 has a depth beyond it
+ * (0.85, which no case may change), so the resolved green is a quarter (64). Runs on the first
  * Vulkan device; VK_DRIVER_FILES picks the driver.
  * tests/mac/vk-depth-bounds-msaa.sh writes the shaders, builds this and runs it. */
 #include <stdio.h>
@@ -23,6 +27,12 @@ static const uint32_t fs_red_spv[] =
 ;
 static const uint32_t fs_red_mask_spv[] =
 #include "vk-depth-bounds-msaa-red-mask.frag.inc"
+;
+static const uint32_t fs_red_early_spv[] =
+#include "vk-depth-bounds-msaa-red-early.frag.inc"
+;
+static const uint32_t fs_probe_spv[] =
+#include "vk-depth-bounds-msaa-probe.frag.inc"
 ;
 
 #define SIZE 8
@@ -83,7 +93,8 @@ static VkShaderModule shader( const uint32_t *code, size_t size )
 }
 
 static VkPipeline pipeline( VkPipelineLayout layout, VkShaderModule vs, VkShaderModule fs,
-                            VkBool32 sample_shading, VkBool32 depth_write, VkBool32 bounds )
+                            VkBool32 sample_shading, VkBool32 depth_write, VkBool32 bounds,
+                            VkBool32 probe )
 {
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -115,8 +126,9 @@ static VkPipeline pipeline( VkPipelineLayout layout, VkShaderModule vs, VkShader
     };
     VkPipelineDepthStencilStateCreateInfo ds = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = depth_write, .depthWriteEnable = depth_write,
-        .depthCompareOp = VK_COMPARE_OP_ALWAYS, .depthBoundsTestEnable = bounds,
+        .depthTestEnable = depth_write || probe, .depthWriteEnable = depth_write,
+        .depthCompareOp = probe ? VK_COMPARE_OP_LESS : VK_COMPARE_OP_ALWAYS,
+        .depthBoundsTestEnable = bounds,
         .minDepthBounds = 0.3f, .maxDepthBounds = 0.65f,
     };
     VkPipelineColorBlendAttachmentState blend_attachment = {
@@ -179,10 +191,10 @@ int main( void )
     vkGetPhysicalDeviceProperties( physical, &props );
     vkGetPhysicalDeviceFeatures( physical, &features );
     printf( "device: %s\n", props.deviceName );
-    if (!features.depthBounds || !features.sampleRateShading)
+    if (!features.depthBounds || !features.sampleRateShading || !features.pipelineStatisticsQuery)
     {
-        printf( "skip: depthBounds %u, sampleRateShading %u\n", features.depthBounds,
-                features.sampleRateShading );
+        printf( "skip: depthBounds %u, sampleRateShading %u, pipelineStatisticsQuery %u\n",
+                features.depthBounds, features.sampleRateShading, features.pipelineStatisticsQuery );
         return 77;
     }
 
@@ -193,7 +205,9 @@ int main( void )
     VkPhysicalDeviceVulkan13Features features13 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .dynamicRendering = VK_TRUE,
     };
-    VkPhysicalDeviceFeatures enable = {.depthBounds = VK_TRUE, .sampleRateShading = VK_TRUE};
+    VkPhysicalDeviceFeatures enable = {
+        .depthBounds = VK_TRUE, .sampleRateShading = VK_TRUE, .pipelineStatisticsQuery = VK_TRUE,
+    };
     const char *device_ext[] = {"VK_KHR_portability_subset"};
     VkDeviceCreateInfo device_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &features13, .queueCreateInfoCount = 1,
@@ -251,15 +265,25 @@ int main( void )
     {
         const char *name;
         VkBool32 depth_write;
-        int mask, draw_first;
+        int mask, draw_first, stats, early;
         unsigned expect;
     } cases[] = {
-        {"plain", VK_FALSE, 0, 0, 128},
-        {"writing depth", VK_TRUE, 0, 0, 128},
-        {"writing sample mask 0x5", VK_FALSE, 1, 0, 64},
-        {"after a bounds draw before the depth", VK_FALSE, 0, 1, 128},
+        {"plain", VK_FALSE, 0, 0, 0, 0, 128},
+        {"writing depth", VK_TRUE, 0, 0, 0, 0, 128},
+        {"writing sample mask 0x5", VK_FALSE, 1, 0, 0, 0, 64},
+        {"after a bounds draw before the depth", VK_FALSE, 0, 1, 0, 0, 128},
+        {"writing depth in a statistics query", VK_TRUE, 0, 0, 1, 0, 128},
+        {"writing depth with early fragment tests", VK_TRUE, 0, 0, 0, 1, 128},
     };
     VkShaderModule red_mask = shader( fs_red_mask_spv, sizeof(fs_red_mask_spv) );
+    VkShaderModule fs_probe = shader( fs_probe_spv, sizeof(fs_probe_spv) );
+    VkShaderModule red_early = shader( fs_red_early_spv, sizeof(fs_red_early_spv) );
+    VkQueryPoolCreateInfo query_info = {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_PIPELINE_STATISTICS,
+        .queryCount = 1, .pipelineStatistics = VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT,
+    };
+    VkQueryPool query;
+    CHECK( vkCreateQueryPool( device, &query_info, NULL, &query ) );
 
     VkCommandPoolCreateInfo pool_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     VkCommandPool pool;
@@ -285,12 +309,14 @@ int main( void )
         }
         CHECK( vkCreatePipelineCache( device, &cache_info, NULL, &cache ) );
         free( cache_data );
-        VkPipeline fill = pipeline( layout, vs, fs_depth, VK_TRUE, VK_TRUE, VK_FALSE );
+        VkPipeline fill = pipeline( layout, vs, fs_depth, VK_TRUE, VK_TRUE, VK_FALSE, VK_FALSE );
+        VkPipeline probe = pipeline( layout, vs, fs_probe, VK_FALSE, VK_FALSE, VK_FALSE, VK_TRUE );
 
         for (unsigned c = 0; c < sizeof(cases) / sizeof(cases[0]); c++)
         {
-            VkPipeline draw = pipeline( layout, vs, cases[c].mask ? red_mask : red, VK_FALSE,
-                                        cases[c].depth_write, VK_TRUE );
+            VkPipeline draw = pipeline( layout, vs, cases[c].mask ? red_mask : cases[c].early ? red_early : red,
+                                        VK_FALSE,
+                                        cases[c].depth_write, VK_TRUE, VK_FALSE );
             VkCommandBufferAllocateInfo cmd_info = {
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = pool,
                 .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1,
@@ -299,6 +325,7 @@ int main( void )
             CHECK( vkAllocateCommandBuffers( device, &cmd_info, &cmd ) );
             VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
             CHECK( vkBeginCommandBuffer( cmd, &begin ) );
+            if (cases[c].stats) vkCmdResetQueryPool( cmd, query, 0, 1 );
             barrier( cmd, depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                      VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL );
             barrier( cmd, color, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -331,7 +358,11 @@ int main( void )
             }
             vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, fill );
             vkCmdDraw( cmd, 3, 1, 0, 0 );
+            if (cases[c].stats) vkCmdBeginQuery( cmd, query, 0, 0 );
             vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw );
+            vkCmdDraw( cmd, 3, 1, 0, 0 );
+            if (cases[c].stats) vkCmdEndQuery( cmd, query, 0 );
+            vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, probe );
             vkCmdDraw( cmd, 3, 1, 0, 0 );
             vkCmdEndRendering( cmd );
             barrier( cmd, resolve, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -354,15 +385,18 @@ int main( void )
             CHECK( vkQueueSubmit( queue, 1, &submit, VK_NULL_HANDLE ) );
             CHECK( vkQueueWaitIdle( queue ) );
 
-            unsigned bad = 0, first = pixels[0];
+            unsigned bad = 0, first = pixels[0], green = pixels[1];
             for (unsigned i = 0; i < SIZE * SIZE; i++)
-                if (abs( (int)pixels[i * 4] - (int)cases[c].expect ) > 2) bad++;
-            printf( "%s: red %u (expected %u), %u of %u pixels off\n", cases[c].name, first,
-                    cases[c].expect, bad, SIZE * SIZE );
+                if (abs( (int)pixels[i * 4] - (int)cases[c].expect ) > 2 ||
+                    abs( (int)pixels[i * 4 + 1] - 64 ) > 2)
+                    bad++;
+            printf( "%s: red %u (expected %u), green %u (expected 64), %u of %u pixels off\n",
+                    cases[c].name, first, cases[c].expect, green, bad, SIZE * SIZE );
             if (bad) failed++;
             vkDestroyPipeline( device, draw, NULL );
         }
         vkDestroyPipeline( device, fill, NULL );
+        vkDestroyPipeline( device, probe, NULL );
     }
     printf( "%s\n", failed ? "FAIL" : "PASS" );
     return failed ? 1 : 0;

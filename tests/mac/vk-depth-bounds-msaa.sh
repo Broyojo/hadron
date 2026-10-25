@@ -43,8 +43,27 @@ void main()
     color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 EOF
+cat > "$OUT/vk-depth-bounds-msaa-red-early.frag" <<'EOF'
+#version 450
+layout(early_fragment_tests) in;
+layout(location = 0) out vec4 color;
+void main()
+{
+    color = vec4(1.0, 0.0, 0.0, 1.0);
+}
+EOF
+cat > "$OUT/vk-depth-bounds-msaa-probe.frag" <<'EOF'
+#version 450
+layout(location = 0) out vec4 color;
+void main()
+{
+    gl_FragDepth = 0.7;
+    color = vec4(0.0, 1.0, 0.0, 1.0);
+}
+EOF
 for s in vk-depth-bounds-msaa.vert vk-depth-bounds-msaa-depth.frag vk-depth-bounds-msaa-red.frag \
-         vk-depth-bounds-msaa-red-mask.frag; do
+         vk-depth-bounds-msaa-red-mask.frag vk-depth-bounds-msaa-probe.frag \
+         vk-depth-bounds-msaa-red-early.frag; do
     glslc -mfmt=c "$OUT/$s" -o "$OUT/$s.inc"
 done
 clang -O1 -Wall "$ROOT/tests/mac/vk-depth-bounds-msaa.c" -I"$OUT" -I"$BREW/include" -L"$BREW/lib" \
