@@ -1,0 +1,232 @@
+From 43128926d3a11e3a1ab4b7922fb4fff989629b5a Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 26 Oct 2026 15:09:46 -0400
+Subject: [PATCH] winemac.drv: Report raw mouse movement in points.
+
+Raw input took its movement from the cursor's position, which is in
+pixels in Retina mode, so mouselook turned twice as fast there. Like the
+X11 and Wayland drivers, send the raw movement separately. Take it from
+the event's location in points, starting again where a warp put the
+cursor: the deltas of the first event after a warp include the warp,
+which games that put the cursor back after each move do every frame.
+---
+ dlls/winemac.drv/cocoa_app.h    |  3 +++
+ dlls/winemac.drv/cocoa_app.m    | 38 ++++++++++++++++++++++++++++++++-
+ dlls/winemac.drv/cocoa_event.m  |  2 ++
+ dlls/winemac.drv/macdrv_cocoa.h |  2 ++
+ dlls/winemac.drv/mouse.c        | 29 ++++++++++++++++---------
+ 5 files changed, 63 insertions(+), 11 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.h b/dlls/winemac.drv/cocoa_app.h
+index 14539ec1be..be69d04cc0 100644
+--- a/dlls/winemac.drv/cocoa_app.h
++++ b/dlls/winemac.drv/cocoa_app.h
+@@ -69,6 +69,9 @@ @interface WineApplicationController : NSObject <NSApplicationDelegate>
+     WineWindow* mouseCaptureWindow;
+     BOOL forceNextMouseMoveAbsolute;
+     double mouseMoveDeltaX, mouseMoveDeltaY;
++    double rawMoveDeltaX, rawMoveDeltaY;
++    CGPoint rawMovePoint;
++    BOOL rawMovePointValid;
+     NSUInteger unmatchedMouseDowns;
+ 
+     NSTimeInterval lastScrollTime;
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index c42327430d..f3a23ce5d2 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -1278,6 +1278,10 @@ - (BOOL) setCursorPosition:(CGPoint)pos
+         {
+             WineEventQueue* queue;
+ 
++            // Raw movement goes on from where the cursor was put.
++            rawMovePoint = pos;
++            rawMovePointValid = TRUE;
++
+             // Discard all pending mouse move events.
+             [eventQueuesLock lock];
+             for (queue in eventQueues)
+@@ -1451,6 +1455,7 @@ - (void) handleMouseMove:(NSEvent*)anEvent
+             CGPoint point = CGEventGetLocation([anEvent CGEvent]);
+             macdrv_event* event;
+             BOOL absolute;
++            int raw_x, raw_y;
+ 
+             // If we recently warped the cursor (other than in our cursor-clipping
+             // event tap), discard mouse move events until we see an event which is
+@@ -1520,6 +1525,19 @@ - (void) handleMouseMove:(NSEvent*)anEvent
+             {
+                 if (self.clippingCursor)
+                     [clipCursorHandler clipCursorLocation:&point];
++
++                // Raw input reports the movement in points, which doesn't
++                // depend on the display's pixel density, as on Windows.  It's
++                // taken from the location, not the event's deltas: those
++                // include the cursor's last warp.
++                if (rawMovePointValid)
++                {
++                    rawMoveDeltaX += point.x - rawMovePoint.x;
++                    rawMoveDeltaY += point.y - rawMovePoint.y;
++                }
++                rawMovePoint = point;
++                rawMovePointValid = TRUE;
++
+                 point = cgpoint_win_from_mac(point);
+ 
+                 event = macdrv_create_event(MOUSE_MOVED_ABSOLUTE, targetWindow);
+@@ -1537,6 +1555,12 @@ - (void) handleMouseMove:(NSEvent*)anEvent
+                 /* deltaY is already flipped */
+                 mouseMoveDeltaX += [anEvent deltaX];
+                 mouseMoveDeltaY += [anEvent deltaY];
++                rawMoveDeltaX += [anEvent deltaX];
++                rawMoveDeltaY += [anEvent deltaY];
++                if (self.clippingCursor)
++                    [clipCursorHandler clipCursorLocation:&point];
++                rawMovePoint = point;
++                rawMovePointValid = TRUE;
+ 
+                 event = macdrv_create_event(MOUSE_MOVED_RELATIVE, targetWindow);
+                 event->mouse_moved.x = mouseMoveDeltaX * scale;
+@@ -1547,7 +1571,16 @@ - (void) handleMouseMove:(NSEvent*)anEvent
+                 mouseMoveDeltaY -= event->mouse_moved.y / scale;
+             }
+ 
+-            if (event->type == MOUSE_MOVED_ABSOLUTE || event->mouse_moved.x || event->mouse_moved.y)
++            /* Keep the remainder after integer truncation. */
++            raw_x = rawMoveDeltaX;
++            raw_y = rawMoveDeltaY;
++            rawMoveDeltaX -= raw_x;
++            rawMoveDeltaY -= raw_y;
++            event->mouse_moved.raw_x = raw_x;
++            event->mouse_moved.raw_y = raw_y;
++
++            if (event->type == MOUSE_MOVED_ABSOLUTE || event->mouse_moved.x || event->mouse_moved.y ||
++                event->mouse_moved.raw_x || event->mouse_moved.raw_y)
+             {
+                 event->mouse_moved.time_ms = [self ticksForEventTime:[anEvent timestamp]];
+                 event->mouse_moved.drag = drag;
+@@ -1560,7 +1593,10 @@ - (void) handleMouseMove:(NSEvent*)anEvent
+             lastTargetWindow = targetWindow;
+         }
+         else
++        {
+             lastTargetWindow = nil;
++            rawMovePointValid = FALSE;
++        }
+ 
+         [self updateCursor:FALSE];
+     }
+diff --git a/dlls/winemac.drv/cocoa_event.m b/dlls/winemac.drv/cocoa_event.m
+index 3389271a8f..6a62077e1f 100644
+--- a/dlls/winemac.drv/cocoa_event.m
++++ b/dlls/winemac.drv/cocoa_event.m
+@@ -229,6 +229,8 @@ - (void) postEventObject:(MacDrvEvent*)event
+                 lastEvent->event->mouse_moved.x = event->event->mouse_moved.x;
+                 lastEvent->event->mouse_moved.y = event->event->mouse_moved.y;
+             }
++            lastEvent->event->mouse_moved.raw_x += event->event->mouse_moved.raw_x;
++            lastEvent->event->mouse_moved.raw_y += event->event->mouse_moved.raw_y;
+ 
+             lastEvent->event->mouse_moved.time_ms = event->event->mouse_moved.time_ms;
+         }
+diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+index 8f2e9664eb..0c5523654d 100644
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -367,6 +367,8 @@ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
+         struct {
+             int             x;
+             int             y;
++            int             raw_x;
++            int             raw_y;
+             bool            drag;
+             unsigned long   time_ms;
+         }                                           mouse_moved;
+diff --git a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
+index 8c3c2f6ba7..0c9ba0393b 100644
+--- a/dlls/winemac.drv/mouse.c
++++ b/dlls/winemac.drv/mouse.c
+@@ -131,7 +131,7 @@ static const CFStringRef cocoa_cursor_names[] =
+  * Update the various window states on a mouse event.
+  */
+ static void send_mouse_input(HWND hwnd, WineWindow *cocoa_window, UINT flags, int x, int y,
+-                             DWORD mouse_data, BOOL drag, unsigned long time)
++                             DWORD mouse_data, BOOL drag, unsigned long time, const struct raw_mouse *raw)
+ {
+     INPUT input;
+ 
+@@ -143,7 +143,8 @@ static void send_mouse_input(HWND hwnd, WineWindow *cocoa_window, UINT flags, in
+     input.mi.time           = time;
+     input.mi.dwExtraInfo    = 0;
+ 
+-    NtUserSendHardwareInput(hwnd, 0, &input, 0);
++    /* raw input gets the movement in raw, and none from the cursor's position */
++    NtUserSendHardwareInput(hwnd, SEND_HWMSG_RAWINPUT, &input, (LPARAM)raw);
+ }
+ 
+ 
+@@ -713,7 +714,7 @@ void macdrv_set_overlay_active(bool active)
+     for (i = 0; active && i < ARRAY_SIZE(buttons); i++)
+     {
+         if (NtUserGetAsyncKeyState(buttons[i].vkey) & 0x8000)
+-            send_mouse_input(NULL, NULL, buttons[i].up, 0, 0, buttons[i].data, FALSE, NtGetTickCount());
++            send_mouse_input(NULL, NULL, buttons[i].up, 0, 0, buttons[i].data, FALSE, NtGetTickCount(), NULL);
+     }
+ }
+ 
+@@ -934,7 +935,7 @@ void macdrv_mouse_button(HWND hwnd, const macdrv_event *event)
+ 
+     send_mouse_input(hwnd, event->window, flags | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
+                      event->mouse_button.x, event->mouse_button.y,
+-                     data, FALSE, event->mouse_button.time_ms);
++                     data, FALSE, event->mouse_button.time_ms, NULL);
+ }
+ 
+ 
+@@ -946,17 +947,25 @@ void macdrv_mouse_button(HWND hwnd, const macdrv_event *event)
+ void macdrv_mouse_moved(HWND hwnd, const macdrv_event *event)
+ {
+     UINT flags = MOUSEEVENTF_MOVE;
++    struct raw_mouse raw = {0};
+ 
+-    TRACE("win %p/%p %s (%d,%d) drag %d time %lu (%lu ticks ago)\n", hwnd, event->window,
++    TRACE("win %p/%p %s (%d,%d) raw (%d,%d) drag %d time %lu (%lu ticks ago)\n", hwnd, event->window,
+           (event->type == MOUSE_MOVED_RELATIVE) ? "relative" : "absolute",
+-          event->mouse_moved.x, event->mouse_moved.y, event->mouse_moved.drag,
+-          event->mouse_moved.time_ms, (NtGetTickCount() - event->mouse_moved.time_ms));
++          event->mouse_moved.x, event->mouse_moved.y, event->mouse_moved.raw_x, event->mouse_moved.raw_y,
++          event->mouse_moved.drag, event->mouse_moved.time_ms, (NtGetTickCount() - event->mouse_moved.time_ms));
+ 
+     if (event->type == MOUSE_MOVED_ABSOLUTE)
+         flags |= MOUSEEVENTF_ABSOLUTE;
+ 
++    if (event->mouse_moved.raw_x || event->mouse_moved.raw_y)
++    {
++        raw.count = 1;
++        raw.data[0].x = event->mouse_moved.raw_x;
++        raw.data[0].y = event->mouse_moved.raw_y;
++    }
++
+     send_mouse_input(hwnd, event->window, flags, event->mouse_moved.x, event->mouse_moved.y,
+-                     0, event->mouse_moved.drag, event->mouse_moved.time_ms);
++                     0, event->mouse_moved.drag, event->mouse_moved.time_ms, &raw);
+ }
+ 
+ 
+@@ -975,11 +984,11 @@ void macdrv_mouse_scroll(HWND hwnd, const macdrv_event *event)
+     if (event->mouse_scroll.y_scroll)
+         send_mouse_input(hwnd, event->window, MOUSEEVENTF_WHEEL | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
+                          event->mouse_scroll.x, event->mouse_scroll.y,
+-                         event->mouse_scroll.y_scroll, FALSE, event->mouse_scroll.time_ms);
++                         event->mouse_scroll.y_scroll, FALSE, event->mouse_scroll.time_ms, NULL);
+     if (event->mouse_scroll.x_scroll)
+         send_mouse_input(hwnd, event->window, MOUSEEVENTF_HWHEEL | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
+                          event->mouse_scroll.x, event->mouse_scroll.y,
+-                         event->mouse_scroll.x_scroll, FALSE, event->mouse_scroll.time_ms);
++                         event->mouse_scroll.x_scroll, FALSE, event->mouse_scroll.time_ms, NULL);
+ }
+ 
+ 
+-- 
+2.54.0 (Apple Git-157)
+
