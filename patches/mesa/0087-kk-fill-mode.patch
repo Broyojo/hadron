@@ -1,0 +1,621 @@
+From 9fb5b1e954b3fbcb904de61e55c538736bd02388 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 24 Oct 2026 22:09:38 -0400
+Subject: [PATCH] kk: fill mode
+
+Generated-by: LLM
+---
+ src/kosmickrisp/bridge/mtl_encoder.h        |   3 +
+ src/kosmickrisp/bridge/mtl_encoder.m        |  10 +
+ src/kosmickrisp/bridge/mtl_types.h          |   5 +
+ src/kosmickrisp/bridge/stubs/mtl_encoder.c  |   6 +
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h      |   9 +
+ src/kosmickrisp/vulkan/kk_cmd_draw.c        |  83 +++++-
+ src/kosmickrisp/vulkan/kk_physical_device.c |   3 +-
+ src/kosmickrisp/vulkan/kk_shader.c          | 312 +++++++++++++++++++-
+ 8 files changed, 415 insertions(+), 16 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_encoder.h b/src/kosmickrisp/bridge/mtl_encoder.h
+index 90a4238957b..65f2018caba 100644
+--- a/src/kosmickrisp/bridge/mtl_encoder.h
++++ b/src/kosmickrisp/bridge/mtl_encoder.h
+@@ -99,6 +99,9 @@ void mtl_set_front_face_winding(mtl_render_encoder *encoder,
+ 
+ void mtl_set_cull_mode(mtl_render_encoder *encoder, enum mtl_cull_mode mode);
+ 
++void mtl_set_triangle_fill_mode(mtl_render_encoder *encoder,
++                                enum mtl_triangle_fill_mode mode);
++
+ void mtl_set_visibility_result_mode(mtl_render_encoder *encoder,
+                                     enum mtl_visibility_result_mode mode,
+                                     size_t offset);
+diff --git a/src/kosmickrisp/bridge/mtl_encoder.m b/src/kosmickrisp/bridge/mtl_encoder.m
+index 04247430ee4..b356b5237e9 100644
+--- a/src/kosmickrisp/bridge/mtl_encoder.m
++++ b/src/kosmickrisp/bridge/mtl_encoder.m
+@@ -361,6 +361,16 @@
+    }
+ }
+ 
++void
++mtl_set_triangle_fill_mode(mtl_render_encoder *encoder,
++                           enum mtl_triangle_fill_mode mode)
++{
++   @autoreleasepool {
++      id<MTL4RenderCommandEncoder> enc = (id<MTL4RenderCommandEncoder>)encoder;
++      [enc setTriangleFillMode:(MTLTriangleFillMode)mode];
++   }
++}
++
+ void
+ mtl_set_visibility_result_mode(mtl_render_encoder *encoder,
+                                enum mtl_visibility_result_mode mode,
+diff --git a/src/kosmickrisp/bridge/mtl_types.h b/src/kosmickrisp/bridge/mtl_types.h
+index 26a97944424..727a7ddd6cf 100644
+--- a/src/kosmickrisp/bridge/mtl_types.h
++++ b/src/kosmickrisp/bridge/mtl_types.h
+@@ -235,6 +235,11 @@ enum mtl_cull_mode {
+    MTL_CULL_MODE_BACK = 2,
+ };
+ 
++enum mtl_triangle_fill_mode {
++   MTL_TRIANGLE_FILL_MODE_FILL = 0,
++   MTL_TRIANGLE_FILL_MODE_LINES = 1,
++};
++
+ enum mtl_visibility_result_mode {
+    MTL_VISIBILITY_RESULT_MODE_DISABLED = 0,
+    MTL_VISIBILITY_RESULT_MODE_BOOLEAN = 1,
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_encoder.c b/src/kosmickrisp/bridge/stubs/mtl_encoder.c
+index 7ef9fe8e306..38995b506bc 100644
+--- a/src/kosmickrisp/bridge/stubs/mtl_encoder.c
++++ b/src/kosmickrisp/bridge/stubs/mtl_encoder.c
+@@ -179,6 +179,12 @@ mtl_set_cull_mode(mtl_render_encoder *encoder, enum mtl_cull_mode mode)
+ {
+ }
+ 
++void
++mtl_set_triangle_fill_mode(mtl_render_encoder *encoder,
++                           enum mtl_triangle_fill_mode mode)
++{
++}
++
+ void
+ mtl_set_visibility_result_mode(mtl_render_encoder *encoder,
+                                enum mtl_visibility_result_mode mode,
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index eced6407731..c661f343821 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -27,6 +27,12 @@
+ 
+ struct kk_query_pool;
+ 
++enum kk_polygon_cull {
++   KK_POLYGON_CULL_FRONT = BITFIELD_BIT(0),
++   KK_POLYGON_CULL_BACK = BITFIELD_BIT(1),
++   KK_POLYGON_FRONT_CCW = BITFIELD_BIT(2),
++};
++
+ struct kk_root_descriptor_table {
+    uint64_t addr;
+ 
+@@ -43,6 +49,9 @@ struct kk_root_descriptor_table {
+          float viewport_z_range[KK_MAX_VIEWPORTS * 2];
+          uint64_t depth_bounds_texture;
+          float depth_bounds[2];
++         uint32_t polygon_cull;
++         float polygon_depth_bias[4];
++         float polygon_viewport[KK_MAX_VIEWPORTS * 4];
+          bool emulate_depth_clamp;
+          bool emulate_viewport_z;
+       } draw;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index eabbb3bd4d2..236c90bfb8f 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -1470,6 +1470,20 @@ kk_upload_geometry_params(struct kk_cmd_buffer *cmd,
+    return kk_pool_upload(cmd, &params, sizeof(params), 8).gpu;
+ }
+ 
++static bool
++kk_front_face_ccw(struct kk_cmd_buffer *cmd)
++{
++   const struct vk_dynamic_graphics_state *dyn =
++      &cmd->vk.dynamic_graphics_state;
++   bool front_face_ccw = dyn->rs.front_face != VK_FRONT_FACE_CLOCKWISE;
++   if (cmd->state.shaders[MESA_SHADER_TESS_EVAL]) {
++      front_face_ccw ^= cmd->state.gfx.tess.info.ccw;
++      front_face_ccw ^=
++         dyn->ts.domain_origin == VK_TESSELLATION_DOMAIN_ORIGIN_LOWER_LEFT;
++   }
++   return front_face_ccw;
++}
++
+ static void
+ kk_flush_dynamic_state(struct kk_cmd_buffer *cmd)
+ {
+@@ -1513,6 +1527,12 @@ kk_flush_dynamic_state(struct kk_cmd_buffer *cmd)
+       }
+    }
+ 
++   if (IS_DIRTY(RS_POLYGON_MODE)) {
++      mtl_set_triangle_fill_mode(enc, dyn->rs.polygon_mode == VK_POLYGON_MODE_LINE
++                                         ? MTL_TRIANGLE_FILL_MODE_LINES
++                                         : MTL_TRIANGLE_FILL_MODE_FILL);
++   }
++
+    /* We enable raster discard by setting scissor to size (0, 0) */
+    if (!(dyn->rs.rasterizer_discard_enable || gfx->is_cull_front_and_back) &&
+        (IS_DIRTY(VP_VIEWPORT_COUNT) || IS_DIRTY(VP_VIEWPORTS) ||
+@@ -1528,17 +1548,66 @@ kk_flush_dynamic_state(struct kk_cmd_buffer *cmd)
+ 
+    if (IS_DIRTY(RS_FRONT_FACE) || IS_DIRTY(TS_DOMAIN_ORIGIN) ||
+        IS_SHADER_DIRTY(TESS_CTRL) || IS_SHADER_DIRTY(TESS_EVAL)) {
+-      bool front_face_ccw = dyn->rs.front_face != VK_FRONT_FACE_CLOCKWISE;
+-      if (cmd->state.shaders[MESA_SHADER_TESS_EVAL]) {
+-         front_face_ccw ^= gfx->tess.info.ccw;
+-         front_face_ccw ^=
+-            dyn->ts.domain_origin == VK_TESSELLATION_DOMAIN_ORIGIN_LOWER_LEFT;
+-      }
+-      mtl_set_front_face_winding(enc, front_face_ccw
++      mtl_set_front_face_winding(enc, kk_front_face_ccw(cmd)
+                                          ? MTL_WINDING_COUNTER_CLOCKWISE
+                                          : MTL_WINDING_CLOCKWISE);
+    }
+ 
++   if (IS_DIRTY(RS_CULL_MODE) || IS_DIRTY(RS_FRONT_FACE) ||
++       IS_DIRTY(TS_DOMAIN_ORIGIN) || IS_SHADER_DIRTY(TESS_CTRL) ||
++       IS_SHADER_DIRTY(TESS_EVAL)) {
++      uint32_t cull = 0;
++      if (dyn->rs.cull_mode & VK_CULL_MODE_FRONT_BIT)
++         cull |= KK_POLYGON_CULL_FRONT;
++      if (dyn->rs.cull_mode & VK_CULL_MODE_BACK_BIT)
++         cull |= KK_POLYGON_CULL_BACK;
++      if (kk_front_face_ccw(cmd))
++         cull |= KK_POLYGON_FRONT_CCW;
++      desc->root.draw.polygon_cull = cull;
++      desc->root_dirty = true;
++   }
++
++   if (IS_DIRTY(VP_VIEWPORT_COUNT) || IS_DIRTY(VP_VIEWPORTS) ||
++       IS_DIRTY(VP_DEPTH_CLIP_NEGATIVE_ONE_TO_ONE)) {
++      for (uint32_t i = 0; i < dyn->vp.viewport_count; i++) {
++         const VkViewport *vp = &dyn->vp.viewports[i];
++         float pz = vp->maxDepth - vp->minDepth;
++         float *out = &desc->root.draw.polygon_viewport[i * 4];
++         out[0] = vp->width * 0.5f;
++         out[1] = vp->height * 0.5f;
++         if (dyn->vp.depth_clip_negative_one_to_one) {
++            out[2] = pz * 0.5f;
++            out[3] = vp->minDepth + pz * 0.5f;
++         } else {
++            out[2] = pz;
++            out[3] = vp->minDepth;
++         }
++      }
++      desc->root_dirty = true;
++   }
++
++   if (IS_DIRTY(RS_DEPTH_BIAS_FACTORS) || IS_DIRTY(RS_DEPTH_BIAS_ENABLE)) {
++      float *bias = desc->root.draw.polygon_depth_bias;
++      bool enable = dyn->rs.depth_bias.enable;
++      bias[0] = enable ? dyn->rs.depth_bias.constant_factor : 0.0f;
++      bias[1] = enable ? dyn->rs.depth_bias.slope_factor : 0.0f;
++      bias[2] = enable ? dyn->rs.depth_bias.clamp : 0.0f;
++      switch (gfx->render.depth_att.vk_format) {
++      case VK_FORMAT_D16_UNORM:
++      case VK_FORMAT_D16_UNORM_S8_UINT:
++         bias[3] = 1.0f / 65536.0f;
++         break;
++      case VK_FORMAT_X8_D24_UNORM_PACK32:
++      case VK_FORMAT_D24_UNORM_S8_UINT:
++         bias[3] = 1.0f / 16777216.0f;
++         break;
++      default:
++         bias[3] = 0.0f;
++         break;
++      }
++      desc->root_dirty = true;
++   }
++
+    if (IS_DIRTY(RS_DEPTH_BIAS_FACTORS) || IS_DIRTY(RS_DEPTH_BIAS_ENABLE)) {
+       if (dyn->rs.depth_bias.enable)
+          mtl_set_depth_bias(enc, dyn->rs.depth_bias.constant_factor,
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index b1634a9ac75..64f57cfb398 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -233,6 +233,7 @@ kk_get_device_features(
+       .alphaToOne = true,
+       .depthBiasClamp = true,
+       .depthBounds = true,
++      .fillModeNonSolid = true,
+       .depthClamp = true,
+       .drawIndirectFirstInstance = true,
+       .dualSrcBlend = true,
+@@ -856,7 +857,7 @@ kk_get_device_properties(
+       .earlyFragmentMultisampleCoverageAfterSampleCounting = true,
+       .earlyFragmentSampleMaskTestBeforeSampleCounting = false,
+       .depthStencilSwizzleOneSupport = true,
+-      .polygonModePointSize = false,
++      .polygonModePointSize = true,
+       .nonStrictSinglePixelWideLinesUseParallelogram = false,
+       .nonStrictWideLinesUseParallelogram = false,
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 79a65cd737b..6fa4d59cfeb 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -2401,13 +2401,285 @@ kk_fold_io_offset(nir_builder *b, nir_intrinsic_instr *intr, void *data)
+    return true;
+ }
+ 
++static nir_def *
++kk_load_root_vec4_indexed(nir_builder *b, unsigned offset, nir_def *index)
++{
++   nir_def *root = nir_load_buffer_ptr_kk(b, 1, 64, .binding = 0);
++   nir_def *addr = nir_iadd(
++      b, nir_iadd_imm(b, root, offset),
++      nir_u2u64(b, nir_imul_imm(b, index, 4 * sizeof(float))));
++   return nir_build_load_global_constant(b, 4, 32, addr, .align_mul = 4,
++                                         .access = ACCESS_CAN_SPECULATE);
++}
++
++static nir_def *
++kk_polygon_point_test(nir_builder *b, nir_def **pos, nir_def *viewport,
++                      nir_def **dz_out)
++{
++   nir_def *vp = kk_load_root_vec4_indexed(
++      b, offsetof(struct kk_root_descriptor_table, draw.polygon_viewport),
++      viewport);
++   nir_def *k = nir_channel(b, vp, 2);
++
++   nir_def *x[3], *y[3], *z[3], *w[3];
++   for (unsigned i = 0; i < 3; i++) {
++      w[i] = nir_channel(b, pos[i], 3);
++      x[i] = nir_fmul(b, nir_fdiv(b, nir_channel(b, pos[i], 0), w[i]),
++                      nir_channel(b, vp, 0));
++      y[i] = nir_fmul(b, nir_fdiv(b, nir_channel(b, pos[i], 1), w[i]),
++                      nir_channel(b, vp, 1));
++      z[i] = nir_ffma(b, nir_fdiv(b, nir_channel(b, pos[i], 2), w[i]), k,
++                      nir_channel(b, vp, 3));
++   }
++   nir_def *e1x = nir_fsub(b, x[1], x[0]), *e1y = nir_fsub(b, y[1], y[0]);
++   nir_def *e1z = nir_fsub(b, z[1], z[0]);
++   nir_def *e2x = nir_fsub(b, x[2], x[0]), *e2y = nir_fsub(b, y[2], y[0]);
++   nir_def *e2z = nir_fsub(b, z[2], z[0]);
++   nir_def *cross =
++      nir_fsub(b, nir_fmul(b, e1x, e2y), nir_fmul(b, e1y, e2x));
++   nir_def *degenerate = nir_feq_imm(b, cross, 0.0f);
++
++   nir_def *cull = kk_load_root_constant(
++      b, 1, 32, offsetof(struct kk_root_descriptor_table, draw.polygon_cull));
++   nir_def *positive = nir_fgt_imm(b, cross, 0.0f);
++   nir_def *ccw = nir_i2b(b, nir_iand_imm(b, cull, KK_POLYGON_FRONT_CCW));
++   nir_def *front = nir_ieq(b, positive, nir_inot(b, ccw));
++   nir_def *cull_front =
++      nir_i2b(b, nir_iand_imm(b, cull, KK_POLYGON_CULL_FRONT));
++   nir_def *cull_back =
++      nir_i2b(b, nir_iand_imm(b, cull, KK_POLYGON_CULL_BACK));
++   nir_def *culled = nir_bcsel(b, degenerate,
++                               nir_ior(b, cull_front, cull_back),
++                               nir_bcsel(b, front, cull_front, cull_back));
++
++   nir_def *bias = kk_load_root_constant(
++      b, 4, 32,
++      offsetof(struct kk_root_descriptor_table, draw.polygon_depth_bias));
++   nir_def *safe_cross = nir_bcsel(b, degenerate, nir_imm_float(b, 1.0f),
++                                   cross);
++   nir_def *dzdx = nir_fdiv(
++      b, nir_fsub(b, nir_fmul(b, e1z, e2y), nir_fmul(b, e1y, e2z)),
++      safe_cross);
++   nir_def *dzdy = nir_fdiv(
++      b, nir_fsub(b, nir_fmul(b, e1x, e2z), nir_fmul(b, e1z, e2x)),
++      safe_cross);
++   nir_def *m = nir_bcsel(b, degenerate, nir_imm_float(b, 0.0f),
++                          nir_fmax(b, nir_fabs(b, dzdx), nir_fabs(b, dzdy)));
++   nir_def *zmax = nir_fmax(b, nir_fmax(b, z[0], z[1]), z[2]);
++   nir_def *float_r = nir_fexp2(
++      b, nir_fadd_imm(b,
++                       nir_ffloor(b, nir_flog2(b, nir_fmax_imm(
++                                                       b, nir_fabs(b, zmax),
++                                                       0x1p-126f))),
++                       -23.0f));
++   nir_def *unorm_r = nir_channel(b, bias, 3);
++   nir_def *r = nir_bcsel(b, nir_feq_imm(b, unorm_r, 0.0f), float_r,
++                          unorm_r);
++   nir_def *o = nir_ffma(b, m, nir_channel(b, bias, 1),
++                         nir_fmul(b, r, nir_channel(b, bias, 0)));
++   nir_def *clamp = nir_channel(b, bias, 2);
++   o = nir_bcsel(b, nir_fgt_imm(b, clamp, 0.0f), nir_fmin(b, o, clamp),
++                 nir_bcsel(b, nir_flt_imm(b, clamp, 0.0f),
++                           nir_fmax(b, o, clamp), o));
++   nir_def *dz = nir_bcsel(b, nir_feq_imm(b, k, 0.0f),
++                           nir_imm_float(b, 0.0f), nir_fdiv(b, o, k));
++
++   *dz_out = dz;
++   return culled;
++}
++
++static void
++kk_emit_polygon_points(nir_shader *gs)
++{
++   nir_function_impl *impl = nir_shader_get_entrypoint(gs);
++   nir_cf_list body;
++   nir_cf_extract(&body, nir_before_impl(impl), nir_after_impl(impl));
++   nir_builder b = nir_builder_at(nir_before_impl(impl));
++
++   nir_def *viewport = nir_imm_int(&b, 0);
++   if (gs->info.inputs_read & VARYING_BIT_VIEWPORT) {
++      nir_io_semantics vp_sem = {.location = VARYING_SLOT_VIEWPORT,
++                                 .num_slots = 1};
++      viewport = nir_load_per_vertex_input(
++         &b, 1, 32, nir_imm_int(&b, 0), nir_imm_int(&b, 0),
++         .io_semantics = vp_sem, .dest_type = nir_type_int32);
++   }
++
++   nir_io_semantics pos_sem = {.location = VARYING_SLOT_POS, .num_slots = 1};
++   nir_def *pos[3], *w[3];
++   for (unsigned i = 0; i < 3; i++) {
++      pos[i] = nir_load_per_vertex_input(
++         &b, 4, 32, nir_imm_int(&b, i), nir_imm_int(&b, 0),
++         .io_semantics = pos_sem, .dest_type = nir_type_float32);
++      w[i] = nir_channel(&b, pos[i], 3);
++   }
++   nir_def *dz;
++   nir_def *culled = kk_polygon_point_test(&b, pos, viewport, &dz);
++
++   nir_push_if(&b, nir_inot(&b, culled));
++   nir_cf_reinsert(&body, b.cursor);
++   nir_pop_if(&b, NULL);
++
++   nir_foreach_block(block, impl) {
++      nir_foreach_instr(instr, block) {
++         if (instr->type != nir_instr_type_intrinsic)
++            continue;
++         nir_intrinsic_instr *store = nir_instr_as_intrinsic(instr);
++         if (store->intrinsic != nir_intrinsic_store_output ||
++             nir_intrinsic_io_semantics(store).location != VARYING_SLOT_POS ||
++             nir_intrinsic_component(store) != 2)
++            continue;
++         nir_instr *src = nir_def_instr(store->src[0].ssa);
++         if (src->type == nir_instr_type_alu)
++            src = nir_def_instr(nir_instr_as_alu(src)->src[0].src.ssa);
++         nir_intrinsic_instr *load = nir_instr_as_intrinsic(src);
++         assert(load->intrinsic == nir_intrinsic_load_per_vertex_input);
++         unsigned vertex = nir_src_as_uint(load->src[0]);
++         b.cursor = nir_before_instr(instr);
++         nir_src_rewrite(&store->src[0],
++                         nir_ffma(&b, dz, w[vertex], store->src[0].ssa));
++      }
++   }
++
++   gs->info.gs.output_primitive = MESA_PRIM_POINTS;
++   nir_progress(true, impl, nir_metadata_none);
++}
++
++static bool
++kk_nir_gs_polygon_points(nir_shader *nir)
++{
++   if (nir->info.gs.output_primitive != MESA_PRIM_TRIANGLE_STRIP ||
++       nir->xfb_info || nir->info.gs.active_stream_mask > 1)
++      return false;
++
++   nir_variable *pos_var = nir_find_variable_with_location(
++      nir, nir_var_shader_out, VARYING_SLOT_POS);
++   if (pos_var == NULL)
++      return false;
++
++   nir_function_impl *impl = nir_shader_get_entrypoint(nir);
++   unsigned count = 0;
++   nir_foreach_shader_out_variable(var, nir)
++      count++;
++
++   nir_variable *outputs[count], *cur[count], *ring[3][count];
++   unsigned n = 0, pos_index = 0, vp_index = UINT32_MAX;
++   nir_foreach_shader_out_variable(var, nir) {
++      if (var == pos_var)
++         pos_index = n;
++      if (var->data.location == VARYING_SLOT_VIEWPORT)
++         vp_index = n;
++      outputs[n] = var;
++      cur[n] = nir_local_variable_create(impl, var->type, "kk_out");
++      for (unsigned r = 0; r < 3; r++)
++         ring[r][n] = nir_local_variable_create(impl, var->type, "kk_ring");
++      n++;
++   }
++
++   nir_foreach_block(block, impl) {
++      nir_foreach_instr(instr, block) {
++         if (instr->type != nir_instr_type_deref)
++            continue;
++         nir_deref_instr *deref = nir_instr_as_deref(instr);
++         if (deref->deref_type != nir_deref_type_var)
++            continue;
++         for (unsigned i = 0; i < count; i++) {
++            if (deref->var == outputs[i])
++               deref->var = cur[i];
++         }
++      }
++   }
++   nir_fixup_deref_modes(nir);
++
++   nir_variable *emitted =
++      nir_local_variable_create(impl, glsl_uint_type(), "kk_emitted");
++   nir_builder b = nir_builder_at(nir_before_impl(impl));
++   nir_store_var(&b, emitted, nir_imm_int(&b, 0), 1);
++
++   nir_foreach_block_safe(block, impl) {
++      nir_foreach_instr_safe(instr, block) {
++         if (instr->type != nir_instr_type_intrinsic)
++            continue;
++         nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++         b.cursor = nir_before_instr(instr);
++
++         if (intr->intrinsic == nir_intrinsic_end_primitive) {
++            nir_store_var(&b, emitted, nir_imm_int(&b, 0), 1);
++            nir_instr_remove(instr);
++            continue;
++         }
++         if (intr->intrinsic != nir_intrinsic_emit_vertex)
++            continue;
++
++         for (unsigned i = 0; i < count; i++) {
++            nir_copy_var(&b, ring[0][i], ring[1][i]);
++            nir_copy_var(&b, ring[1][i], ring[2][i]);
++            nir_copy_var(&b, ring[2][i], cur[i]);
++         }
++         nir_def *c = nir_iadd_imm(&b, nir_load_var(&b, emitted), 1);
++         nir_store_var(&b, emitted, c, 1);
++
++         nir_push_if(&b, nir_uge_imm(&b, c, 3));
++         {
++            nir_def *p[3];
++            for (unsigned r = 0; r < 3; r++)
++               p[r] = nir_load_var(&b, ring[r][pos_index]);
++            nir_def *even = nir_i2b(&b, nir_iand_imm(&b, c, 1));
++            nir_def *tri[3] = {
++               nir_bcsel(&b, even, p[0], p[1]),
++               nir_bcsel(&b, even, p[1], p[0]),
++               p[2],
++            };
++            nir_def *viewport =
++               vp_index == UINT32_MAX
++                  ? nir_imm_int(&b, 0)
++                  : nir_load_var(&b, ring[0][vp_index]);
++            nir_def *dz;
++            nir_def *culled =
++               kk_polygon_point_test(&b, tri, viewport, &dz);
++            nir_push_if(&b, nir_inot(&b, culled));
++            for (unsigned r = 0; r < 3; r++) {
++               for (unsigned i = 0; i < count; i++)
++                  nir_copy_var(&b, outputs[i], ring[r][i]);
++               nir_def *pos = p[r];
++               nir_store_var(&b, pos_var,
++                             nir_vector_insert_imm(
++                                &b, pos,
++                                nir_ffma(&b, dz, nir_channel(&b, pos, 3),
++                                         nir_channel(&b, pos, 2)),
++                                2),
++                             0xf);
++               nir_emit_vertex(&b, 0);
++            }
++            nir_pop_if(&b, NULL);
++         }
++         nir_pop_if(&b, NULL);
++         nir_instr_remove(instr);
++      }
++   }
++
++   nir->info.gs.output_primitive = MESA_PRIM_POINTS;
++   nir->info.gs.vertices_out = MAX2(3 * ((int)nir->info.gs.vertices_out - 2), 1);
++   nir_progress(true, impl, nir_metadata_none);
++
++   NIR_PASS(_, nir, nir_split_var_copies);
++   NIR_PASS(_, nir, nir_lower_var_copies);
++   NIR_PASS(_, nir, nir_lower_indirect_derefs_to_if_else_trees, nir_var_function_temp,
++            UINT32_MAX);
++   NIR_PASS(_, nir, nir_lower_vars_to_ssa);
++   NIR_PASS(_, nir, nir_remove_dead_variables, nir_var_function_temp, NULL);
++   return true;
++}
++
+ static nir_shader *
+ kk_create_passthrough_gs(struct kk_device *dev, nir_shader *prev,
+-                         const struct vk_graphics_pipeline_state *state)
++                         const struct vk_graphics_pipeline_state *state,
++                         bool polygon_points)
+ {
+    const nir_xfb_info *xfb = prev->xfb_info;
++   unsigned xfb_outputs = xfb ? xfb->output_count : 0;
+    struct poly_passthrough_gs_key *key =
+-      calloc(1, poly_passthrough_gs_key_size(xfb->output_count));
++      calloc(1, poly_passthrough_gs_key_size(xfb_outputs));
+    if (key == NULL)
+       return NULL;
+ 
+@@ -2415,8 +2687,10 @@ kk_create_passthrough_gs(struct kk_device *dev, nir_shader *prev,
+    kk_gather_output_types(prev, key);
+    key->clip_distance_array_size = prev->info.clip_distance_array_size;
+    key->cull_distance_array_size = prev->info.cull_distance_array_size;
+-   memcpy(key->xfb_stride, prev->info.xfb_stride, sizeof(key->xfb_stride));
+-   memcpy(&key->xfb_info, xfb, nir_xfb_info_size(xfb->output_count));
++   if (xfb_outputs) {
++      memcpy(key->xfb_stride, prev->info.xfb_stride, sizeof(key->xfb_stride));
++      memcpy(&key->xfb_info, xfb, nir_xfb_info_size(xfb_outputs));
++   }
+ 
+    if (prev->info.stage == MESA_SHADER_TESS_EVAL) {
+       if (prev->info.tess.point_mode)
+@@ -2439,10 +2713,13 @@ kk_create_passthrough_gs(struct kk_device *dev, nir_shader *prev,
+ 
+    nir_shader *gs = b.shader;
+    gs->info.io_lowered = true;
++   if (polygon_points)
++      kk_emit_polygon_points(gs);
+    nir_shader_gather_info(gs, nir_shader_get_entrypoint(gs));
+    NIR_PASS(_, gs, nir_shader_intrinsics_pass, kk_fold_io_offset,
+             nir_metadata_control_flow, NULL);
+-   NIR_PASS(_, gs, nir_io_add_intrinsic_xfb_info);
++   if (xfb_outputs)
++      NIR_PASS(_, gs, nir_io_add_intrinsic_xfb_info);
+    return gs;
+ }
+ 
+@@ -2466,6 +2743,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+    struct kk_shader *shaders[shader_count + 2u];
+ 
+    int xfb_stage = -1;
++   bool polygon_points = false;
+    if (state) {
+       bool has_gs = false;
+       for (uint32_t i = 0u; i < shader_count; ++i) {
+@@ -2476,8 +2754,22 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+             xfb_stage = i;
+       }
+ 
+-      if (has_gs || xfb_stage < 0 || infos[xfb_stage].nir->xfb_info == NULL ||
+-          infos[xfb_stage].nir->xfb_info->output_count == 0)
++      bool has_xfb = xfb_stage >= 0 && infos[xfb_stage].nir->xfb_info &&
++                     infos[xfb_stage].nir->xfb_info->output_count > 0;
++      if (!has_gs && !has_xfb && xfb_stage >= 0 && state->rs &&
++          state->rs->polygon_mode == VK_POLYGON_MODE_POINT) {
++         const nir_shader *last = infos[xfb_stage].nir;
++         if (last->info.stage == MESA_SHADER_TESS_EVAL)
++            polygon_points =
++               !last->info.tess.point_mode &&
++               last->info.tess._primitive_mode != TESS_PRIMITIVE_ISOLINES;
++         else
++            polygon_points = state->ia &&
++                             u_reduced_prim(kk_assembled_prim(state)) ==
++                                MESA_PRIM_TRIANGLES;
++      }
++
++      if (has_gs || (!has_xfb && !polygon_points))
+          xfb_stage = -1;
+       else
+          infos[xfb_stage].nir->info.next_stage = MESA_SHADER_GEOMETRY;
+@@ -2497,6 +2789,9 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+          (int)i == xfb_stage;
+ 
+       msl_preprocess_nir_workarounds(nir, pdev->settings.disabled_workarounds);
++      if (nir->info.stage == MESA_SHADER_GEOMETRY && state && state->rs &&
++          state->rs->polygon_mode == VK_POLYGON_MODE_POINT)
++         NIR_PASS(_, nir, kk_nir_gs_polygon_points);
+       kk_lower_nir(dev, nir, emulated_stage, info->robustness,
+                    info->set_layout_count, info->set_layouts, state, features);
+ 
+@@ -2516,7 +2811,8 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+       for (uint32_t j = total_shaders; j > passthrough_index; j--)
+          nir_shaders[j] = nir_shaders[j - 1u];
+       nir_shaders[passthrough_index] =
+-         kk_create_passthrough_gs(dev, nir_shaders[xfb_stage], state);
++         kk_create_passthrough_gs(dev, nir_shaders[xfb_stage], state,
++                                  polygon_points);
+       total_shaders += 1u;
+ 
+       if (nir_shaders[passthrough_index] == NULL) {
+-- 
+2.54.0 (Apple Git-157)
+
