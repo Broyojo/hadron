@@ -1,0 +1,102 @@
+From 5daa5372a2df7833d397fdce58ddbdec56b7c49d Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 24 Oct 2026 14:42:17 -0400
+Subject: [PATCH] loader: Start again while the range an executable needs is in
+ use.
+
+An executable without relocations must be mapped at its preferred base,
+which ntdll passes in WINEPRELOADRESERVE. On Linux the preloader reserves
+that range before libc runs. On arm64 macOS nothing runs that early, and
+libmalloc maps its metadata at a random 2MB-aligned address before main(),
+inside such a range above 4GB about a third of the time (Hogwarts Legacy,
+0x140000000-0x15bcc2000), and the image then fails to map with
+STATUS_CONFLICTING_ADDRESSES. The loader now checks the range first and
+starts again, up to 32 times, while something is in it.
+
+The range is not reserved: a reserved area there would be taken by the
+top-down allocations made before the image is mapped.
+
+Approach and analysis by matteofuligni (Hadron issue #95).
+---
+ loader/main.c | 51 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 51 insertions(+)
+
+diff --git a/loader/main.c b/loader/main.c
+index 9e02a1a2aa..adbb635de4 100644
+--- a/loader/main.c
++++ b/loader/main.c
+@@ -36,6 +36,8 @@
+ #endif
+ #ifdef __APPLE__
+ # include <mach-o/dyld.h>
++# include <mach/mach.h>
++# include <mach/mach_vm.h>
+ #endif
+ 
+ #include "main.h"
+@@ -265,6 +267,54 @@ static void set_runtime_defaults( const char *exe, char *argv[] )
+     execv( exe, argv );  /* on failure, go on without the library path */
+ }
+ 
++/* An executable that can only load at its preferred base (no relocations) needs the range ntdll
++ * names in WINEPRELOADRESERVE free when it maps the image. On Linux the preloader reserves it
++ * before libc runs. Here nothing can run that early, and libmalloc maps its metadata at a random
++ * 2MB-aligned address before main(), at times inside a range above 4GB such as Hogwarts
++ * Legacy's 0x140000000-0x15bcc2000, and the image then fails with STATUS_CONFLICTING_ADDRESSES.
++ * Start the loader again while something is in the range: the next start draws new placements.
++ * The range is not reserved here: a reserved area there would be taken by the top-down
++ * allocations made before the image is mapped. */
++static void reexec_while_reserve_taken( const char *exe, char *argv[] )
++{
++    static const char attempt_var[] = "WINEHADRONRESERVEATTEMPT";
++    const char *str = getenv( "WINEPRELOADRESERVE" ), *attempt_str;
++    unsigned long long start, end;
++    mach_vm_address_t addr;
++    mach_vm_size_t size = 0;
++    vm_region_basic_info_data_64_t info;
++    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
++    mach_port_t object;
++    char *p, attempt_buf[16];
++    int attempt;
++
++    if (!str || !exe) return;
++    start = strtoull( str, &p, 16 );
++    if (*p != '-') return;
++    end = strtoull( p + 1, NULL, 16 );
++    /* below 4GB the loader's own low reserve keeps the range free */
++    if (end <= start || start < 0x100000000ULL) return;
++
++    addr = start;
++    if (mach_vm_region( mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
++                        (vm_region_info_t)&info, &count, &object ) != KERN_SUCCESS || addr >= end)
++    {
++        unsetenv( attempt_var );
++        return;
++    }
++
++    attempt = (attempt_str = getenv( attempt_var )) ? atoi( attempt_str ) : 0;
++    if (attempt >= 32)
++    {
++        fprintf( stderr, "wine: %llx-%llx still in use after %d restarts\n", start, end, attempt );
++        unsetenv( attempt_var );
++        return;
++    }
++    snprintf( attempt_buf, sizeof(attempt_buf), "%d", attempt + 1 );
++    setenv( attempt_var, attempt_buf, 1 );
++    execv( exe, argv );  /* on failure, go on and let the image fail as before */
++}
++
+ #endif
+ 
+ /**********************************************************************
+@@ -276,6 +326,7 @@ int main( int argc, char *argv[] )
+ 
+ #if defined(__APPLE__) && defined(__aarch64__)
+     set_runtime_defaults( get_self_exe(), argv );
++    reexec_while_reserve_taken( get_self_exe(), argv );
+ #endif
+     init_reserved_areas();
+ 
+-- 
+2.54.0 (Apple Git-157)
+

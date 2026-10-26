@@ -1786,3 +1786,24 @@ differs, under a new name renamed over the old one, so launches that share a pre
 a half-written DLL. `HADRON_D3D9=wined3d` leaves them alone. `tests/mac/test-mtld3d-refresh.sh`
 makes a prefix's copies stale, starts a program through `play`, and compares: main's `play`
 leaves all four stale, this one replaces all four.
+
+## A fixed-base executable failed to load a third of the time (fixed, #56, issue #95)
+
+Hogwarts Legacy's `HogwartsLegacy.exe` (issue #95) has no relocations: it maps at 0x140000000-
+0x15bcc2000 or not at all, and it often failed with `c0000018`, STATUS_CONFLICTING_ADDRESSES. The
+reporter found why. Before `main()` runs, macOS libmalloc maps a 16 KiB metadata region at a
+random 2 MiB-aligned address between about 0x11c600000 and 0x15be00000, and Hadron's loader
+reserves only the memory below 4 GB (`low_reserve`, from the page zero). ntdll names the image's
+range to the new process in `WINEPRELOADRESERVE`; on Linux the preloader reserves it before libc
+runs, but on arm64 macOS nothing runs that early. `tests/win/fixed-base.c` builds an executable
+with the same base and size and no relocations: on main it failed 11 of 30 direct starts.
+
+Wine patch 0046, the reporter's approach moved into the loader: before anything else, `main()`
+looks up the range with `mach_vm_region` and, while something is in it, starts the loader again
+(at most 32 times), which draws new placements. The range is not reserved, as the reporter
+pointed out: a reserved area there would be taken by the top-down allocations made before the
+image is mapped (the first thread's data, the ARM64EC code map). With it the test executable
+loaded 30 of 30 direct starts and 40 of 40 as a child, the way the game's bootstrap starts it.
+Upstream Wine's rework of the reserved areas (#120) may offer a fuller fix at the next rebase. The
+report's minor case, an x64 `infinst.exe` with base 0x100000000 from DirectX's June 2010
+redistributable, is not covered: its range starts below 4 GB, in the page zero.
