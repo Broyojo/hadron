@@ -1868,3 +1868,28 @@ loaded from a pipeline cache. It found
 that the MSL backend ignored the sample index of a multisampled image load (every sample read
 sample 0; the driver offers no multisampled storage images, so nothing reached it before), and
 the test reads through a texture fetch instead.
+
+## A buffer descriptor whose range ran past its buffer aborted DOOM (fixed, #58, issue #128)
+
+With depth bounds reported (#57), DOOM (2016) gets past device creation and then stops on an
+assertion in Mesa, `range + offset <= buffer->size` (`vk_buffer.h`). It writes uniform buffer
+descriptors with a range of 64 KB on buffers of 49,152 and 65,520 bytes (issue #128, found by
+tracing its descriptor writes). That is invalid (VUID-VkDescriptorBufferInfo-range-00342), so
+Vulkan leaves the result undefined; the game runs on Windows drivers, and on Linux, where Mesa is
+built with its assertions off and the drivers use the range as given. Hadron's Mesa is built with
+them on (`--buildtype=debugoptimized`, #47), so the game aborts.
+
+Turning the assertions off would only trade the abort for reads of other memory: with the range
+as given, KosmicKrisp's bounds checks let the shader read past the buffer into whatever is
+allocated after it. Mesa patch 0086 clamps the range of a buffer descriptor (and of a transform
+feedback buffer) to the part of the buffer from its offset, so that a read past the buffer's end
+is out of bounds and is handled as any other one: zero with robust buffer access, nothing outside
+the buffer without it. A valid range is unchanged.
+
+`tests/mac/vk-ubo-range-past-end.sh` writes descriptors as DOOM does, plain and dynamic, with a
+buffer filled with a marker right after the small one, and reads inside and past the end with
+robustBufferAccess2 on. The installed driver aborts on the assertion; with the clamp every read
+inside sees the buffer's data and every read past the end sees zero; with the range kept and no
+assertion, the reads past the end see the next buffer's marker. A third of the Vulkan CTS lists for
+robustness, uniform buffers, transform feedback and descriptor binding passes with the clamp:
+52,804 pass, none fail.
