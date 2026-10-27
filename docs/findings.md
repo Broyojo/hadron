@@ -1918,3 +1918,39 @@ checks the registered Steam process the way `steam_api` does, at once and a seco
 a window up. With the old `hadron-steam.exe` it finds pid 0; with the new one it finds the
 launcher running, the launcher returns when the second process has exited (3.8 s), and the Wine
 session ends at once after it.
+
+## Mouselook turned twice as fast in Retina mode (fixed, #61, issue #131)
+
+Since 0.3.1 made Retina mode the default (#45), games that capture the mouse to look around
+turned about twice as fast for the same hand movement; menus and the visible cursor were as
+before. Raw input (`WM_INPUT`, which mouselook reads: Portal 2 has `m_rawinput 1`, Wine's
+DirectInput mouse is built on it) took its movement from the cursor's position: wineserver
+reports the difference between the new position and the last as the raw movement, unless the
+driver sends the raw movement itself. The cursor's position is in pixels in Retina mode, so a
+point the Mac's pointer moved became two counts of raw input. On Windows raw input is the
+device's movement and does not depend on the display's pixel density. Wine's X11 and Wayland
+drivers already send it separately (`SEND_HWMSG_RAWINPUT`); winemac did not.
+
+Wine patch 0047 sends it in points, separately from the cursor, which stays in pixels and under
+the Mac's pointer. A first version took it from the events' deltas, and Portal 2's view snapped
+back with every move: the game puts the cursor back in the middle after each movement, and the
+deltas of the first event after `CGWarpMouseCursorPosition` include the warp (the comment in
+`cocoa_cursorclipping.m` says so; its event tap cancels the warps it makes itself). The patch
+takes the movement from the events' locations instead, starting again where a warp put the
+cursor, which is what raw input did before 0.3.1 at point scale; while the cursor is pinned at
+the edge of its clip rect or the desktop, from the deltas, as the cursor's own relative moves
+are. Mouse movement over windows of other programs is not counted; on Windows it would be, for
+a program that asked for raw input in the background. Movement that is in Wine's event queue
+when a program sets the cursor's position is dropped with the queued events, as before.
+
+A game that reads mouselook from the cursor's position rather than raw input, putting the cursor
+back and measuring how far it moved, still gets pixels, twice as many as before in Retina mode.
+Changing that would mean moving Wine's cursor by a pixel for each point while such a game holds
+it, which halves the cursor's visible speed and needs a way to tell when a game does it.
+
+With the patch, mouselook in Portal 2 from Steam "seems more normal", and is good in Subnautica
+(Unity) (2026-10-26, owner's runs); with the first version Portal 2's view snapped back. No
+automated test: mouse events that a command-line tool posts (`CGEventPost` at
+`kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
+test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
+no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
