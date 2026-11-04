@@ -3,11 +3,24 @@ watchdog_start() {
     ps -p "$1" -o lstart= | tr -d ' :\n'
 }
 watchdog_same_prefix() {
-    case " $(ps eww -p "$1" -o command=) " in
+    environment=$(ps eww -p "$1" -o command=)
+    case " $environment " in
         *" WINEPREFIX=$WINEPREFIX "*) return 0 ;;
+        *" WINEPREFIX="*) return 1 ;;
     esac
-    return 1
+    # Hardened Wine clients may hide their environment. Wine names its shared
+    # mappings after the prefix device/inode (ntdll/unix/server.c init_server_dir).
+    identity=$(stat -f '%d %i' "$WINEPREFIX") || return 1
+    set -- "$1" $identity
+    server_dir="$(cd /tmp && pwd -P)/.wine-$(id -u)/server-$(printf '%x-%x' "$2" "$3")"
+    lsof -a -p "$1" -Fn 2>/dev/null | {
+        while IFS= read -r mapped; do
+            case "$mapped" in "n$server_dir"/*) exit 0 ;; esac
+        done
+        exit 1
+    }
 }
+
 watchdog_has_paused() {
     [ -f "$state" ] || return 1
     while read -r saved_pid saved_start; do

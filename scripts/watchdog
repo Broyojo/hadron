@@ -37,11 +37,10 @@ wine_memory() {  # sets rss, footprint (MB), and procs for this checkout's proce
         p=${entry%%:*} rest=${entry#*:}
         kb=${rest%%:*} key="$p:${rest#*:}"
         seen="$seen$key "
-        case "$others" in *" $key "*) continue ;; esac
         case "$ours" in
             *" $key "*) ;;
             *)  if is_hadron_process "$p" && watchdog_same_prefix "$p"; then ours="$ours$key "
-                else others="$others$key "; continue
+                else continue
                 fi ;;
         esac
         rss=$((rss + kb / 1024)) procs=$((procs + 1))
