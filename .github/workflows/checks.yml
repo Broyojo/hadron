@@ -41,6 +41,7 @@ jobs:
           xcrun clang -O2 -Wall -Wextra -Werror -o "$RUNNER_TEMP/hadron-memory" launcher/hadron-memory.c
           python3 tests/mac/test-memory-helper.py "$RUNNER_TEMP/hadron-memory"
           sh tests/mac/test-watchdog-policy.sh
+          sh tests/mac/test-watchdog-session.sh
 
   patches:
     name: Patch queues apply
