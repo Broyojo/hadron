@@ -1,0 +1,26 @@
+From 1b83d7775020f1dfff837f4d7fa6aedad27f5756 Mon Sep 17 00:00:00 2001
+From: Marc-Aurel Zent <mzent@codeweavers.com>
+Date: Tue, 6 Oct 2026 15:26:23 +0200
+Subject: [PATCH] fix(d3d11): avoid deadlock on reentrant `ResizeTarget()`
+
+Signed-off-by: Marc-Aurel Zent <mzent@codeweavers.com>
+(cherry picked from commit e94c312f5c054263acf261cfa109edf13e757587)
+---
+ src/d3d11/d3d11_swapchain.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/d3d11/d3d11_swapchain.cpp b/src/d3d11/d3d11_swapchain.cpp
+index 2235dfd..3771b4c 100644
+--- a/src/d3d11/d3d11_swapchain.cpp
++++ b/src/d3d11/d3d11_swapchain.cpp
+@@ -571,6 +571,7 @@ public:
+     fullscreen_desc_.Scaling = newDisplayMode.Scaling;
+ 
+     if (fullscreen_desc_.Windowed) {
++      lock = {};
+       wsi::resizeWindow(hWnd, &window_state_, newDisplayMode.Width,
+                         newDisplayMode.Height);
+     } else {
+-- 
+2.54.0 (Apple Git-157)
+
