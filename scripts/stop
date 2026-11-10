@@ -1,5 +1,6 @@
 #!/bin/sh
-# Stop every Hadron Wine process (all prefixes), including orphans whose wineserver is gone.
+# Stop every Hadron Wine process (all prefixes), including orphans whose wineserver is gone, and
+# games running from a copy of an installed Hadron's runtime.
 # Leaves the native Mac Steam client and other Wine installations alone (see hadron-procs.sh).
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 for p in "$ROOT"/prefix/*; do
@@ -9,8 +10,16 @@ for p in "$ROOT"/prefix/*; do
 done
 sleep 1
 . "$ROOT/scripts/hadron-procs.sh"
-ours() {  # print the PIDs of this checkout's processes
-    hadron_candidates | while read -r pid rss start; do is_hadron_process "$pid" && echo "$pid"; done
+# Games started from Steam with an installed Hadron.app run from a copy of its runtime, not from
+# this checkout (scripts/runtime-versions.sh): they are Hadron's too.
+copies="$(cd "$HOME/Library/Application Support/Hadron/runtimes" 2>/dev/null && pwd -P)"
+ours() {  # print the PIDs of this runtime's processes and of every runtime copy's
+    hadron_candidates | while read -r pid rss start; do
+        if is_hadron_process "$pid" ||
+           { [ -n "$copies" ] && lsof -a -p "$pid" -d txt -Fn 2>/dev/null | grep -qF "$copies/"; }; then
+            echo "$pid"
+        fi
+    done
 }
 ours | xargs kill -9 2>/dev/null; true
 echo "remaining Hadron processes: $(ours | wc -l | tr -d ' ')"
