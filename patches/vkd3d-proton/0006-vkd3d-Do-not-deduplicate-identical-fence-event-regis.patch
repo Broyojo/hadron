@@ -1,0 +1,62 @@
+From 01ed5fe73b512440a5a20b3f8a5fa360be35cdb7 Mon Sep 17 00:00:00 2001
+From: leonel <leonelisaacguerrero@gmail.com>
+Date: Thu, 22 Oct 2026 09:36:22 -0500
+Subject: [PATCH] vkd3d: Do not deduplicate identical fence event
+ registrations.
+
+SetEventOnCompletion() with a (value, event) pair that is already
+registered was dropped, so the event was signaled only once. When two
+threads wait on the same auto-reset event for the same value, one of
+them never wakes up.
+
+The Witcher 3 (4.04, DX12) hits this and deadlocks a few minutes into
+gameplay, right after the "Event completion for native sync handle is
+already in the list" warning.
+
+Signed-off-by: leonel <leonelisaacguerrero@gmail.com>
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+(cherry picked from commit 49a1e2c7098f4646374458b9a8fbc7c0d0b5ff3d)
+---
+ libs/vkd3d/command.c | 19 +++----------------
+ 1 file changed, 3 insertions(+), 16 deletions(-)
+
+diff --git a/libs/vkd3d/command.c b/libs/vkd3d/command.c
+index 54cfba71..87a142ca 100644
+--- a/libs/vkd3d/command.c
++++ b/libs/vkd3d/command.c
+@@ -1587,7 +1587,6 @@ static HRESULT d3d12_fence_set_native_sync_handle_on_completion_explicit(struct
+         enum vkd3d_waiting_event_type wait_type, UINT64 value, vkd3d_native_sync_handle handle, uint32_t *payload)
+ {
+     struct vkd3d_waiting_event event;
+-    unsigned int i;
+     HRESULT hr;
+     bool latch;
+     int rc;
+@@ -1615,21 +1614,9 @@ static HRESULT d3d12_fence_set_native_sync_handle_on_completion_explicit(struct
+     event.timeline_cookie = vkd3d_queue_timeline_trace_register_event_signal(&fence->device->queue_timeline_trace,
+             handle, &fence->ID3D12Fence_iface, value);
+ 
+-    if (wait_type == VKD3D_WAITING_EVENT_SINGLE && vkd3d_native_sync_handle_is_valid(handle))
+-    {
+-        for (i = 0; i < fence->event_count; ++i)
+-        {
+-            struct vkd3d_waiting_event *current = &fence->events[i];
+-            if (current->wait_type == VKD3D_WAITING_EVENT_SINGLE && current->value == value &&
+-                    vkd3d_native_sync_handle_eq(current->handle, handle))
+-            {
+-                WARN("Event completion for native sync handle is already in the list.\n");
+-                pthread_mutex_unlock(&fence->mutex);
+-                return S_OK;
+-            }
+-        }
+-    }
+-
++    /* Do not deduplicate identical (value, event) pairs. Every SetEventOnCompletion()
++     * must signal the event once. Multiple threads may wait on the same auto-reset event
++     * for the same value, and each of them needs its own SetEvent() to wake up. */
+     if (!vkd3d_array_reserve((void **)&fence->events, &fence->events_size,
+             fence->event_count + 1, sizeof(*fence->events)))
+     {
+-- 
+2.54.0 (Apple Git-157)
+
