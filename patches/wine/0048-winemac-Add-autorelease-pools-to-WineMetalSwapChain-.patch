@@ -1,0 +1,55 @@
+From e93902d39c6a5dac3a82b7e550b10b283178e6de Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Mon, 28 Sep 2026 16:10:29 -0700
+Subject: [PATCH] winemac: Add autorelease pools to WineMetalSwapChain C
+ wrappers.
+
+(cherry picked from commit 1300ec99c7ed7461df1d400257aa83165faf0069)
+---
+ dlls/winemac.drv/cocoa_window.m | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 111cceac00..62425f1a49 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -3901,24 +3901,36 @@ - (void) dealloc
+ @end
+ 
+ id<WineMetalSwapChain> macdrv_create_view_swapchain(WineContentView *view)
++{
++@autoreleasepool
+ {
+     return [[MetalViewSwapChain alloc] initWithView:view];
+ }
++}
+ 
+ id<WineMetalSwapChain> macdrv_create_offscreen_swapchain(void* hwnd, CGRect bounds)
++{
++@autoreleasepool
+ {
+     return [[CAContextSwapChain alloc] initWithHwnd:hwnd bounds:bounds];
+ }
++}
+ 
+ CAMetalLayer *macdrv_swapchain_get_layer(id<WineMetalSwapChain> swapchain)
++{
++@autoreleasepool
+ {
+     return [swapchain layer];
+ }
++}
+ 
+ void macdrv_destroy_swapchain(id<WineMetalSwapChain> swapchain)
++{
++@autoreleasepool
+ {
+     [swapchain release];
+ }
++}
+ 
+ void macdrv_window_create_ca_layer_host_view(WineWindow *window, unsigned int context_id)
+ {
+-- 
+2.54.0 (Apple Git-157)
+
