@@ -1894,6 +1894,32 @@ assertion, the reads past the end see the next buffer's marker. A third of the V
 robustness, uniform buffers, transform feedback and descriptor binding passes with the clamp:
 52,804 pass, none fail.
 
+## DOOM's memory grew to 30 GB from depth bounds copies (fixed, #62, issue #128)
+
+On 0.3.2, loading a level of DOOM (2016) on an M1 Max grew its footprint to about 30 GB, until the
+watchdog stopped it (issue #128, found and traced by its reporter). The cause is #57's emulation:
+a draw that writes depth with the bounds test on reads a copy of the depth attachment, and each
+copy is a new buffer the size of the whole image plane (every level and layer), kept until the
+command buffer is reset. DOOM draws that way with bounds [0, 1], thousands of times a frame.
+
+Without `VK_EXT_depth_range_unrestricted` every defined value a depth attachment can hold is in
+[0, 1]: the reporter checked the specification's chapters on fragment depth, clears and copies,
+where values outside [0, 1] are either clamped, not allowed, or leave the result undefined. So
+bounds that cover [0, 1] cannot reject a sample, and Mesa patch 0088 skips the emulation for them: no break of the render pass, no copy, no
+shader variant. Depth written by such a draw still counts as changed, so a later draw with
+narrower bounds reads it from memory again. The reporter's version of the same check held DOOM at
+6.4 GB in the scene that grew to 30 GB.
+
+`tests/mac/vk-depth-bounds-memory.sh` records 128 such draws on a 1024×1024 depth buffer and then
+checks bounds of [0.4, 0.6] (which must draw) and [0.6, 0.9] (which must not). With the 0.3.2
+driver the process grew by 597 MB, with 0088 by 18 MB; both draw correctly. The 26,830 depth
+bounds cases of the Vulkan CTS give the same 1,986 pass and 24,844 not supported with and without
+it, case for case, and `tests/mac/vk-depth-bounds-msaa.sh` passes.
+
+Left open: a draw that writes depth with narrower bounds still copies the whole plane every
+time. Copying only the view's level and layers, and reusing one copy per depth image in a command
+buffer, would bound it; no game is known to draw that way yet.
+
 ## A game that restarts into another executable lost Steam (fixed, #59, issue #128)
 
 DOOM (2016) started from Steam with the Vulkan renderer runs `DOOMx64.exe`, which starts

@@ -1,0 +1,53 @@
+From 892a4bb90d8e0908dd7b1084fe8512e24ac95984 Mon Sep 17 00:00:00 2001
+From: Aitor Camacho <aitor@lunarg.com>
+Date: Wed, 28 Oct 2026 16:33:19 -0600
+Subject: [PATCH] kk: Report VK_ERROR_OUT_OF_DEVICE_MEMORY when Metal fails
+ texture creation
+
+MTLTextures are created at bind time. If the heap used for the creation
+does not have enough size to fit the texture, Metal will fail and return
+null. Report out of device memory error for such cases
+
+Reviewed-by: squidbus <squidbus@proton.me>
+Signed-off-by: Aitor Camacho <aitor@lunarg.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45725>
+(cherry picked from commit bb172922a4651e77de60e4e5028cbae0dcfb4b80)
+---
+ src/kosmickrisp/vulkan/kk_image.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index dc379bf810a..2b83cf89ab8 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -1115,6 +1115,9 @@ kk_image_plane_bind(struct kk_device *dev, struct kk_image *image,
+    plane->mem = mem;
+    plane->mem_offset_B = *offset_B;
+    plane->mtl_handle = kk_image_plane_create_texture(plane, &plane->layout, 0u);
++   if (plane->mtl_handle == NULL)
++      return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++
+    if (image->vk.base.object_name)
+       mtl_resource_set_label(plane->mtl_handle, image->vk.base.object_name);
+ 
+@@ -1136,6 +1139,8 @@ kk_image_plane_bind(struct kk_device *dev, struct kk_image *image,
+                                  array_layout.height_px)) + 1u);
+       plane->mtl_handle_array = mtl_new_texture_with_descriptor(
+          mem->bo->mtl_handle, &array_layout, *offset_B);
++      if (plane->mtl_handle_array == NULL)
++         return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
+       if (image->vk.base.object_name)
+          mtl_resource_set_label(plane->mtl_handle_array,
+                                 image->vk.base.object_name);
+@@ -1219,7 +1224,7 @@ kk_BindImageMemory2(VkDevice device, uint32_t bindInfoCount,
+       const VkBindMemoryStatusKHR *status =
+          vk_find_struct_const(pBindInfos[i].pNext, BIND_MEMORY_STATUS_KHR);
+       if (status != NULL && status->pResult != NULL)
+-         *status->pResult = VK_SUCCESS;
++         *status->pResult = result;
+ 
+       if (first_error_or_success == VK_SUCCESS)
+          first_error_or_success = result;
+-- 
+2.54.0 (Apple Git-157)
+
