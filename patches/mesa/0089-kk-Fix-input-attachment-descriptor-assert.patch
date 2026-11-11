@@ -1,0 +1,29 @@
+From 7288817c23417bfe1ef12cd4187a96cfc57b3c6d Mon Sep 17 00:00:00 2001
+From: Aitor Camacho <aitor@lunarg.com>
+Date: Sat, 17 Oct 2026 09:54:25 +0900
+Subject: [PATCH] kk: Fix input attachment descriptor assert
+
+Reviewed-by: squidbus <squidbus@proton.me>
+Signed-off-by: Aitor Camacho <aitor@lunarg.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45325>
+(cherry picked from commit 1d396c4031a8062fb1fb9a63600b5fa38f19b6d6)
+---
+ src/kosmickrisp/vulkan/kk_descriptor_set.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_descriptor_set.c b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+index 1e28c40c5d1..c7407e09d94 100644
+--- a/src/kosmickrisp/vulkan/kk_descriptor_set.c
++++ b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+@@ -71,7 +71,7 @@ get_sampled_image_view_desc(VkDescriptorType descriptor_type,
+       plane_count = view->plane_count;
+       for (uint8_t plane = 0; plane < plane_count; plane++) {
+          if (is_input_attachment) {
+-            assert(view->planes[plane].sampled_gpu_resource_id);
++            assert(view->planes[plane].input_gpu_resource_id);
+             desc[plane].image_gpu_resource_id =
+                view->planes[plane].input_gpu_resource_id;
+             desc[plane].residency_gpu_resource_id =
+-- 
+2.54.0 (Apple Git-157)
+
