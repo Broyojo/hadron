@@ -1,0 +1,103 @@
+From 9d58e848ea2da7a610e420e57650fbca7dbf4812 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Pawe=C5=82=20Ko=C5=82odziejski?= <aquadran@gmail.com>
+Date: Wed, 7 Oct 2026 21:20:31 +0200
+Subject: [PATCH] fix(d3d11): `pMappedResource` argument in
+ `ID3D11DeviceContext::Map` can be NULL
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Paweł Kołodziejski <aquadran@gmail.com>
+(cherry picked from commit 186a2327f1ec76376f6bc1ef64636f08b0728567)
+---
+ src/d3d11/d3d11_context_def.cpp |  7 +++++++
+ src/d3d11/d3d11_context_imm.cpp | 13 +++++++++++--
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/src/d3d11/d3d11_context_def.cpp b/src/d3d11/d3d11_context_def.cpp
+index 554912d..9e9b816 100644
+--- a/src/d3d11/d3d11_context_def.cpp
++++ b/src/d3d11/d3d11_context_def.cpp
+@@ -149,6 +149,8 @@ public:
+       D3D11_MAPPED_SUBRESOURCE *pMappedResource) override {
+     UINT buffer_length = 0, &row_pitch = buffer_length;
+     UINT bind_flag = 0, &depth_pitch = bind_flag;
++    if (unlikely(!pResource))
++      return E_INVALIDARG;
+     if (auto dynamic = GetDynamicBuffer(pResource, &buffer_length, &bind_flag)) {
+       if (!pMappedResource)
+         return E_INVALIDARG;
+@@ -262,6 +264,9 @@ public:
+       }
+       return S_OK;
+     }
++    if (pMappedResource == nullptr) {
++      UNIMPLEMENTED("map-on-default: map");
++    }
+     return E_FAIL;
+   }
+ 
+@@ -270,6 +275,8 @@ public:
+   Unmap(ID3D11Resource *pResource, UINT Subresource) override {
+     UINT buffer_length = 0, &row_pitch = buffer_length;
+     UINT bind_flag = 0, &depth_pitch = bind_flag;
++    if (unlikely(!pResource))
++      return;
+     if (auto dynamic = GetDynamicTexture(pResource, Subresource, &row_pitch, &depth_pitch)) {
+       BlitObject texture(device, pResource);
+       UpdateTexture(TextureUpdateCommand(texture, Subresource, nullptr),
+diff --git a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+index 987c488..09a7162 100644
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -139,13 +139,15 @@ public:
+       D3D11_MAPPED_SUBRESOURCE *pMappedResource) override {
+     std::lock_guard<d3d11_device_mutex> lock(mutex);
+ 
+-    if (unlikely(!pResource || !pMappedResource))
++    if (unlikely(!pResource))
+       return E_INVALIDARG;
+     UINT buffer_length = 0, &row_pitch = buffer_length;
+     UINT bind_flag = 0, &depth_pitch = bind_flag;
+     auto current_seq_id = cmd_queue.CurrentSeqId();
+     auto coherent_seq_id = cmd_queue.CoherentSeqId();
+     if (auto dynamic = GetDynamicBuffer(pResource, &buffer_length, &bind_flag)) {
++      if (!pMappedResource)
++        return E_INVALIDARG;
+       switch (MapType) {
+       case D3D11_MAP_READ:
+       case D3D11_MAP_WRITE:
+@@ -181,6 +183,8 @@ public:
+       return S_OK;
+     }
+     if (auto dynamic = GetDynamicTexture(pResource, Subresource, &row_pitch, &depth_pitch)) {
++      if (!pMappedResource)
++        return E_INVALIDARG;
+       switch (MapType) {
+       case D3D11_MAP_READ:
+       case D3D11_MAP_WRITE:
+@@ -201,6 +205,8 @@ public:
+       return S_OK;
+     }
+     if (auto dynamic = GetDynamicLinearTexture(pResource, &row_pitch, &depth_pitch)) {
++      if (!pMappedResource)
++        return E_INVALIDARG;
+       switch (MapType) {
+       case D3D11_MAP_READ:
+       case D3D11_MAP_WRITE:
+@@ -232,8 +238,11 @@ public:
+       return S_OK;
+     }
+     if (auto staging = GetStagingResource(pResource, Subresource)) {
++      if (!pMappedResource)
++        return E_INVALIDARG;
++
+       if (MapType > 3 || MapType == 0)
+-          return E_INVALIDARG;
++        return E_INVALIDARG;
+ 
+       if (ignore_map_flag_no_wait_)
+         MapFlags &= ~D3D11_MAP_FLAG_DO_NOT_WAIT;
+-- 
+2.54.0 (Apple Git-157)
+

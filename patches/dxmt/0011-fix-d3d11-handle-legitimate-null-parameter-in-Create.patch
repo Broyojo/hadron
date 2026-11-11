@@ -1,0 +1,55 @@
+From 04086ed07ef1e37ae143688fa1ba0dbe93519951 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Mon, 5 Oct 2026 17:03:27 +0800
+Subject: [PATCH] fix(d3d11): handle legitimate null parameter in
+ `Create{Blend|Rasterizer}State()`
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit 68af85e96196e1cf9f50de9fe24c70f03a1db4a7)
+---
+ src/d3d11/d3d11_device.cpp | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/d3d11/d3d11_device.cpp b/src/d3d11/d3d11_device.cpp
+index a21b3c5..62efc67 100644
+--- a/src/d3d11/d3d11_device.cpp
++++ b/src/d3d11/d3d11_device.cpp
+@@ -377,8 +377,9 @@ public:
+       desc.RenderTarget[i].RenderTargetWriteMask =
+           pBlendStateDesc->RenderTarget[i].RenderTargetWriteMask;
+     }
+-    auto hr = CreateBlendState1(&desc, &pBlendState1);
+-    *ppBlendState = pBlendState1;
++    auto hr = CreateBlendState1(&desc, ppBlendState ? &pBlendState1: nullptr);
++    if (ppBlendState)
++      *ppBlendState = pBlendState1;
+     return hr;
+   }
+ 
+@@ -406,8 +407,9 @@ public:
+     desc.AntialiasedLineEnable = pRasterizerDesc->AntialiasedLineEnable;
+     desc.ForcedSampleCount = 0;
+     desc.ConservativeRaster = D3D11_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+-    auto hr = CreateRasterizerState2(&desc, &pRasterizerState);
+-    *ppRasterizerState = pRasterizerState;
++    auto hr = CreateRasterizerState2(&desc, ppRasterizerState ? &pRasterizerState: nullptr);
++    if (ppRasterizerState)
++      *ppRasterizerState = pRasterizerState;
+     return hr;
+   }
+ 
+@@ -747,8 +749,9 @@ public:
+     desc.AntialiasedLineEnable = pRasterizerDesc->AntialiasedLineEnable;
+     desc.ForcedSampleCount = pRasterizerDesc->ForcedSampleCount;
+     desc.ConservativeRaster = D3D11_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+-    auto hr = CreateRasterizerState2(&desc, &pRasterizerState);
+-    *ppRasterizerState = pRasterizerState;
++    auto hr = CreateRasterizerState2(&desc, ppRasterizerState ? &pRasterizerState: nullptr);
++    if (ppRasterizerState)
++      *ppRasterizerState = pRasterizerState;
+     return hr;
+   }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

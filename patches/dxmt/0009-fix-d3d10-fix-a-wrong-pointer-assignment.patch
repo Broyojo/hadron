@@ -1,0 +1,27 @@
+From 0ec3788e3ff51fa20b57037e50608576b8ceb3b8 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Fri, 2 Oct 2026 17:52:02 +0800
+Subject: [PATCH] fix(d3d10): fix a wrong pointer assignment
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit e4f868dc3e53cafb14d5e72667ab9ac0f73d7a9d)
+---
+ src/d3d10/d3d10_device.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/d3d10/d3d10_device.cpp b/src/d3d10/d3d10_device.cpp
+index 155e626..83d1e6d 100644
+--- a/src/d3d10/d3d10_device.cpp
++++ b/src/d3d10/d3d10_device.cpp
+@@ -498,7 +498,7 @@ MTLD3D10Device::IAGetIndexBuffer(ID3D10Buffer **pIndexBuffer, DXGI_FORMAT *Forma
+     if (d3d11_buffer)
+       d3d11_buffer->QueryInterface(IID_PPV_ARGS(pIndexBuffer));
+     else
+-      pIndexBuffer = nullptr;
++      *pIndexBuffer = nullptr;
+   }
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

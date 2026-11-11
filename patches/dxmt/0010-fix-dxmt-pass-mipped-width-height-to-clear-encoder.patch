@@ -1,0 +1,40 @@
+From b9df1dbf2eaf3ed88236dbd4ea6ec8ac45a3eb60 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Fri, 2 Oct 2026 17:24:35 +0800
+Subject: [PATCH] fix(dxmt): pass mipped width & height to clear encoder
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit f9beaea30b95c14e9ad76546e4a9bd9b726205c3)
+---
+ src/dxmt/dxmt_context.cpp | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+index 0ba84cd..7b29f1e 100644
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -476,8 +476,8 @@ ArgumentEncodingContext::clearColor(Rc<Texture> &&texture, uint64_t viewId, unsi
+   encoder_info->color = color;
+   SanitizeRTVClearColor(texture->pixelFormat(viewId), encoder_info->color);
+   encoder_info->array_length = arrayLength;
+-  encoder_info->width = texture->width();
+-  encoder_info->height = texture->height();
++  encoder_info->width = texture->width(viewId);
++  encoder_info->height = texture->height(viewId);
+   encoder_current = encoder_info;
+ 
+   encoder_info->attachment = access(texture, viewId, ResourceAccess::Write);
+@@ -500,8 +500,8 @@ ArgumentEncodingContext::clearDepthStencil(
+   encoder_info->clear_dsv = flag & DepthStencilPlanarFlags(texture->pixelFormat());
+   encoder_info->depth_stencil = {depth, stencil};
+   encoder_info->array_length = arrayLength;
+-  encoder_info->width = texture->width();
+-  encoder_info->height = texture->height();
++  encoder_info->width = texture->width(viewId);
++  encoder_info->height = texture->height(viewId);
+   encoder_current = encoder_info;
+ 
+   encoder_info->attachment = access(texture, viewId, ResourceAccess::Write);
+-- 
+2.54.0 (Apple Git-157)
+
