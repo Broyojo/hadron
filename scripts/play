@@ -7,6 +7,9 @@
 # Only an allowlist of environment variables reaches the game: host secrets never do.
 # HADRON_LOG=1 writes module load addresses and errors to the logs directory for crash analysis;
 # past HADRON_LOG_MAX_MB (64) a log keeps its start and its end (scripts/logcap).
+# FEX keeps translated code in a disk cache in the prefix (FEX_DISKCACHE=1), up to
+# FEX_DISKCACHEMAXFILESIZE bytes per cache file: 4 GiB here, as FEX's own 1 GiB filled up for
+# large games and FEX never removes entries (#149).
 # FEX_BLOCKJITNAMING=1 (with FEX_DISKCACHE=0) makes FEX list its translated blocks in
 # /tmp/perf-<pid>.map, to map samples in JIT code back to x86 addresses.
 # The watchdog warns once at half of RAM footprint, 2–4 GB swap growth or elevated pressure.
@@ -223,7 +226,7 @@ else
 fi
 for var in $(env | grep -oE '^(WINE[A-Z0-9_]*|(DXMT|MTLD3D|MTL|DXVK|VKD3D|FEX|MESA)_[A-Za-z0-9_]*)=' | tr -d = | sort -u); do
     case "$var" in
-        WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|WINE_MAC_OPENGL|MESA_LOADER_DRIVER_OVERRIDE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_BLOCKJITNAMING) continue ;;
+        WINEPREFIX|WINELOADER|WINEDEBUG|WINEDLLOVERRIDES|WINE_LARGE_ADDRESS_AWARE|WINE_MAC_OPENGL|MESA_LOADER_DRIVER_OVERRIDE|MTLD3D_CONFIG|MTLD3D_NO_CRASH_HANDLER|FEX_DISKCACHE|FEX_DISKCACHEMAXFILESIZE|FEX_BLOCKJITNAMING) continue ;;
         VKD3D_SHADER_CACHE_PATH) [ -n "${vkd3d_cache:-}" ] && continue ;;
         VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES) continue ;;
     esac
@@ -295,6 +298,7 @@ exec env -i HOME="$HOME" USER="$USER" LANG="${LANG:-en_US.UTF-8}" PATH=/usr/bin:
     WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$overrides}" \
     DYLD_FALLBACK_LIBRARY_PATH="$libpath" \
     FEX_DISKCACHE="${FEX_DISKCACHE:-1}" \
+    FEX_DISKCACHEMAXFILESIZE="${FEX_DISKCACHEMAXFILESIZE:-4294967296}" \
     WINE_LARGE_ADDRESS_AWARE="${HADRON_LARGE_ADDRESS_AWARE:-1}" \
     MTLD3D_NO_CRASH_HANDLER=1 \
     MTLD3D_CONFIG="$mtld3d_config" \
