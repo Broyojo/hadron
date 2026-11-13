@@ -1,0 +1,195 @@
+From 2194d9ecd372db1fcca87a6339ce7ad1379607b7 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 12 Nov 2026 22:53:59 -0500
+Subject: [PATCH] overlay-shim: Release what the game holds while the overlay
+ is open
+
+The overlay blocks every key, button and modifier event, releases
+included. A key held when the overlay opens and let go while it is open
+never reached the game, which kept it pressed after the overlay closed;
+the same for a mouse button or a modifier.
+
+Remember which keys, buttons and modifiers the game was sent pressed, and
+let their release through while the overlay is open, once. Input pressed
+in the overlay still never reaches the game, nor does its release.
+---
+ overlay-shim/overlay_shim.m | 85 ++++++++++++++++++++++++++++++++++++-
+ overlay-shim/tests/input.m  | 38 ++++++++++++++++-
+ 2 files changed, 119 insertions(+), 4 deletions(-)
+
+diff --git a/overlay-shim/overlay_shim.m b/overlay-shim/overlay_shim.m
+index 48241fe..5342f1e 100644
+--- a/overlay-shim/overlay_shim.m
++++ b/overlay-shim/overlay_shim.m
+@@ -964,15 +964,96 @@ static void report_renderer_chain(void)
+ static int overlay_active;
+ static void (*next_send_event)(id, SEL, id);
+ 
++// Keys, mouse buttons and modifiers the game has seen pressed, so that their release still reaches
++// it while the overlay is open: otherwise a key held when the overlay opens stays pressed for the
++// game after it closes. Events arrive on the main thread only.
++static uint64_t held_keys[2];
++static uint64_t held_buttons;
++static NSUInteger held_modifiers;
++
++static int event_button(id event, NSUInteger type)
++{
++	typedef NSInteger (*button_fn)(id, SEL);
++
++	if (type == event_left_down || type == event_left_up)
++		return 0;
++	if (type == event_right_down || type == event_right_up)
++		return 1;
++	NSInteger button = ((button_fn)objc_msgSend)(event, sel_registerName("buttonNumber"));
++	return button >= 0 && button < 64 ? (int)button : -1;
++}
++
++// Notes what the game is sent and returns whether this event releases something it holds.
++static int track_delivery(id event, NSUInteger type, int deliver)
++{
++	typedef unsigned short (*key_code_fn)(id, SEL);
++	typedef NSUInteger (*flags_fn)(id, SEL);
++	unsigned short key;
++	int button;
++	NSUInteger flags;
++
++	switch (type) {
++	case event_key_down:
++	case event_key_up:
++		key = ((key_code_fn)objc_msgSend)(event, sel_registerName("keyCode")) & 127;
++		if (type == event_key_up) {
++			int held = (held_keys[key / 64] >> (key % 64)) & 1;
++			if (deliver || held)
++				held_keys[key / 64] &= ~(1ull << (key % 64));
++			return held;
++		}
++		if (deliver)
++			held_keys[key / 64] |= 1ull << (key % 64);
++		return 0;
++	case event_left_down:
++	case event_right_down:
++	case event_other_down:
++	case event_left_up:
++	case event_right_up:
++	case event_other_up:
++		button = event_button(event, type);
++		if (button < 0)
++			return 0;
++		if (type == event_left_up || type == event_right_up || type == event_other_up) {
++			int held = (held_buttons >> button) & 1;
++			if (deliver || held)
++				held_buttons &= ~(1ull << button);
++			return held;
++		}
++		if (deliver)
++			held_buttons |= 1ull << button;
++		return 0;
++	case event_flags_changed:
++		flags = ((flags_fn)objc_msgSend)(event, sel_registerName("modifierFlags"));
++		if (deliver) {
++			held_modifiers = flags;
++			return 0;
++		}
++		// A change that only lets go of modifiers the game holds is a release; it gets the result.
++		if ((flags & ~held_modifiers) == 0 && flags != held_modifiers) {
++			held_modifiers = flags;
++			return 1;
++		}
++		return 0;
++	}
++	return 0;
++}
++
+ static int overlay_blocks(id event)
+ {
+ 	typedef NSUInteger (*event_type_fn)(id, SEL);
+ 
+-	if (!__atomic_load_n(&overlay_active, __ATOMIC_RELAXED) || event == nil)
++	if (event == nil)
+ 		return 0;
+ 
+ 	NSUInteger type = ((event_type_fn)objc_msgSend)(event, sel_registerName("type"));
+-	return type < 64 && (overlay_input_mask & event_bit(type)) != 0;
++	if (type >= 64 || (overlay_input_mask & event_bit(type)) == 0)
++		return 0;
++	if (!__atomic_load_n(&overlay_active, __ATOMIC_RELAXED)) {
++		track_delivery(event, type, 1);
++		return 0;
++	}
++	return !track_delivery(event, type, 0);
+ }
+ 
+ static void hook_send_event(id app, SEL selector, id event)
+diff --git a/overlay-shim/tests/input.m b/overlay-shim/tests/input.m
+index c225261..d4fd298 100644
+--- a/overlay-shim/tests/input.m
++++ b/overlay-shim/tests/input.m
+@@ -16,20 +16,32 @@ - (void)sendEvent:(id)event {
+ 
+ @interface TestEvent : NSObject
+ @property(nonatomic) NSUInteger type;
++@property(nonatomic) unsigned short keyCode;
++@property(nonatomic) NSInteger buttonNumber;
++@property(nonatomic) NSUInteger modifierFlags;
+ @end
+ @implementation TestEvent
+ @end
+ 
+-static int delivered(WineApplication *app, NSUInteger type)
++static int delivered_with(WineApplication *app, NSUInteger type, unsigned short key, NSInteger button,
++                          NSUInteger flags)
+ {
+ 	TestEvent *event = [[TestEvent alloc] init];
+ 	event.type = type;
++	event.keyCode = key;
++	event.buttonNumber = button;
++	event.modifierFlags = flags;
+ 	int before = app.delivered;
+ 	[app sendEvent:event];
+ 	[event release];
+ 	return app.delivered - before;
+ }
+ 
++static int delivered(WineApplication *app, NSUInteger type)
++{
++	return delivered_with(app, type, 0, 0, 0);
++}
++
+ int main(void)
+ {
+ 	@autoreleasepool {
+@@ -58,8 +70,30 @@ int main(void)
+ 		for (size_t i = 0; i < sizeof(blocked) / sizeof(*blocked); i++)
+ 			CHECK(delivered(app, blocked[i]) == 1, "event type %lu is sent to the game again after the overlay closes",
+ 			      (unsigned long)blocked[i]);
++
++		// Something the game saw pressed is released for it while the overlay is open, once;
++		// something pressed while it is open never reaches the game, its release neither.
++		enum { shift = 1 << 17, control = 1 << 18 };
++		CHECK(delivered_with(app, event_key_down, 13, 0, 0) == 1, "W goes down for the game");
++		CHECK(delivered_with(app, event_left_down, 0, 0, 0) == 1, "the left button goes down for the game");
++		CHECK(delivered_with(app, event_other_down, 0, 3, 0) == 1, "button 3 goes down for the game");
++		CHECK(delivered_with(app, event_flags_changed, 0, 0, shift) == 1, "shift goes down for the game");
++		np_overlay_shim_set_active(1);
++		CHECK(delivered_with(app, event_key_down, 14, 0, 0) == 0, "E pressed in the overlay is not sent");
++		CHECK(delivered_with(app, event_key_up, 13, 0, 0) == 1, "W held before the overlay opened is released for the game");
++		CHECK(delivered_with(app, event_key_up, 13, 0, 0) == 0, "W is released once");
++		CHECK(delivered_with(app, event_key_up, 14, 0, 0) == 0, "E released in the overlay is not sent");
++		CHECK(delivered_with(app, event_left_up, 0, 0, 0) == 1, "the left button is released for the game");
++		CHECK(delivered_with(app, event_other_up, 0, 3, 0) == 1, "button 3 is released for the game");
++		CHECK(delivered_with(app, event_other_up, 0, 4, 0) == 0, "button 4, never pressed for the game, is not released");
++		CHECK(delivered_with(app, event_flags_changed, 0, 0, shift | control) == 0, "control pressed in the overlay is not sent");
++		CHECK(delivered_with(app, event_flags_changed, 0, 0, shift) == 0, "control released in the overlay is not sent");
++		CHECK(delivered_with(app, event_flags_changed, 0, 0, 0) == 1, "shift held before the overlay opened is released for the game");
++		CHECK(delivered_with(app, event_flags_changed, 0, 0, 0) == 0, "shift is released once");
++		np_overlay_shim_set_active(0);
++		CHECK(delivered_with(app, event_key_up, 14, 0, 0) == 1, "input is sent again after the overlay closes");
+ 		[app release];
+ 	}
+-	printf("input is blocked while the overlay is open and comes back when it closes\n");
++	printf("input is blocked while the overlay is open, held input is still released, and input comes back when it closes\n");
+ 	return 0;
+ }
+-- 
+2.54.0 (Apple Git-157)
+
