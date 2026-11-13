@@ -112,6 +112,8 @@ fi
 dxmt_build="$BUILD/dxmt"; [[ $variant == dev ]] && dxmt_build="$BUILD/dxmt-dev"
 if [[ -f "$dxmt_build/build.ninja" ]]; then
     PATH="$ROOT/toolchains/llvm-mingw/bin:$PATH" meson install -C "$dxmt_build" --no-rebuild >/dev/null
+    [[ $variant == dev || ! -f "$dxmt_build-i386/build.ninja" ]] ||
+        PATH="$ROOT/toolchains/llvm-mingw/bin:$PATH" meson install -C "$dxmt_build-i386" --no-rebuild >/dev/null
     log "reinstalled DXMT"
 fi
 log "done: $PREFIX/bin/wine"
