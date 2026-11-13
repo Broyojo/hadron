@@ -19,6 +19,9 @@ export HADRON_PROGRAM=1
 export STEAM_COMPAT_DATA_PATH="$HADRON_SUPPORT/programs"
 export STEAM_COMPAT_INSTALL_PATH="$dir"
 export STEAM_COMPAT_APP_ID="program-$(printf '%s' "$exe" | /sbin/md5 -q | cut -c1-12)"
+# Per-game settings can name a program by its file name, where it is installed is the user's
+# (scripts/steam-run, apply_profile).
+export HADRON_PROGRAM_EXE="$(basename "$exe")"
 export HADRON_APP_NAME="${HADRON_APP_NAME:-$(basename "$exe" .exe)}"
 # A program starts in its own folder, as Explorer starts it on Windows.
 cd "$dir" || exit 1

@@ -69,11 +69,25 @@ done
 
 # Per-game settings, like Proton's app defaults: lines of "<appid> NAME=value..." in the user's
 # games.conf, then Hadron's config/games.conf. Launch options win over both, the user's file over
-# Hadron's, since a setting is only taken while unset.
+# Hadron's, since a setting is only taken while unset. A program that is not on Steam
+# (scripts/program-run) is named "exe:<file name>", in any case, as Windows compares file names:
+# its id depends on where it is installed. A program started by it gets the same settings.
+program_exe=$(printf '%s' "${HADRON_PROGRAM_EXE:-}" | tr '[:upper:]' '[:lower:]')
+tab=$(printf '\t')
 apply_profile() {  # <file>
     [ -f "$1" ] || return 0
     while read -r id settings; do
-        [ "$id" = "${STEAM_COMPAT_APP_ID:-}" ] || continue
+        case "$id" in
+            exe:*)
+                # A file name may hold spaces: it runs to the first ".exe" that ends a word.
+                [ -n "$program_exe" ] || continue
+                line=$(printf '%s %s\n' "${id#exe:}" "$settings" | awk '{
+                    i = match(tolower($0), /\.exe([ \t]|$)/)
+                    if (i) print tolower(substr($0, 1, i + 3)) "\t" substr($0, i + 5) }')
+                [ "${line%%"$tab"*}" = "$program_exe" ] || continue
+                settings="${line#*"$tab"}" ;;
+            *) [ "$id" = "${STEAM_COMPAT_APP_ID:-}" ] || continue ;;
+        esac
         for setting in ${settings%%#*}; do
             name="${setting%%=*}"
             # Names only: this is a data file, nothing in it may run as shell code.
@@ -306,7 +320,7 @@ keep_watching() {
     # A recorded watchdog counts only while it still is one (a PID can be reused) and its waiter,
     # which ends with the session it watches, still runs: one left from a session that just ended
     # does not cover the new one.
-    read -r _watching _waiter < "$WINEPREFIX/.hadron-session-watchdog" 2>/dev/null
+    read -r _watching _waiter 2>/dev/null < "$WINEPREFIX/.hadron-session-watchdog"
     case "$(ps -o args= -p "${_watching:-0}" 2>/dev/null)" in
         *"/scripts/watchdog "*-after.mem.log*)
             case "$(ps -o args= -p "${_waiter:-0}" 2>/dev/null)" in
@@ -340,6 +354,9 @@ HADRON_SESSION_PID=$$ "$ROOT/scripts/play" "${STEAM_COMPAT_APP_ID:-${SteamAppId:
 launched=$!
 wait $launched
 status=$?
+# How it ended goes in the run log, which a report packs: a program that quits on its own at
+# startup leaves nothing else behind (#155).
+echo "exited with status $status at $(date +%H:%M:%S)" >> "$log" 2>/dev/null
 # A program shares its prefix with other programs: wait for it alone, and return its status.
 if [ -n "${HADRON_PROGRAM:-}" ]; then
     keep_watching
