@@ -1,0 +1,162 @@
+From 9ba500c010fe5bff2bf168117acc7af71ee4ab02 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Mon, 5 Oct 2026 17:35:14 +0800
+Subject: [PATCH] feat(d3d11): allow copying between different texture types in
+ `CopySubresourceRegion()`
+
+Fix #220
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit e40c9d7ae1cf476ee9cc54b9c2cab6ed09b2e595)
+---
+ src/d3d11/d3d11_context_impl.cpp | 76 +++++++++++++++++++++-----------
+ 1 file changed, 50 insertions(+), 26 deletions(-)
+
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index 0a2d16e..11f432a 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -321,6 +321,7 @@ public:
+   MTL_DXGI_FORMAT_DESC SrcFormat;
+   MTL_DXGI_FORMAT_DESC DstFormat;
+ 
++  bool DimensionIncompatible;
+   bool Invalid = true;
+ 
+   TextureCopyCommand(
+@@ -332,9 +333,8 @@ public:
+       SrcSubresource(SrcSubresource),
+       DstSubresource(DstSubresource),
+       SrcFormat(Src_.FormatDescription),
+-      DstFormat(Dst_.FormatDescription) {
+-    if (Dst_.Dimension != Src_.Dimension)
+-      return;
++      DstFormat(Dst_.FormatDescription),
++      DimensionIncompatible(Dst_.Dimension != Src_.Dimension) {
+ 
+     if (SrcFormat.PixelFormat == WMTPixelFormatInvalid)
+       return;
+@@ -347,7 +347,49 @@ public:
+     }
+     case D3D11_RESOURCE_DIMENSION_TEXTURE1D: {
+       D3D11_TEXTURE1D_DESC &dst_desc = Dst_.Texture1DDesc;
++      if (DstSubresource >= dst_desc.MipLevels * dst_desc.ArraySize) return;
++
++      Dst.Format = dst_desc.Format;
++      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
++      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
++      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
++      Dst.Height = 1;
++      Dst.Depth = 1;
++      break;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE2D: {
++      D3D11_TEXTURE2D_DESC1 &dst_desc = Dst_.Texture2DDesc;
++      if (DstSubresource >= dst_desc.MipLevels * dst_desc.ArraySize) return;
++
++      Dst.Format = dst_desc.Format;
++      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
++      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
++      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
++      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
++      Dst.Depth = 1;
++      break;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE3D: {
++      D3D11_TEXTURE3D_DESC1 &dst_desc = Dst_.Texture3DDesc;
++      if (DstSubresource >= dst_desc.MipLevels) return;
++
++      Dst.Format = dst_desc.Format;
++      Dst.MipLevel = DstSubresource;
++      Dst.ArraySlice = 0;
++      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
++      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
++      Dst.Depth = std::max(1u, dst_desc.Depth >> Dst.MipLevel);
++      break;
++    }
++    }
++
++    switch (Src_.Dimension) {
++    default: {
++      return;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE1D: {
+       D3D11_TEXTURE1D_DESC &src_desc = Src_.Texture1DDesc;
++      if (SrcSubresource >= src_desc.MipLevels * src_desc.ArraySize) return;
+ 
+       Src.Format = src_desc.Format;
+       Src.MipLevel = SrcSubresource % src_desc.MipLevels;
+@@ -356,17 +398,11 @@ public:
+       Src.Height = 1;
+       Src.Depth = 1;
+ 
+-      Dst.Format = dst_desc.Format;
+-      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
+-      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
+-      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
+-      Dst.Height = 1;
+-      Dst.Depth = 1;
+       break;
+     }
+     case D3D11_RESOURCE_DIMENSION_TEXTURE2D: {
+-      D3D11_TEXTURE2D_DESC1 &dst_desc = Dst_.Texture2DDesc;
+       D3D11_TEXTURE2D_DESC1 &src_desc = Src_.Texture2DDesc;
++      if (SrcSubresource >= src_desc.MipLevels * src_desc.ArraySize) return;
+ 
+       Src.Format = src_desc.Format;
+       Src.MipLevel = SrcSubresource % src_desc.MipLevels;
+@@ -375,17 +411,11 @@ public:
+       Src.Height = std::max(1u, src_desc.Height >> Src.MipLevel);
+       Src.Depth = 1;
+ 
+-      Dst.Format = dst_desc.Format;
+-      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
+-      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
+-      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
+-      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
+-      Dst.Depth = 1;
+       break;
+     }
+     case D3D11_RESOURCE_DIMENSION_TEXTURE3D: {
+-      D3D11_TEXTURE3D_DESC1 &dst_desc = Dst_.Texture3DDesc;
+       D3D11_TEXTURE3D_DESC1 &src_desc = Src_.Texture3DDesc;
++      if (SrcSubresource >= src_desc.MipLevels) return;
+ 
+       Src.Format = src_desc.Format;
+       Src.MipLevel = SrcSubresource;
+@@ -393,14 +423,6 @@ public:
+       Src.Width = std::max(1u, src_desc.Width >> Src.MipLevel);
+       Src.Height = std::max(1u, src_desc.Height >> Src.MipLevel);
+       Src.Depth = std::max(1u, src_desc.Depth >> Src.MipLevel);
+-
+-      Dst.Format = dst_desc.Format;
+-      Dst.MipLevel = DstSubresource;
+-      Dst.ArraySlice = 0;
+-      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
+-      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
+-      Dst.Depth = std::max(1u, dst_desc.Depth >> Dst.MipLevel);
+-
+       break;
+     }
+     }
+@@ -1110,6 +1132,8 @@ public:
+       break;
+     }
+     default:
++      if (Src.Dimension == D3D11_RESOURCE_DIMENSION_BUFFER)
++        return;
+       CopyTexture(TextureCopyCommand(Dst, DstSubresource, DstX, DstY, DstZ, Src, SrcSubresource, pSrcBox));
+       break;
+     }
+@@ -4018,7 +4042,7 @@ public:
+           auto dst_format = dst_->pixelFormat();
+           auto src = enc.access(src_, cmd.Src.MipLevel, cmd.Src.ArraySlice, ResourceAccess::Read);
+           auto dst = enc.access(dst_, cmd.Dst.MipLevel, cmd.Dst.ArraySlice, ResourceAccess::Write);
+-          if (Forget_sRGB(dst_format) != Forget_sRGB(src_format)) {
++          if (Forget_sRGB(dst_format) != Forget_sRGB(src_format) || cmd.DimensionIncompatible) {
+ 
+             // bitcast, using a temporary buffer
+             size_t bytes_per_row, bytes_per_image, bytes_total;
+-- 
+2.54.0 (Apple Git-157)
+

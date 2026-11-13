@@ -1,0 +1,28 @@
+From 3b7cdf29d6b18fe0130a219c10086c2a44ff05dc Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Fri, 2 Oct 2026 17:18:18 +0800
+Subject: [PATCH] fix(d3d11): raise vertex buffer binding count to
+ `D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit 830eb41996bce66a9671ba069349f0055c5d8789)
+---
+ src/d3d11/d3d11_context_state.hpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/d3d11/d3d11_context_state.hpp b/src/d3d11/d3d11_context_state.hpp
+index 3484bda..8198b43 100644
+--- a/src/d3d11/d3d11_context_state.hpp
++++ b/src/d3d11/d3d11_context_state.hpp
+@@ -95,7 +95,7 @@ template <> struct redundant_binding_trait<VERTEX_BUFFER_B> {
+ 
+ struct D3D11InputAssemblerStageState {
+   Com<IMTLD3D11InputLayout> InputLayout;
+-  BindingSet<VERTEX_BUFFER_B, 16> VertexBuffers;
++  BindingSet<VERTEX_BUFFER_B, D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT> VertexBuffers;
+   Com<D3D11ResourceCommon, false> IndexBuffer;
+   /**
+   either DXGI_FORMAT_R16_UINT or DXGI_FORMAT_R32_UINT
+-- 
+2.54.0 (Apple Git-157)
+
