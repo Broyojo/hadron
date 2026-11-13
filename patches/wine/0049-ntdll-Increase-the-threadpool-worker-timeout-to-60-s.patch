@@ -1,0 +1,33 @@
+From 27109549fc4a10de440998f9597cbbd6756f2d10 Mon Sep 17 00:00:00 2001
+From: Elizabeth Figura <zfigura@codeweavers.com>
+Date: Thu, 29 Oct 2026 14:35:58 -0500
+Subject: [PATCH] ntdll: Increase the threadpool worker timeout to 60 seconds.
+
+On Windows 10 it seems to be 67 seconds, but we'll use a less odd-looking value.
+
+This avoids an apparent bug with Denuvo visible in Dead Cells. If a thread exits
+at a certain point in time, it triggers a TLS callback which crashes due to
+incomplete decryption. In some environments, the 5 second timeout of a
+threadpool worker can frequently trigger this crash.
+
+(cherry picked from commit c37cb58e4c05d31ad3cec0112dc57fba68c1893e)
+---
+ dlls/ntdll/threadpool.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/threadpool.c b/dlls/ntdll/threadpool.c
+index b47a26775e..796338bf6f 100644
+--- a/dlls/ntdll/threadpool.c
++++ b/dlls/ntdll/threadpool.c
+@@ -95,7 +95,7 @@ struct timer_queue
+  * Object-oriented thread pooling API
+  */
+ 
+-#define THREADPOOL_WORKER_TIMEOUT 5000
++#define THREADPOOL_WORKER_TIMEOUT 60000
+ #define MAXIMUM_WAITQUEUE_OBJECTS (MAXIMUM_WAIT_OBJECTS - 1)
+ 
+ /* internal threadpool representation */
+-- 
+2.54.0 (Apple Git-157)
+
