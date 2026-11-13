@@ -1,0 +1,48 @@
+From 9e5b3c0afa9f4334ce899264926182e442fd15ca Mon Sep 17 00:00:00 2001
+From: Ryan Houdek <Sonicadvance1@gmail.com>
+Date: Thu, 5 Nov 2026 20:25:03 -0800
+Subject: [PATCH] CPUID: Fixes crash in CPUID
+
+When affinity changes are in play this can cause a crash because core
+index is larger than the number of cores known about.
+
+Happens on Frame.
+
+(cherry picked from commit b9fc587ac88e098613e33d12b77a8449ca93eabf)
+---
+ FEXCore/Source/Interface/Core/CPUID.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/CPUID.cpp b/FEXCore/Source/Interface/Core/CPUID.cpp
+index ddce98d66..a4ff516ec 100644
+--- a/FEXCore/Source/Interface/Core/CPUID.cpp
++++ b/FEXCore/Source/Interface/Core/CPUID.cpp
+@@ -1133,14 +1133,14 @@ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_8000_0004h(uint32_t Leaf) con
+ 
+ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_8000_0002h(uint32_t Leaf, uint32_t CPU) const {
+   FEXCore::CPUID::FunctionResults Res {};
+-  auto& Data = PerCPUData[CPU];
++  auto& Data = PerCPUData[std::min<uint32_t>(CPU, PerCPUData.size() - 1)];
+   memcpy(&Res, Data.ProductName, std::min(strlen(Data.ProductName), sizeof(FEXCore::CPUID::FunctionResults)));
+   return Res;
+ }
+ 
+ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_8000_0003h(uint32_t Leaf, uint32_t CPU) const {
+   FEXCore::CPUID::FunctionResults Res {};
+-  auto& Data = PerCPUData[CPU];
++  auto& Data = PerCPUData[std::min<uint32_t>(CPU, PerCPUData.size() - 1)];
+   const auto RemainingStringSize = std::max<ssize_t>(0, strlen(Data.ProductName) - 16);
+   memcpy(&Res, Data.ProductName + 16, std::min<size_t>(RemainingStringSize, sizeof(FEXCore::CPUID::FunctionResults)));
+   return Res;
+@@ -1148,7 +1148,7 @@ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_8000_0003h(uint32_t Leaf, uin
+ 
+ FEXCore::CPUID::FunctionResults CPUIDEmu::Function_8000_0004h(uint32_t Leaf, uint32_t CPU) const {
+   FEXCore::CPUID::FunctionResults Res {};
+-  auto& Data = PerCPUData[CPU];
++  auto& Data = PerCPUData[std::min<uint32_t>(CPU, PerCPUData.size() - 1)];
+   const auto RemainingStringSize = std::max<ssize_t>(0, strlen(Data.ProductName) - 32);
+   memcpy(&Res, Data.ProductName + 32, std::min<size_t>(RemainingStringSize, sizeof(FEXCore::CPUID::FunctionResults)));
+   return Res;
+-- 
+2.54.0 (Apple Git-157)
+
