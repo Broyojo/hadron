@@ -1,0 +1,40 @@
+From b800d4c2997e868439bb3b958d05184d29e271c4 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Mon, 26 Oct 2026 19:18:58 +0800
+Subject: [PATCH] fix(airconv): store call return point before redirecting to
+ branch
+
+In this case `bb->target` stores `call` before assigned uncondition branch, but later `call->return_point` is accessed again, a typical use-after-free.
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit 9839e55f98d4aca103957ee4132d6395a325a9ed)
+---
+ src/airconv/dxbc_converter_cfg.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/airconv/dxbc_converter_cfg.cpp b/src/airconv/dxbc_converter_cfg.cpp
+index 7fda483..c676f86 100644
+--- a/src/airconv/dxbc_converter_cfg.cpp
++++ b/src/airconv/dxbc_converter_cfg.cpp
+@@ -690,6 +690,7 @@ read_control_flow(
+         return cloned;
+       };
+ 
++      auto call_return_point = call->return_point;
+       bb->target = BasicBlockUnconditionalBranch{clone(func_entries.at(call->func_id))};
+ 
+       while (!block_to_redirect.empty()) {
+@@ -699,8 +700,8 @@ read_control_flow(
+         cloned->target = std::visit(
+             patterns{
+                 [](BasicBlockUndefined) -> BasicBlockTarget { return BasicBlockUndefined{}; },
+-                [&](BasicBlockReturn ret) -> BasicBlockTarget {
+-                  return BasicBlockUnconditionalBranch{call->return_point};
++                [=](BasicBlockReturn ret) -> BasicBlockTarget {
++                  return BasicBlockUnconditionalBranch{call_return_point};
+                 },
+                 [&](BasicBlockUnconditionalBranch uncond) -> BasicBlockTarget {
+                   return BasicBlockUnconditionalBranch{clone(uncond.target)};
+-- 
+2.54.0 (Apple Git-157)
+

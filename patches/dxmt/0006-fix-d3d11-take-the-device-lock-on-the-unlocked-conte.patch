@@ -1,0 +1,57 @@
+From c8063c290147ee0b3a484b6b255dff713a35c954 Mon Sep 17 00:00:00 2001
+From: Moritz Jost <78492794+jostmoritz@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 11:14:01 +0200
+Subject: [PATCH] fix(d3d11): take the device lock on the unlocked context
+ entries
+
+WaitUntilGPUIdle, TemporalUpscale, BeginUAVOverlap and EndUAVOverlap emitted commands without the immediate-context mutex.
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit a71b60ecc506484b964cba9ebd3f9fb2b2537e04)
+---
+ src/d3d11/d3d11_context_imm.cpp  | 1 +
+ src/d3d11/d3d11_context_impl.cpp | 3 +++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+index fbb59d8..987c488 100644
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -578,6 +578,7 @@ public:
+ 
+   virtual void
+   WaitUntilGPUIdle() override {
++    std::lock_guard<d3d11_device_mutex> lock(mutex);
+     uint64_t seq = cmd_queue.CurrentSeqId();
+     if(!InvalidateCurrentPass())
+       Commit();
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index 02eff44..0a2d16e 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -5212,6 +5212,7 @@ public:
+   }
+ 
+   void STDMETHODCALLTYPE TemporalUpscale(const MTL_TEMPORAL_UPSCALE_D3D11_DESC *pDesc) final {
++    std::lock_guard<typename ContextInternalState::device_mutex_t> lock(ctx_->mutex);
+     Rc<Texture> input, output, depth, motion_vector, exposure;
+     if (!(input = static_cast<D3D11ResourceCommon *>(pDesc->Color)->texture()))
+       return;
+@@ -5350,12 +5351,14 @@ public:
+   }
+ 
+   void STDMETHODCALLTYPE BeginUAVOverlap() final {
++    std::lock_guard<typename ContextInternalState::device_mutex_t> lock(ctx_->mutex);
+     ctx_->EmitOP([](ArgumentEncodingContext &enc) {
+       enc.setIntrapassBarrierControl(kIntrapassControlBitIgnoreUAVWaW);
+     });
+   }
+ 
+   void STDMETHODCALLTYPE EndUAVOverlap() final {
++    std::lock_guard<typename ContextInternalState::device_mutex_t> lock(ctx_->mutex);
+     ctx_->EmitOP([](ArgumentEncodingContext &enc) {
+       enc.setIntrapassBarrierControl(0);
+     });
+-- 
+2.54.0 (Apple Git-157)
+
