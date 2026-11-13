@@ -1,0 +1,215 @@
+From f71d64ad9cfb519a64445a0f8d91f1efda4090dc Mon Sep 17 00:00:00 2001
+From: NotProtonNot <332734261+NotProtonNot@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 22:37:04 -0400
+Subject: [PATCH] Block game input while the Steam overlay is open
+
+(cherry picked from commit 0c798e7148efe279627573f864210064788b427c)
+---
+ Makefile                    |  2 +-
+ lsteamclient/unixlib.cpp    | 18 ++++++++++
+ overlay-shim/overlay_shim.m | 67 +++++++++++++++++++++++++++++++++++++
+ overlay-shim/tests/input.m  | 65 +++++++++++++++++++++++++++++++++++
+ 4 files changed, 151 insertions(+), 1 deletion(-)
+ create mode 100644 overlay-shim/tests/input.m
+
+diff --git a/Makefile b/Makefile
+index 50f2404..83ffc0e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -360,7 +360,7 @@ overlay-shim-tests: $(OVERLAY_SHIM)
+ 		$(call SKIP,overlay-shim-tests,$(OVERLAY_SHIM_TESTS)); exit 0; fi; \
+ 	mkdir -p $(OUT_DIR); \
+ 	fail=0; ran=0; skipped=0; \
+-	for t in device bridge delivery; do \
++	for t in device bridge delivery input; do \
+ 		for a in arm64 x86_64; do \
+ 			$(CC) -arch $$a $(OVERLAY_SHIM_TEST_FLAGS) -o $(OUT_DIR)/$$t.$$a \
+ 				$(OVERLAY_SHIM_TESTS)/$$t.m || exit 1; \
+diff --git a/lsteamclient/unixlib.cpp b/lsteamclient/unixlib.cpp
+index 944ee88..7e71426 100644
+--- a/lsteamclient/unixlib.cpp
++++ b/lsteamclient/unixlib.cpp
+@@ -352,6 +352,20 @@ static NTSTATUS steamclient_Steam_BGetCallback( Params *params, bool wow64 )
+     return 0;
+ }
+ 
++#ifdef __APPLE__
++/* winemac sadly doesn't honor __wine_steamclient_GameOverlayActivated, soo... */
++static void notify_overlay_shim( const u_CallbackMsg_t *u_msg )
++{
++    void (*set_active)( int );
++
++    if (u_msg->m_iCallback != 0x14b /* GameOverlayActivated_t::k_iCallback */ || u_msg->m_cubParam < 1)
++        return;
++
++    if ((set_active = (void (*)( int ))dlsym( RTLD_DEFAULT, "np_overlay_shim_set_active" )))
++        set_active( *(const uint8_t *)u_msg->m_pubParam );
++}
++#endif /* __APPLE__ */
++
+ template< typename Params >
+ static NTSTATUS steamclient_callback_message_receive( Params *params, bool wow64 )
+ {
+@@ -360,6 +374,10 @@ static NTSTATUS steamclient_callback_message_receive( Params *params, bool wow64
+ 
+     if (!u_msg) return 0;
+ 
++#ifdef __APPLE__
++    notify_overlay_shim( u_msg );
++#endif
++
+     convert_callback_utow( u_msg->m_iCallback, (void *)u_msg->m_pubParam,
+                            u_msg->m_cubParam, (void *)w_msg->m_pubParam,
+                            w_msg->m_cubParam, false );
+diff --git a/overlay-shim/overlay_shim.m b/overlay-shim/overlay_shim.m
+index 2d2678b..48241fe 100644
+--- a/overlay-shim/overlay_shim.m
++++ b/overlay-shim/overlay_shim.m
+@@ -933,6 +933,73 @@ static void report_renderer_chain(void)
+ 	interpose(layer, "nextDrawable", (IMP)hook_next_drawable, (IMP *)&next_layer_drawable);
+ }
+ 
++// Proton drops input while the Steam Overlay is open. Winemac doesn't, that's not acceptable!
++enum {
++	event_left_down = 1,
++	event_left_up = 2,
++	event_right_down = 3,
++	event_right_up = 4,
++	event_mouse_moved = 5,
++	event_left_dragged = 6,
++	event_right_dragged = 7,
++	event_key_down = 10,
++	event_key_up = 11,
++	event_flags_changed = 12,
++	event_scroll_wheel = 22,
++	event_other_down = 25,
++	event_other_up = 26,
++	event_other_dragged = 27,
++};
++
++#define event_bit(type) (1ull << (type))
++
++static const uint64_t overlay_input_mask =
++        event_bit(event_left_down) | event_bit(event_left_up) | event_bit(event_right_down) |
++        event_bit(event_right_up) | event_bit(event_mouse_moved) |
++        event_bit(event_left_dragged) | event_bit(event_right_dragged) |
++        event_bit(event_key_down) | event_bit(event_key_up) | event_bit(event_flags_changed) |
++        event_bit(event_scroll_wheel) | event_bit(event_other_down) | event_bit(event_other_up) |
++        event_bit(event_other_dragged);
++
++static int overlay_active;
++static void (*next_send_event)(id, SEL, id);
++
++static int overlay_blocks(id event)
++{
++	typedef NSUInteger (*event_type_fn)(id, SEL);
++
++	if (!__atomic_load_n(&overlay_active, __ATOMIC_RELAXED) || event == nil)
++		return 0;
++
++	NSUInteger type = ((event_type_fn)objc_msgSend)(event, sel_registerName("type"));
++	return type < 64 && (overlay_input_mask & event_bit(type)) != 0;
++}
++
++static void hook_send_event(id app, SEL selector, id event)
++{
++	if (overlay_blocks(event))
++		return;
++
++	next_send_event(app, selector, event);
++}
++
++// Called by lsteamclient on GameOverlayActivated_t,
++__attribute__((visibility("default"))) void np_overlay_shim_set_active(int active)
++{
++	static dispatch_once_t once;
++
++	dispatch_once(&once, ^{
++		int hooked = interpose(objc_getClass("WineApplication"), "sendEvent:",
++		                       (IMP)hook_send_event, (IMP *)&next_send_event);
++		shim_log("overlay_shim np_overlay_shim_set_active: sendEvent=%s\n",
++		        hooked ? "hooked" : "missed");
++	});
++
++	__atomic_store_n(&overlay_active, active != 0, __ATOMIC_RELAXED);
++	shim_log("overlay_shim np_overlay_shim_set_active: %s game input\n",
++	        active ? "blocking" : "passing");
++}
++
+ // FEX specific stuff
+ __attribute__((visibility("default"))) void np_overlay_shim_install(void)
+ {
+diff --git a/overlay-shim/tests/input.m b/overlay-shim/tests/input.m
+new file mode 100644
+index 0000000..c225261
+--- /dev/null
++++ b/overlay-shim/tests/input.m
+@@ -0,0 +1,65 @@
++// Checks that -[WineApplication sendEvent:] drops game input while the overlay is open.
++#import "../overlay_shim.m"
++#import "check.h"
++
++@interface WineApplication : NSObject
++@property(nonatomic) int delivered;
++- (void)sendEvent:(id)event;
++@end
++
++@implementation WineApplication
++- (void)sendEvent:(id)event {
++	(void)event;
++	self.delivered++;
++}
++@end
++
++@interface TestEvent : NSObject
++@property(nonatomic) NSUInteger type;
++@end
++@implementation TestEvent
++@end
++
++static int delivered(WineApplication *app, NSUInteger type)
++{
++	TestEvent *event = [[TestEvent alloc] init];
++	event.type = type;
++	int before = app.delivered;
++	[app sendEvent:event];
++	[event release];
++	return app.delivered - before;
++}
++
++int main(void)
++{
++	@autoreleasepool {
++		WineApplication *app = [[WineApplication alloc] init];
++		static const NSUInteger blocked[] = {
++			event_left_down, event_left_up, event_right_down, event_right_up,
++			event_mouse_moved, event_left_dragged, event_right_dragged,
++			event_key_down, event_key_up, event_flags_changed, event_scroll_wheel,
++			event_other_down, event_other_up, event_other_dragged,
++		};
++		// ApplicationDefined, SystemDefined, AppKitDefined
++		static const NSUInteger passed[] = { 15, 14, 13 };
++
++		CHECK(delivered(app, event_mouse_moved) == 1, "input is sent to the game when the overlay is not open");
++
++		np_overlay_shim_set_active(1);
++		for (size_t i = 0; i < sizeof(blocked) / sizeof(*blocked); i++)
++			CHECK(delivered(app, blocked[i]) == 0, "event type %lu is not sent to the game when the overlay is open",
++			      (unsigned long)blocked[i]);
++		for (size_t i = 0; i < sizeof(passed) / sizeof(*passed); i++)
++			CHECK(delivered(app, passed[i]) == 1, "event type %lu is still sent to the game when the overlay is open",
++			      (unsigned long)passed[i]);
++		[app sendEvent:nil];
++
++		np_overlay_shim_set_active(0);
++		for (size_t i = 0; i < sizeof(blocked) / sizeof(*blocked); i++)
++			CHECK(delivered(app, blocked[i]) == 1, "event type %lu is sent to the game again after the overlay closes",
++			      (unsigned long)blocked[i]);
++		[app release];
++	}
++	printf("input is blocked while the overlay is open and comes back when it closes\n");
++	return 0;
++}
+-- 
+2.54.0 (Apple Git-157)
+
