@@ -29,6 +29,13 @@ ls -t "$HOME/Library/Application Support/Steam/steamapps/compatdata"/*/hadron-ru
     while IFS= read -r f; do
         appid=$(basename "$(dirname "$f")")
         tail -n 400 "$f" > "$dir/logs/$appid-hadron-run.log"
+        # mtld3d (Direct3D 9) writes its own log beside the game's executable, one per process:
+        # the end of the newest two.
+        game=$(grep -a '^game: ' "$f" | tail -n 1 | sed -E -e 's/^game: //' -e 's/(\.[eE][xX][eE]) .*/\1/')
+        [ -n "$game" ] || continue
+        ls -t "$(dirname "$game")/mtld3d-logs"/*.log 2>/dev/null | head -2 | while IFS= read -r m; do
+            tail -n 2000 "$m" > "$dir/logs/$appid-mtld3d-$(basename "$m")"
+        done
     done
 # And for Windows programs that are not on Steam (scripts/program-run), which share one prefix.
 programs_log="$HADRON_SUPPORT/programs/hadron-run.log"
