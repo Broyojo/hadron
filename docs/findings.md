@@ -1980,3 +1980,39 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## A window tool's tile left a maximized window maximized (fixed, #64)
+
+A Mac window tool that tiles a maximized window to half the screen, Rectangle for one, left it
+maximized as far as the program knew: it kept its restore button, and restoring it sent it back to
+the rect it had before it was maximized, not where the tool had put it. A maximized window moved to
+another display stayed maximized but didn't fill that display, and restored to the display it had
+left.
+
+A window tool changes a frame through the Accessibility API in steps (Rectangle sets the size, the
+position, then the size again), and winemac applied each step and left the window maximized. macOS
+may also hold a size the tool asks for to the display the window is leaving.
+
+Wine patch 0052 has the Cocoa window report when its frame has stopped changing
+(`WINDOW_FRAME_SETTLED`, 0.3 s after the last change). If the window filled a display when the
+change began, the driver judges the new frame as a whole:
+
+- On the same display, not filling it: the window isn't maximized any more, as on Windows when the
+  user resizes a maximized window, and it restores to its new frame.
+- On another display: it stays maximized and fills that display, and the rect it restores to moves
+  to that display, as with Windows' Win+Shift+arrow.
+
+`tests/win/own-frame.c standard hold-maximized` opens a maximized window with Wine's own frame,
+`tests/mac/ax-window.swift --frame` sets a frame as Rectangle does, and `tests/win/win-info.c` reads
+the window from the Windows side, then restores it as a double-click on its title bar does. Measured
+at 96 DPI on a MacBook Pro's display (1728×1117 points) with a 2560×1440 display beside it, with
+Hadron 0.3.3's runtime and the same runtime with this patch's `winemac.so`:
+
+| Gesture | 0.3.3 | Patched |
+|---|---|---|
+| Left half of the same display | still maximized; restores to its old rect | not maximized; stays on the half |
+| Moved to the other display, filling it | maximized, but 1087 points tall of the 1410 it would fill; restores to the old display | maximized, fills the other display; restores on it |
+
+On a display that isn't the main one, macOS keeps windows below that display's own menu bar, 30
+points, which `ax-window --screens` doesn't count, so a frame asked for at its very top comes out 30
+points lower. That is macOS, before and after.
