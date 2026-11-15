@@ -7,8 +7,8 @@
 // Usage: ax-window <pid or part of the app's name> [--resize WIDTH HEIGHT | --frame X Y WIDTH HEIGHT]
 //        ax-window --screens
 // Coordinates are points, from the top left of the main display, as the Accessibility API has them.
-// Exit status: 0, or 1 when a --resize or --frame didn't take. The terminal needs Accessibility
-// permission (System Settings › Privacy & Security › Accessibility).
+// Exit status: 0, or 1 when a --resize or --frame didn't take or found no window to try it on.
+// The terminal needs Accessibility permission (System Settings › Privacy & Security › Accessibility).
 //
 // Build: swiftc -O -o ax-window tests/mac/ax-window.swift
 import AppKit
@@ -101,6 +101,7 @@ func text(_ point: CGPoint?) -> String { point.map { "\(Int($0.x)),\(Int($0.y))"
 func text(_ size: CGSize?) -> String { size.map { "\(Int($0.width))x\(Int($0.height))" } ?? "?" }
 
 var failed = false
+var tried = 0
 for app in apps {
     let element = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(element, 2) // a busy Wine app must not hang the check
@@ -116,6 +117,7 @@ for app in apps {
               + "; subrole \(string(window, kAXSubroleAttribute) ?? "none")"
               + "; Mac title bar: \(hasCloseButton(window) ? "yes" : "no")")
         guard var target = wanted, let value = AXValueCreate(.cgSize, &target) else { continue }
+        tried += 1
         func move() -> AXError {
             guard var origin = wantedOrigin, let point = AXValueCreate(.cgPoint, &origin) else { return .success }
             return AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, point)
@@ -138,5 +140,9 @@ for app in apps {
         print("    asked for \(asked)\(text(target)): \(set == .success ? "accepted" : "refused (AX error \(set.rawValue))")"
               + ", now \(text(at)), \(text(now)): \(took ? "PASS" : "FAIL")")
     }
+}
+if wanted != nil && tried == 0 {
+    print("No window to try it on")
+    failed = true
 }
 exit(failed ? 1 : 0)
