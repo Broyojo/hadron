@@ -2012,6 +2012,14 @@ Hadron 0.3.3's runtime, and the same runtime with this patch's `winemac.so`:
 A first version took the scale from the system DPI as if Retina mode always meant 192 DPI. At 96 DPI
 it showed the hourglass at 16 points. The `wait` row at 96 DPI is the test for that.
 
+**Not covered:** the scale comes from the DPI of the window the cursor is set for, not from the DPI
+it was loaded at, which win32u doesn't keep. On the Mac the two only differ in a program that mixes
+DPI awareness: winemac gives every display the system DPI, so a window's DPI doesn't change with the
+display it is on. A cursor that a DPI-aware thread loaded at 192 DPI, set over a window that isn't
+DPI aware, shows at 64 points; the other way round, at 16 (from reading the code; not tested).
+Keeping the loading thread's DPI with the cursor would take a change to win32u and to what it tells
+the driver.
+
 `nscursor-log.dylib` goes in with `STEAM_DYLD_INSERT_LIBRARIES`, which `scripts/play` passes on for
 a Steam game. For a program run with `scripts/program-run`, `scripts/play` unsets it, so for these
 runs that line was taken out of a copy of the runtime.
