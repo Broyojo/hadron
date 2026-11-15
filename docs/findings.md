@@ -1980,3 +1980,40 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## A sideways swipe did nothing in programs that only know Shift + wheel (fixed, #66)
+
+A sideways swipe on a trackpad, or a mouse's sideways wheel, reaches a Windows program as
+`WM_MOUSEHWHEEL`. Many programs from before Windows Vista, or built on libraries from before it,
+never handle that message; most of them scroll sideways with Shift and the up-and-down wheel. In
+them a sideways swipe did nothing: the message went up to `DefWindowProc`, which drops it.
+Enterprise Architect's diagrams are one example.
+
+Wine patch 0055 gives `DefWindowProc` a fallback, in win32u. A sideways wheel that no window from
+the target up to its top-level window handled is sent to the target as `WM_MOUSEWHEEL`, with
+`MK_SHIFT` and the delta turned around, as a Shift + wheel would arrive. The Shift key's own state
+(`GetKeyState`) is left as it is. A program that handles the sideways wheel never sees the fallback,
+and the up-and-down wheel is untouched. This touches shared Wine code, not only the Mac driver, but
+nothing in it is specific to the Mac.
+
+`tests/win/scroll-target.c` counts what reaches a view: `legacy` handles only the wheel and Shift +
+wheel, `hwheel` handles the sideways wheel itself, `toplevel` has no child view, and `send-right`
+and `send-down` post ten wheel messages of 40 to it, as Wine does for a swipe. With Hadron 0.3.3's
+runtime, and the same runtime with this patch's `win32u.so`:
+
+| Case | 0.3.3 | Patched |
+|---|---|---|
+| `legacy send-right` | nothing scrolled | 400 to the right, as Shift + wheel |
+| `legacy toplevel send-right` | nothing scrolled | 400 to the right |
+| `legacy send-down` (control) | 400 down | 400 down |
+| `hwheel send-right` (control) | 400 to the right | 400 to the right |
+
+A real swipe and a mouse's sideways wheel scrolled Enterprise Architect's diagrams sideways with the
+patch (owner's runs, 2026-11-15). Posting is used here because macOS gives scroll events that one
+program posts to another no window, and winemac drops those.
+
+Pull request #115 (Shift with the vertical wheel, open) works at the other end, on the Mac event: it
+keeps a vertical wheel vertical while Shift is held. From reading it (the two were not tested
+together), they don't overlap. With both, Shift + wheel arrives as `WM_MOUSEWHEEL` with `MK_SHIFT`,
+and a sideways swipe arrives as `WM_MOUSEHWHEEL`, which falls back to the same when the program
+ignores it.

@@ -1,0 +1,94 @@
+From ca96c325606260dae19c092f5b02e46deec9827a Mon Sep 17 00:00:00 2001
+From: Ondrej Simon <ondrej@dorhawk.software>
+Date: Sun, 15 Nov 2026 10:52:47 +0100
+Subject: [PATCH] win32u: Give a window that ignores the sideways wheel Shift
+ and the wheel.
+
+Many apps from before Windows Vista, or built on libraries from before
+it, never handle WM_MOUSEHWHEEL, so a sideways swipe on a trackpad does
+nothing in them; most scroll sideways with Shift and the wheel. When no
+window from the target up to its top-level window takes the sideways
+wheel, DefWindowProc sends the target WM_MOUSEWHEEL with MK_SHIFT and
+the delta turned around.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/win32u/defwnd.c         | 37 +++++++++++++++++++++++++++++++++++-
+ dlls/win32u/ntuser_private.h |  2 ++
+ 2 files changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/win32u/defwnd.c b/dlls/win32u/defwnd.c
+index a88304fa79..066f071b80 100644
+--- a/dlls/win32u/defwnd.c
++++ b/dlls/win32u/defwnd.c
+@@ -2400,6 +2400,38 @@ static LRESULT handle_nc_mouse_leave( HWND hwnd )
+ }
+ 
+ 
++/* The sideways wheel (WM_MOUSEHWHEEL) came with Windows Vista, and many apps from before it, or
++ * built on libraries from before it, never handle it: a sideways swipe on a trackpad does nothing
++ * in them. Most of them scroll sideways with Shift and the wheel instead. So when no window from
++ * the one that got the sideways wheel up to its top-level window took it, give that window Shift
++ * and the wheel, turned the other way (wheel up is left, sideways wheel up is right). An app that
++ * handles the sideways wheel anywhere in the chain never sees the difference. */
++static LRESULT default_hwheel( HWND hwnd, WPARAM wparam, LPARAM lparam )
++{
++    struct user_thread_info *info = get_user_thread_info();
++    BOOL outermost = !info->hwheel_depth;
++    LRESULT result = 0;
++
++    if (outermost) info->hwheel_unhandled = FALSE;
++    if (get_window_long( hwnd, GWL_STYLE ) & WS_CHILD)
++    {
++        info->hwheel_depth++;
++        result = send_message( get_parent( hwnd ), WM_MOUSEHWHEEL, wparam, lparam );
++        info->hwheel_depth--;
++    }
++    else info->hwheel_unhandled = TRUE;
++
++    if (outermost && info->hwheel_unhandled)
++    {
++        info->hwheel_unhandled = FALSE;
++        TRACE( "%p doesn't take the sideways wheel: giving it Shift and the wheel\n", hwnd );
++        result = send_message( hwnd, WM_MOUSEWHEEL,
++                               MAKEWPARAM( GET_KEYSTATE_WPARAM( wparam ) | MK_SHIFT,
++                                           -GET_WHEEL_DELTA_WPARAM( wparam ) ), lparam );
++    }
++    return result;
++}
++
+ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi )
+ {
+     LRESULT result = 0;
+@@ -2588,11 +2620,14 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+         break;
+ 
+     case WM_MOUSEWHEEL:
+-    case WM_MOUSEHWHEEL:
+         if (get_window_long( hwnd, GWL_STYLE ) & WS_CHILD)
+             result = send_message( get_parent( hwnd ), msg, wparam, lparam );
+         break;
+ 
++    case WM_MOUSEHWHEEL:
++        result = default_hwheel( hwnd, wparam, lparam );
++        break;
++
+     case WM_ERASEBKGND:
+     case WM_ICONERASEBKGND:
+         {
+diff --git a/dlls/win32u/ntuser_private.h b/dlls/win32u/ntuser_private.h
+index 26bab84b2e..f33b53e02f 100644
+--- a/dlls/win32u/ntuser_private.h
++++ b/dlls/win32u/ntuser_private.h
+@@ -132,6 +132,8 @@ struct user_thread_info
+     struct mouse_tracking_info   *mouse_tracking_info;    /* NtUserTrackMouseEvent handling */
+     struct opengl_thread_data    *opengl_data;            /* OpenGL private thread data */
+     struct list                   known_pointers;         /* list of known pointers */
++    WORD                          hwheel_depth;           /* DefWindowProc passing WM_MOUSEHWHEEL to parents */
++    BOOL                          hwheel_unhandled;       /* and no window in the chain took it */
+ };
+ 
+ extern struct user_thread_info *get_user_thread_info(void);
+-- 
+2.56.1
+
