@@ -1,0 +1,62 @@
+From 90c81d94b1958814acfd907dda8878078ee3b56b Mon Sep 17 00:00:00 2001
+From: Ondrej Simon <ondrej@dorhawk.software>
+Date: Sun, 15 Nov 2026 07:41:39 +0100
+Subject: [PATCH 50/51] winemac.drv: Let macOS resize windows that draw their
+ own frame.
+
+An app that draws its own title bar and border takes the whole window
+as its client area, so the window has no visible frame, and
+get_cocoa_window_features gave it no features at all. Its Cocoa window
+wasn't resizable, though the app's sizing border (WS_THICKFRAME) lets
+the user resize it from the Windows side: window tools that resize
+through the Accessibility API, such as Rectangle, could move such a
+window but not resize it, and the edges had no Mac resize cursors.
+
+Keep resizable for such windows, and let a borderless Cocoa window be
+resizable too.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/winemac.drv/cocoa_window.m | 6 +++++-
+ dlls/winemac.drv/window.c       | 8 +++++++-
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 62425f1a49..2173935cd1 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -77,7 +77,11 @@ static NSUInteger style_mask_for_features(const struct macdrv_window_features* w
+         if (wf->resizable || wf->maximize_button) style_mask |= NSWindowStyleMaskResizable;
+         if (wf->utility) style_mask |= NSWindowStyleMaskUtilityWindow;
+     }
+-    else style_mask = NSWindowStyleMaskBorderless;
++    else
++    {
++        style_mask = NSWindowStyleMaskBorderless;
++        if (wf->resizable) style_mask |= NSWindowStyleMaskResizable;
++    }
+ 
+     if (wf->prevents_app_activation) style_mask |= NSWindowStyleMaskNonactivatingPanel;
+ 
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index 872e317ad7..ff03d5cb4b 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -86,7 +86,13 @@ static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win
+     struct macdrv_window_features wf = {0};
+ 
+     if (ex_style & WS_EX_NOACTIVATE) wf.prevents_app_activation = TRUE;
+-    if (EqualRect(&data->rects.window, &data->rects.visible)) return wf;
++    if (EqualRect(&data->rects.window, &data->rects.visible))
++    {
++        /* The app draws its own frame, but a sizing border still lets the user resize the
++         * window: let macOS and its window tools resize it too. */
++        if ((style & WS_THICKFRAME) && !data->shaped) wf.resizable = TRUE;
++        return wf;
++    }
+ 
+     return get_window_features_for_style(style, ex_style, data->shaped);
+ }
+-- 
+2.56.1
+

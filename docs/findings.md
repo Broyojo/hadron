@@ -1980,3 +1980,33 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## Window tools could move a window that draws its own frame, but not resize it (fixed, #63)
+
+Many desktop programs draw their own title bar and border: ribbon toolbars, and programs with a
+title bar of their own. Mac window tools such as Rectangle work through the Accessibility API. They
+could move such a window but not resize it.
+
+Two causes in winemac:
+
+- A program that takes the whole window as its client area (`WM_NCCALCSIZE`), or a popup with a
+  sizing border and no caption, has no frame Wine draws, and `get_cocoa_window_features` gave its
+  Cocoa window no features at all, so it wasn't resizable. Wine patch 0050 keeps it resizable when
+  the window has a sizing border (`WS_THICKFRAME`), and lets a borderless Cocoa window be resizable.
+- Some ribbon libraries give a window that isn't maximized a window region: one rectangle a pixel
+  larger than the window, set again after every size change. It doesn't change the window's outline,
+  but winemac counted any region as a shape, and a shaped window isn't resizable from the Mac side.
+  Wine patch 0051 doesn't count a region that covers the whole window as a shape, for a window that
+  draws its own frame.
+
+`tests/win/own-frame.c` opens each kind of frame and `tests/mac/ax-window.swift` asks for a new size
+through the Accessibility API, as Rectangle does (`ax-window <pid> --resize 800 500`). Measured at
+96 DPI, with Hadron 0.3.3's runtime, and the same runtime with this patch's `winemac.so`:
+
+| Frame | 0.3.3 | Patched |
+|---|---|---|
+| `standard` (Wine's frame, the control) | 800×500 | 800×500 |
+| `popup` | refused (`kAXErrorFailure`) | 800×500 |
+| `popup region` | refused | 800×500 |
+| `nccalc region` | refused | 800×500 |
+
