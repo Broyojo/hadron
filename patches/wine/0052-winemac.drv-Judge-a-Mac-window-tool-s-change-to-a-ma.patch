@@ -1,4 +1,4 @@
-From 6a63800d6cd0978125ce9ca0c66e75401d0de76d Mon Sep 17 00:00:00 2001
+From 571653d0634216a5f9463e98b3745fd4fe78e525 Mon Sep 17 00:00:00 2001
 From: Ondrej Simon <ondrej@dorhawk.software>
 Date: Sun, 15 Nov 2026 09:45:51 +0100
 Subject: [PATCH] winemac.drv: Judge a Mac window tool's change to a maximized
@@ -18,21 +18,30 @@ changing (WINDOW_FRAME_SETTLED, 0.3 s after the last change), and the
 driver judges the frame as a whole, against where the change began, if
 the window filled a display then:
 
-- On the same display, not filling it: the window isn't maximized any
-  more, as on Windows when the user resizes a maximized window. It
-  restores to its new frame.
-- On another display: it stays maximized, fills that display, and the
-  rect it restores to moves along to that display, as with Windows'
+- Not filling a display, the same one or another (a half, a third, a
+  frame with gaps around it): the window isn't maximized any more, as on
+  Windows when the user resizes a maximized window. It restores to its
+  new frame.
+- Moved to another display whole: filling it, the size it was (a move
+  without a new size), or as wide as it and as tall as it was (what
+  macOS leaves of a maximize there, holding the height to the display
+  the window left): it stays maximized, fills that display, and the rect
+  it restores to moves along to that display, as with Windows'
   Win+Shift+arrow.
+
+A window fills a display when its edges reach the work area's, give or
+take 2 points, and its top is no more than a menu bar lower than it was
+at the start: a Mac title bar sits above the visible rect, and a display
+that isn't the main one has a menu bar its work area doesn't leave out.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  dlls/winemac.drv/cocoa_window.m |  12 +++
- dlls/winemac.drv/event.c        |   5 ++
+ dlls/winemac.drv/event.c        |   5 +
  dlls/winemac.drv/macdrv.h       |   3 +
  dlls/winemac.drv/macdrv_cocoa.h |   1 +
- dlls/winemac.drv/window.c       | 133 +++++++++++++++++++++++++++++++-
- 5 files changed, 151 insertions(+), 3 deletions(-)
+ dlls/winemac.drv/window.c       | 166 +++++++++++++++++++++++++++++++-
+ 5 files changed, 184 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 index 62425f1a49..873cf5f0e5 100644
@@ -128,7 +137,7 @@ index 0c5523654d..61f50b23a4 100644
      WINDOW_LOST_FOCUS,
      WINDOW_MAXIMIZE_REQUESTED,
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 872e317ad7..b1d4db9d80 100644
+index 872e317ad7..96a157945e 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
 @@ -1649,6 +1649,10 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
@@ -142,36 +151,54 @@ index 872e317ad7..b1d4db9d80 100644
  
      TRACE("win %p/%p new_rects %s style %08x flags %08x surface %p\n", hwnd, data->cocoa_window,
            debugstr_window_rects(new_rects), new_style, swp_flags, surface);
-@@ -1729,6 +1733,28 @@ void macdrv_window_close_requested(HWND hwnd)
+@@ -1729,6 +1733,46 @@ void macdrv_window_close_requested(HWND hwnd)
  }
  
  
++/* raw pixels in a number of Mac points */
++static int points(int count)
++{
++    return retina_on ? 2 * count : count;
++}
++
++
 +/***********************************************************************
-+ *              fills_work_area
++ *              reaches_work_area
 + *
-+ * Whether a visible rect (raw pixels) covers the work area of the display it is mostly on, as a
-+ * maximized window does: within a 32nd of the work area, so a window that hangs its sizing border
-+ * past the edges, or that macOS keeps below the menu bar, counts, and a window tool's halves and
-+ * thirds don't. Call it with the thread's DPI awareness set to per-monitor.
++ * Whether a visible rect (raw pixels) reaches the left, right and bottom edges of the work area
++ * of the display it is mostly on, as a maximized window does, give or take 2 points; a window that
++ * hangs its sizing border past them counts. The top isn't judged: a Mac title bar sits above the
++ * visible rect, and so does the menu bar of a display that isn't the main one, which that display's
++ * work area doesn't leave out. Call it with the thread's DPI awareness set to per-monitor.
 + */
-+static BOOL fills_work_area(const RECT *visible, MONITORINFO *info)
++static BOOL reaches_work_area(const RECT *visible, MONITORINFO *info)
 +{
 +    HMONITOR monitor = NtUserMonitorFromRect(visible, MONITOR_DEFAULTTONEAREST);
-+    int slack_x, slack_y;
 +
 +    info->cbSize = sizeof(*info);
 +    if (!monitor || !NtUserGetMonitorInfo(monitor, info)) return FALSE;
-+    slack_x = (info->rcWork.right - info->rcWork.left) / 32;
-+    slack_y = (info->rcWork.bottom - info->rcWork.top) / 32;
-+    return visible->left <= info->rcWork.left + slack_x && visible->top <= info->rcWork.top + slack_y &&
-+           visible->right >= info->rcWork.right - slack_x && visible->bottom >= info->rcWork.bottom - slack_y;
++    return visible->left <= info->rcWork.left + points(2) && visible->right >= info->rcWork.right - points(2) &&
++           visible->bottom >= info->rcWork.bottom - points(2);
++}
++
++
++/* whether a visible rect on another display is the window moved there whole, not tiled: see
++ * macdrv_window_frame_settled */
++static BOOL moved_whole(const RECT *visible, const RECT *start, const MONITORINFO *end_info)
++{
++    int width = visible->right - visible->left, height = visible->bottom - visible->top;
++    int start_width = start->right - start->left, start_height = start->bottom - start->top;
++
++    if (abs(width - start_width) <= points(2) && abs(height - start_height) <= points(2)) return TRUE;
++    return visible->left <= end_info->rcWork.left + points(2) && visible->right >= end_info->rcWork.right - points(2) &&
++           height >= start_height - points(2);
 +}
 +
 +
  /***********************************************************************
   *              macdrv_window_frame_changed
   *
-@@ -1737,7 +1763,7 @@ void macdrv_window_close_requested(HWND hwnd)
+@@ -1737,7 +1781,7 @@ void macdrv_window_close_requested(HWND hwnd)
  void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
  {
      struct macdrv_win_data *data;
@@ -180,7 +207,7 @@ index 872e317ad7..b1d4db9d80 100644
      UINT flags = SWP_NOACTIVATE | SWP_NOZORDER;
      int width, height;
      BOOL being_dragged;
-@@ -1756,8 +1782,9 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1756,8 +1800,9 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
            wine_dbgstr_cgrect(event->window_frame_changed.frame),
            event->window_frame_changed.fullscreen, event->window_frame_changed.in_resize);
  
@@ -192,7 +219,7 @@ index 872e317ad7..b1d4db9d80 100644
      width = rect.right - rect.left;
      height = rect.bottom - rect.top;
  
-@@ -1776,6 +1803,16 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1776,6 +1821,16 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
                data->rects.window.bottom - data->rects.window.top, width, height);
  
      being_dragged = data->drag_event != NULL;
@@ -209,7 +236,7 @@ index 872e317ad7..b1d4db9d80 100644
      release_win_data(data);
  
      if (event->window_frame_changed.fullscreen)
-@@ -1792,6 +1829,96 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1792,6 +1847,111 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
  }
  
  
@@ -220,20 +247,22 @@ index 872e317ad7..b1d4db9d80 100644
 + * on the Mac side (a window tool such as Rectangle, or the user's shortcut for one) changed the
 + * frame of a maximized window that filled a display, judge where it ended up:
 + *
-+ * - On the same display, not filling it (a half, a third): the window isn't maximized any more, as
-+ *   on Windows when the user resizes a maximized window. It restores to its new frame. (Dragging
-+ *   its edge with the mouse is handled in windowWillStartLiveResize.)
-+ * - On another display: it stays maximized and fills that display, whatever size it came with
-+ *   (macOS may hold a size to the display the window left), and the rect it restores to moves
-+ *   along to that display, as with Windows' Win+Shift+arrow.
++ * - Not filling a display (a half, a third, on the same display or another): the window isn't
++ *   maximized any more, as on Windows when the user resizes a maximized window. It restores to its
++ *   new frame. (Dragging its edge with the mouse is handled in windowWillStartLiveResize.)
++ * - Moved to another display whole, filling it, keeping its size, or as wide as it and as tall
++ *   as it was (macOS holding its height to the display it left): it stays maximized and fills that
++ *   display, and the rect it restores to moves along to that display, as with Windows'
++ *   Win+Shift+arrow.
 + */
 +void macdrv_window_frame_settled(HWND hwnd)
 +{
 +    struct macdrv_win_data *data;
 +    MONITORINFO start_info, end_info;
 +    RECT start, visible, window;
-+    BOOL end_fills;
++    BOOL end_fills, same_display;
 +    UINT context;
++    int start_top;
 +
 +    if (!(data = get_win_data(hwnd))) return;
 +    if (!data->frame_gesture)
@@ -250,21 +279,34 @@ index 872e317ad7..b1d4db9d80 100644
 +    if (!(NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZE)) return;
 +
 +    context = NtUserSetThreadDpiAwarenessContext(NTUSER_DPI_PER_MONITOR_AWARE_V2);
-+    end_fills = fills_work_area(&visible, &end_info);
-+    if (!fills_work_area(&start, &start_info))
-+        TRACE("%p didn't fill a display: leaving it as it is\n", hwnd);
-+    else if (EqualRect(&start_info.rcMonitor, &end_info.rcMonitor))
++    if (!reaches_work_area(&start, &start_info))
 +    {
-+        if (!end_fills)
-+        {
-+            TRACE("%p no longer fills its display: it restores to %s\n", hwnd, wine_dbgstr_rect(&window));
-+            NtUserSetRawWindowPos(hwnd, window, 0, TRUE);
-+            NtUserSetThreadDpiAwarenessContext(context);
-+            perform_window_command(hwnd, WS_MAXIMIZE, 0, SC_RESTORE, HTMAXBUTTON);
-+            return;
-+        }
++        TRACE("%p didn't fill a display: leaving it as it is\n", hwnd);
++        NtUserSetThreadDpiAwarenessContext(context);
++        return;
 +    }
-+    else
++    /* How far below its work area's top the window's visible rect was: its Mac title bar, if it has
++     * one, and the menu bar of a display that isn't the main one. It may end up lower by as much as
++     * a menu bar: macOS keeps a frame a window tool sets below the menu bar, which a maximized window
++     * with a Mac title bar may have reached into, and on another display there may be one. */
++    start_top = start.top - start_info.rcWork.top;
++    end_fills = reaches_work_area(&visible, &end_info) && visible.top - end_info.rcWork.top <= start_top + points(40);
++    same_display = EqualRect(&start_info.rcMonitor, &end_info.rcMonitor);
++
++    /* Moved to another display, the window may not fill it and still be meant to: a window tool may
++     * move it without a new size, and macOS may hold a window's height to the display it leaves
++     * (never its width), so a "maximize on the next display" can come out short. Such a window is
++     * the size it was, or as wide as the new work area and at least as tall as it was; a window
++     * tool's halves, thirds and other tiles aren't. */
++    if (!end_fills && (same_display || !moved_whole(&visible, &start, &end_info)))
++    {
++        TRACE("%p no longer fills a display: it restores to %s\n", hwnd, wine_dbgstr_rect(&window));
++        NtUserSetRawWindowPos(hwnd, window, 0, TRUE);
++        NtUserSetThreadDpiAwarenessContext(context);
++        perform_window_command(hwnd, WS_MAXIMIZE, 0, SC_RESTORE, HTMAXBUTTON);
++        return;
++    }
++    if (!same_display)
 +    {
 +        WINDOWPLACEMENT placement = {.length = sizeof(placement)};
 +
