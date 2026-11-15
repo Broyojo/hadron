@@ -2046,3 +2046,49 @@ Hadron 0.3.3's runtime and the same runtime with this patch's `winemac.so`:
 On a display that isn't the main one, macOS keeps windows below that display's own menu bar, 30
 points, which `ax-window --screens` doesn't count, so a frame asked for at its very top comes out 30
 points lower. That is macOS, before and after.
+
+## A maximized window's hidden border showed past the screen's edges (fixed, #65)
+
+Windows maximizes a window with a sizing border so that the border hangs past the edges of the work
+area, off the monitor or under the taskbar, where the user never sees it. winemac showed it. A
+maximized window that draws its own frame, but leaves `WM_GETMINMAXINFO` to Windows (Enterprise
+Architect's frame, `tests/win/own-frame.c nccalc default-minmax`), hung 2 to 3 points past both
+sides of the display, and started maximized, 5 points into the Dock. A popup without a caption,
+which Windows maximizes over the whole monitor, hung past every edge.
+
+Wine patch 0053 (win32u) clips a maximized top-level window's visible rect to the work area of its
+monitor, or to the monitor for a window Windows maximizes over the whole monitor: what the user sees
+of it on Windows. The window rect a program reads keeps its border past the work area, as on
+Windows. Patch 0054 keeps winemac in step: the driver told a window that draws its own frame from
+its visible rect being the whole window, which a clipped rect no longer is, so it remembers that
+instead, or such a window would get a Mac title bar. When a window tool moves a maximized window,
+the window's frame is the clipped one; moved to another display, it fills that display's work area
+as it filled the first, with each edge where it was from that area's edges.
+
+0053 and 0054 build on #63 and #64 (patches 0050 to 0052), which make such windows resizable and
+judge a window tool's change to a maximized window.
+
+Measured with `tests/win/own-frame.c`, started maximized (`hold-maximized`, as a program that
+remembers being maximized opens) or maximized as a double-click on its title bar does (`hold`, then
+`tests/win/win-info.c own-frame maximize`), and `tests/mac/ax-window.swift` reading the Mac window,
+on a display of 1728×1117 points, usable 0,33 1728×1024, with Hadron 0.3.3's runtime and the same
+runtime with patches 0050 to 0054:
+
+| Frame | How | DPI | 0.3.3 | Patched |
+|---|---|---|---|---|
+| `nccalc default-minmax` | started maximized | 192 | -3,33 1733×1029 | 0,33 1728×1024, the usable area |
+| `nccalc default-minmax` | double-click | 192 | -3,65 1733×992 | 0,65 1728×992 |
+| `nccalc default-minmax` | double-click | 96 | -2,65 1732×992 | 0,65 1728×992 |
+| `popup default-minmax` | double-click | 192 | -2,-2 1732×1121 | 0,0 1728×1117, the whole display |
+| `popup`, `nccalc`, `border`, `standard` | double-click | 192 and 96 | as patched | unchanged |
+
+The window rect a program reads still has its border past the work area, as on Windows: started
+maximized at 192 DPI, -5,61 to 3461,2119 (0.3.3: -6,66 to 3460,2124). No frame gained or lost a Mac
+title bar. With `nccalc default-minmax` maximized at 192 DPI, a window tool's left half gives a
+window that isn't maximized, on the half (0.3.3 refused the size). Moved to a 2560×1440 display, the
+window stays maximized at that display's full width.
+
+**Still open:** an `nccalc` window maximized after it was shown, as with the double-click here,
+comes out 32 points short at the top, at 96 and at 192 DPI, with and without these patches: its
+window rect's top is 64 pixels (at 192 DPI) below the work area's, on the Windows side already.
+Started maximized, the same window fills the work area. Not looked into yet.

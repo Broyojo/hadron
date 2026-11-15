@@ -1,0 +1,74 @@
+From c13b341fa67c3e84df5c721ed85e416d570564a2 Mon Sep 17 00:00:00 2001
+From: Ondrej Simon <ondrej@dorhawk.software>
+Date: Sun, 15 Nov 2026 09:58:27 +0100
+Subject: [PATCH 53/54] win32u: Show a maximized window only within its work
+ area.
+
+Windows maximizes a window with a sizing border so that the border
+hangs past the edges of the work area: off the monitor, or under the
+taskbar, where the user never sees it. A host window shows it: on macOS
+the border showed as a strip under the menu bar, and since macOS keeps
+a window's top below the menu bar, it moved the whole window down, so
+its bottom went twice the border into the Dock (Enterprise Architect,
+maximized).
+
+Clip a maximized window's visible rect to the work area of its monitor,
+or to the monitor for a window Windows maximizes over the whole monitor
+(a popup without a caption), as the user sees it on Windows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/win32u/window.c | 30 +++++++++++++++++++++++++++++-
+ 1 file changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/win32u/window.c b/dlls/win32u/window.c
+index 8ddc40fb17..b47333b3d9 100644
+--- a/dlls/win32u/window.c
++++ b/dlls/win32u/window.c
+@@ -2124,7 +2124,7 @@ done:
+ }
+ 
+ 
+-static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style, const struct window_rects *rects )
++static RECT get_visible_rect_unclipped( HWND hwnd, BOOL shaped, UINT style, UINT ex_style, const struct window_rects *rects )
+ {
+     struct ratio dpi = get_dpi_for_window( hwnd );
+     UINT style_mask, ex_style_mask;
+@@ -2148,6 +2148,34 @@ static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style,
+     return visible_rect;
+ }
+ 
++/* Windows maximizes a window with a sizing border so that the border hangs past the edges of
++ * the work area: off the monitor, or under the taskbar, so the user never sees it. A host window
++ * would show it, and the host may move the whole window to keep its top edge on screen (macOS
++ * keeps windows below the menu bar), pushing the rest past the other edge. So show a maximized
++ * window only where Windows would: within the work area of its monitor, or within the monitor for
++ * a window Windows maximizes over the whole monitor (a popup without a caption). */
++static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style, const struct window_rects *rects )
++{
++    RECT visible_rect = get_visible_rect_unclipped( hwnd, shaped, style, ex_style, rects ), area, clipped, dummy;
++    MONITORINFO info;
++
++    if (!(style & WS_MAXIMIZE) || (style & WS_CHILD) || get_present_rect( hwnd, &dummy, get_thread_dpi() ))
++        return visible_rect;
++
++    info = monitor_info_from_rect( rects->window, get_thread_dpi() );
++    if (IsRectEmpty( &info.rcMonitor )) return visible_rect;
++    if ((style & WS_MAXIMIZEBOX) && ((style & WS_CAPTION) == WS_CAPTION || !(style & WS_POPUP)))
++        area = info.rcWork;
++    else
++        area = info.rcMonitor;
++    if (!intersect_rect( &clipped, &visible_rect, &area )) return visible_rect;
++
++    if (!EqualRect( &clipped, &visible_rect ))
++        TRACE( "hwnd %p maximized: visible_rect %s clipped to %s\n", hwnd, wine_dbgstr_rect( &visible_rect ),
++               wine_dbgstr_rect( &clipped ) );
++    return clipped;
++}
++
+ 
+ static BOOL get_surface_rect( const RECT *visible_rect, RECT *surface_rect )
+ {
+-- 
+2.56.1
+
