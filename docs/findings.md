@@ -2072,3 +2072,58 @@ would have its surface anchored at the clipped corner rather than at the surface
 virtual visible rect's, in `get_surface_rect`). Whether such a window reaches the driver as
 fullscreen at all is unchecked. In the GDI-only test the window's last pixel row is off-colour at the screen's
 shape, before and after: win32u's scaled surface, not the letterbox.
+
+## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
+
+Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play
+all at once after pausing and unpausing; the game's frame pacing gets worse at each event that
+should start one. The game's sounds are xWMA, which XAudio2 (FAudio, in `libs/faudio`) decodes
+with Wine's WMA decoder transform (`winegstreamer/wma_decoder.c`, GStreamer's `avdec_wmav2`).
+
+The first idea was that the decoder keeps the end of each stream until a drain, which
+`wma_decoder.c` ignored (its `ProcessMessage` was a stub). It does not: `tests/win/wma-decoder-drain.c`
+decodes raw WMA packets through the transform and counts what comes out, and every packet's
+frames come out of `ProcessOutput` right after `ProcessInput`; a drain adds nothing, before the
+fix below or after it (3, 9 and 44 packets at 22050 Hz mono and 44100 Hz stereo, encoded by
+FFmpeg, and Wine's `dlls/mf/tests/wmaencdata.bin` from the Windows encoder; i686 and aarch64).
+gst-libav sets `AV_CODEC_FLAG2_SKIP_MANUAL` for WMA and does not collect FFmpeg's last frame on
+a drain (`gstavauddec.c`, gstreamer issue 1474), so there is nothing left to drain. The source
+reader drains at the end of a stream; it got all but 9 to 19 samples of what the transform gives.
+
+What the stub did lose is the reset between streams. With the bit reservoir (the Windows
+encoder's streams, and what FAudio declares for xWMA), the bytes of a frame that continues in
+the next packet stay in libavcodec, so a second stream on the same decoder came out one frame
+longer (24576 samples instead of 23552 for `wmaencdata.bin`), the first frame made from the end
+of the old stream, and a flush did not drop it. Wine patch 0053 drains and flushes the
+`wg_transform`, as the video decoder does; the second stream then gives 23552, after a drain and
+after a flush. FAudio does not drain between the buffers of a voice (only when the voice is
+destroyed), so a second buffer queued on one xWMA voice still starts with that extra frame; that
+would be a change to FAudio.
+
+None of it explains the game. Its log has about 2,200 `transform_ProcessMessage` fixmes; per
+decoder, most voices get one `NOTIFY_START_OF_STREAM`, which FAudio's `decode_wma` sends only
+while it has no output for the buffer. Two voices get 944 and 834 of them, one per mixing pass
+for about nine seconds each, with no output at all, and each run starts right after a burst of
+libavcodec errors (`block_len_bits 6 out of range` and the like, the only such errors in the
+log): FAudio pushed the whole buffer in one pass and the decoder rejected every packet. The test
+reproduces that kind of failure by declaring the wrong format: `wmaencdata.bin` with 2500 or 6000
+bytes a second instead of its 4003 decodes to 0 samples with 15 to 17 errors, and an FFmpeg
+stream declared with FAudio's flags (`0x1f`, bit reservoir and variable block length) to 0 with
+242. FAudio declares fixed codec flags for xWMA and corrects `nAvgBytesPerSec` to a table of
+rates (`fixup_wma_bitrate`); a format of the game's that does not match either would give this.
+The next step is to log the `WAVEFORMATEX` the game passes to `CreateSourceVoice` and decode one
+of its buffers with the test.
+
+No call in the path blocks. Measured in the test (i686 under FEX, then aarch64), before and after
+the patch alike: `ProcessOutput` at most 0.6 ms (0.2), `ProcessInput` 0.1 ms (0.2 on i686 with
+the patched DLL, which FEX had not translated before; 0.00 on aarch64), a drain 0.05 ms,
+`ReadSample` at most 2.8 ms (0.3), creating a decoder 0.8 ms (about 18 ms for the first in a
+process, which loads GStreamer's plugins), destroying one 0.05 ms. FAudio runs `decode_wma` on its
+mixing thread holding the voice's buffer lock, which the game's `SubmitSourceBuffer` and `GetState`
+on that voice also take, and destroys a voice's decoder holding the engine's source lock. A voice
+whose packets all fail is decoded in a single pass, every packet of the line at up to 0.2 ms each
+in the test; whether that is the game's hitch was not measured.
+
+Seen while testing: about one run in four of the test hung at process exit, after `MFShutdown`,
+with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
+`TerminateProcess`. Not looked into.
