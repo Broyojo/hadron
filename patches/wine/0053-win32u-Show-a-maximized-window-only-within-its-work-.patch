@@ -1,4 +1,4 @@
-From c13b341fa67c3e84df5c721ed85e416d570564a2 Mon Sep 17 00:00:00 2001
+From 4fe572db808e0de9cf467292a7a3cabf5e6ccb43 Mon Sep 17 00:00:00 2001
 From: Ondrej Simon <ondrej@dorhawk.software>
 Date: Sun, 15 Nov 2026 09:58:27 +0100
 Subject: [PATCH 53/54] win32u: Show a maximized window only within its work

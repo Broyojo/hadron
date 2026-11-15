@@ -1,4 +1,4 @@
-From 6c4ef274b06654bd4bb481b32a090ec2b4df3cde Mon Sep 17 00:00:00 2001
+From 0ab76b60aac488b9d3e1c6240bd4b18790734114 Mon Sep 17 00:00:00 2001
 From: Ondrej Simon <ondrej@dorhawk.software>
 Date: Sun, 15 Nov 2026 10:32:58 +0100
 Subject: [PATCH 54/54] winemac.drv: Keep up with win32u's clipping of a
@@ -37,7 +37,7 @@ index a7115e90e8..0d3a7d51aa 100644
  
  struct macdrv_client_surface
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index d1e368cb9e..e58f39f26e 100644
+index 474d811aad..918be6dbd4 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
 @@ -99,6 +99,55 @@ static BOOL region_covers_window(HWND hwnd, const RECT *window)
@@ -129,7 +129,7 @@ index d1e368cb9e..e58f39f26e 100644
      if (!(new_style & WS_MAXIMIZE))
      {
          data->frame_gesture = FALSE;
-@@ -1813,7 +1865,26 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1831,7 +1883,26 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
  
      visible = rect_from_cgrect(event->window_frame_changed.frame);
      old_visible = data->rects.visible;
@@ -157,7 +157,7 @@ index d1e368cb9e..e58f39f26e 100644
      width = rect.right - rect.left;
      height = rect.bottom - rect.top;
  
-@@ -1831,17 +1902,6 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1849,17 +1920,6 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
          TRACE("%p resizing from (%dx%d) to (%dx%d)\n", hwnd, data->rects.window.right - data->rects.window.left,
                data->rects.window.bottom - data->rects.window.top, width, height);
  
@@ -175,16 +175,16 @@ index d1e368cb9e..e58f39f26e 100644
      release_win_data(data);
  
      if (event->window_frame_changed.fullscreen)
-@@ -1876,7 +1936,7 @@ void macdrv_window_frame_settled(HWND hwnd)
+@@ -1895,7 +1955,7 @@ void macdrv_window_frame_settled(HWND hwnd)
  {
      struct macdrv_win_data *data;
      MONITORINFO start_info, end_info;
 -    RECT start, visible, window;
 +    RECT start, start_window, visible, window, frame;
-     BOOL end_fills;
+     BOOL end_fills, same_display;
      UINT context;
- 
-@@ -1888,6 +1948,7 @@ void macdrv_window_frame_settled(HWND hwnd)
+     int start_top;
+@@ -1908,6 +1968,7 @@ void macdrv_window_frame_settled(HWND hwnd)
      }
      data->frame_gesture = FALSE;
      start = data->gesture_start;
@@ -192,7 +192,7 @@ index d1e368cb9e..e58f39f26e 100644
      visible = data->rects.visible;
      window = data->rects.window;
      release_win_data(data);
-@@ -1913,15 +1974,23 @@ void macdrv_window_frame_settled(HWND hwnd)
+@@ -1946,15 +2007,23 @@ void macdrv_window_frame_settled(HWND hwnd)
      {
          WINDOWPLACEMENT placement = {.length = sizeof(placement)};
  
@@ -224,7 +224,7 @@ index d1e368cb9e..e58f39f26e 100644
              TRACE("%p moved to another display: filling it with %s\n", hwnd, wine_dbgstr_rect(&frame));
              NtUserSetRawWindowPos(hwnd, frame, SWP_NOACTIVATE | SWP_NOZORDER, FALSE);
          }
-@@ -2135,7 +2204,9 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
+@@ -2168,7 +2237,9 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
          if ((style & WS_MAXIMIZE) && (style & WS_VISIBLE) && (data = get_win_data(hwnd)))
          {
              RECT rect = rect_from_cgrect(event->window_restore_requested.frame);

@@ -2027,10 +2027,18 @@ Wine patch 0052 has the Cocoa window report when its frame has stopped changing
 (`WINDOW_FRAME_SETTLED`, 0.3 s after the last change). If the window filled a display when the
 change began, the driver judges the new frame as a whole:
 
-- On the same display, not filling it: the window isn't maximized any more, as on Windows when the
-  user resizes a maximized window, and it restores to its new frame.
-- On another display: it stays maximized and fills that display, and the rect it restores to moves
-  to that display, as with Windows' Win+Shift+arrow.
+- Not filling a display, the same one or another (a half, a third, a frame with gaps around it):
+  the window isn't maximized any more, as on Windows when the user resizes a maximized window, and
+  it restores to its new frame.
+- Moved to another display whole (filling it, the size it was, or as wide as it and as tall as it
+  was, which is what macOS leaves of a maximize there): it stays maximized and fills that display,
+  and the rect it restores to moves to that display, as with Windows' Win+Shift+arrow.
+
+A window fills a display when its left, right and bottom edges reach the work area's, give or take
+2 points, and its top is no more than a menu bar (40 points) lower than it was when the change
+began. The top can't be held to the work area's: the driver's rect for a window with a Mac title bar
+starts below the title bar, and macOS keeps windows below the menu bar of a display that isn't the
+main one, which that display's work area doesn't leave out.
 
 `tests/win/own-frame.c standard hold-maximized` opens a maximized window with Wine's own frame,
 `tests/mac/ax-window.swift --frame` sets a frame as Rectangle does, and `tests/win/win-info.c` reads
@@ -2041,7 +2049,21 @@ Hadron 0.3.3's runtime and the same runtime with this patch's `winemac.so`:
 | Gesture | 0.3.3 | Patched |
 |---|---|---|
 | Left half of the same display | still maximized; restores to its old rect | not maximized; stays on the half |
+| Bottom half of the same display | still maximized | not maximized; stays on the half |
+| Maximize with 10-point gaps around it | still maximized | not maximized; stays in the frame |
 | Moved to the other display, filling it | maximized, but 1087 points tall of the 1410 it would fill; restores to the old display | maximized, fills the other display; restores on it |
+| Left half, or top half, of the other display | still maximized | not maximized; stays on the half |
+| Moved to the other display without a new size | still maximized, at its old size | maximized, fills the other display |
+| Filled the other display, then its left half | still maximized | not maximized; stays on the half |
+| Filled the other display, then the left half of the first | still maximized | not maximized; stays on the half |
+
+On the other display, the left half comes out 1087 points tall where 1410 were asked for, as in
+0.3.3: macOS kept the window's height to the display it came from.
+
+A first version counted a frame within a 32nd of the work area as filling it, and filled the other
+display with any frame moved there: a half of the other display became a maximize there, and the
+left half of the first display, after filling the other, filled the first. The rows for the other
+display's halves and the last row are the tests for that.
 
 On a display that isn't the main one, macOS keeps windows below that display's own menu bar, 30
 points, which `ax-window --screens` doesn't count, so a frame asked for at its very top comes out 30
@@ -2085,8 +2107,13 @@ runtime with patches 0050 to 0054:
 The window rect a program reads still has its border past the work area, as on Windows: started
 maximized at 192 DPI, -5,61 to 3461,2119 (0.3.3: -6,66 to 3460,2124). No frame gained or lost a Mac
 title bar. With `nccalc default-minmax` maximized at 192 DPI, a window tool's left half gives a
-window that isn't maximized, on the half (0.3.3 refused the size). Moved to a 2560×1440 display, the
-window stays maximized at that display's full width.
+window that isn't maximized, on the half (0.3.3 refused the size), and so does a frame with 10-point
+gaps around it. Moved to a 2560×1440 display, the window stays maximized at that display's full
+width, whether the tool gave it that display's size or only moved it. That display's left half gives
+a window that isn't maximized, on the half, and so does the first display's left half after the
+window filled the other. (With the first version of patch 0052, #64, the frame with gaps stayed
+maximized, the other display's left half was filled to that whole display, and the first display's
+left half, after the other, to the whole first display.)
 
 **Still open:** an `nccalc` window maximized after it was shown, as with the double-click here,
 comes out 32 points short at the top, at 96 and at 192 DPI, with and without these patches: its
