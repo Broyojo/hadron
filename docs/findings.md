@@ -1980,3 +1980,38 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## A DPI-aware program's system cursors were twice the Mac pointer's size at 192 DPI (fixed, #67)
+
+Since issue #98 (#45, Wine patch 0039), a cursor covers a point per pixel, as the Mac's own do. A
+cursor loaded from a resource, Windows' own or the program's, comes in the size for the DPI of the
+thread that loads it: 32 pixels at 96 DPI, 64 at 192 (200% scaling, what Windows would use on a
+Retina panel). At 192 DPI a DPI-aware program's hourglass was 64×64 points, twice the Mac pointer;
+any cursor loaded from a resource takes the same path. Programs that aren't DPI aware get their
+cursors at 96 DPI and were the right size.
+
+Wine patch 0056 shows a cursor loaded from a resource at as many points as it would have pixels at
+96 DPI, in Retina mode only: 96 / DPI points per pixel, from the DPI of the window the cursor is set
+for. A cursor a program builds from its own bitmaps (`CreateIconIndirect`, as games do) isn't sized
+for the DPI and keeps a point per pixel, as patch 0039 has it. Without Retina mode a pixel is a
+point, as for the program's windows, and nothing changes. Wine swaps the arrow and a few other
+standard cursors for the Mac's own; they were never affected.
+
+`tests/win/cursor-size.c` gains `wait` (a per-monitor DPI-aware program sets the hourglass) and
+`wait-unaware` (the same, not DPI aware), and `tests/mac/nscursor-log.m` logs the `NSCursor`. With
+Hadron 0.3.3's runtime, and the same runtime with this patch's `winemac.so`:
+
+| Case | DPI | Windows cursor | 0.3.3 | Patched |
+|---|---|---|---|---|
+| `wait` | 192 | 64×64 px, hot spot 30,30 | 64×64 points, 30,30 | 32×32 points, 15,15 |
+| `wait` | 96 | 32×32 px | 32×32 points | 32×32 points |
+| `wait-unaware` | 192 and 96 | 32×32 px | 32×32 points | 32×32 points |
+| bitmap (no argument) | 192 and 96 | 32×32 px, hot spot 5,9 | 32×32 points, 5,9 | 32×32 points, 5,9 |
+| `wait`, `RetinaMode=n` | 192 | 64×64 px | 64×64 points | 64×64 points |
+
+A first version took the scale from the system DPI as if Retina mode always meant 192 DPI. At 96 DPI
+it showed the hourglass at 16 points. The `wait` row at 96 DPI is the test for that.
+
+`nscursor-log.dylib` goes in with `STEAM_DYLD_INSERT_LIBRARIES`, which `scripts/play` passes on for
+a Steam game. For a program run with `scripts/program-run`, `scripts/play` unsets it, so for these
+runs that line was taken out of a copy of the runtime.

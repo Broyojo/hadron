@@ -3,8 +3,16 @@
  * under the pointer where it is, and closes after a second, so the test needs nobody at the screen.
  * What the Mac shows is read on the Mac side: tests/mac/nscursor-log.m logs every NSCursor the
  * process makes. A cursor should cover as many points as it has pixels, in Retina mode too (#98).
- * Usage: cursor-size.exe */
+ *
+ * With "wait", the program is per-monitor DPI aware, as most desktop programs are, and sets the
+ * system's hourglass (IDC_WAIT) instead. Windows loads a system cursor in the size for the
+ * program's DPI: 64x64 pixels at 192 DPI. It should still cover 32x32 points, the Mac pointer's
+ * size, with its hot spot halved to match. "wait-unaware" does the same in a program that isn't DPI
+ * aware: Windows loads its cursors at 96 DPI, 32x32 pixels, which already are the right size.
+ * Usage: cursor-size.exe [wait|wait-unaware] */
+#define _WIN32_WINNT 0x0A00
 #include <stdio.h>
+#include <string.h>
 #include <windows.h>
 
 static HCURSOR cursor;
@@ -17,7 +25,7 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     return DefWindowProcA( hwnd, msg, wparam, lparam );
 }
 
-int main( void )
+int main( int argc, char **argv )
 {
     BITMAPV5HEADER bi = {.bV5Size = sizeof(bi), .bV5Width = 32, .bV5Height = -32, .bV5Planes = 1,
                          .bV5BitCount = 32, .bV5Compression = BI_BITFIELDS, .bV5RedMask = 0xff0000,
@@ -33,7 +41,20 @@ int main( void )
     info.hbmColor = CreateDIBSection( NULL, (BITMAPINFO *)&bi, DIB_RGB_COLORS, (void **)&bits, NULL, 0 );
     for (i = 0; i < 32 * 32; i++) bits[i] = (i % 32 == i / 32 || i % 32 < 2) ? 0xffff0000 : 0;
     info.hbmMask = CreateBitmap( 32, 32, 1, 1, NULL );
-    cursor = CreateIconIndirect( &info );
+    if (argc > 1 && !strncmp( argv[1], "wait", 4 ))
+    {
+        BITMAP bm;
+        ICONINFO wait;
+
+        SetProcessDpiAwarenessContext( strcmp( argv[1], "wait" ) ? DPI_AWARENESS_CONTEXT_UNAWARE
+                                                                 : DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 );
+        cursor = LoadCursorA( NULL, (const char *)IDC_WAIT );
+        GetIconInfo( cursor, &wait );
+        GetObjectA( wait.hbmColor ? wait.hbmColor : wait.hbmMask, sizeof(bm), &bm );
+        printf( "hourglass %ldx%ld pixels, hot spot %lu,%lu, %u DPI\n", bm.bmWidth,
+                wait.hbmColor ? bm.bmHeight : bm.bmHeight / 2, wait.xHotspot, wait.yHotspot, GetDpiForSystem() );
+    }
+    else cursor = CreateIconIndirect( &info );
     printf( "cursor %p, SM_CXCURSOR %d\n", cursor, GetSystemMetrics( SM_CXCURSOR ) );
 
     /* Wine finds the window under the pointer from the position it last heard of: tell it the
