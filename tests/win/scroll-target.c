@@ -2,7 +2,7 @@
  * a view inside, as in a diagram editor, counts what reaches the view for a while, then says how
  * far it scrolled each way. Swipe on it, or let it scroll itself:
  *
- *   scroll-target.exe legacy|hwheel [toplevel] [send-right|send-down] [SECONDS]
+ *   scroll-target.exe legacy|hwheel [toplevel|thread|nested] [send-right|send-down] [SECONDS]
  *
  * send-right and send-down post ten small wheel turns to the view, sideways or down, as Wine does
  * for a trackpad swipe. (Posted, not put through SendInput: Wine sends that wheel to the window under
@@ -13,11 +13,14 @@
  * legacy: the view understands only the up-and-down wheel, and Shift + wheel as sideways, as many
  * older apps do (Enterprise Architect, for one); the sideways wheel (WM_MOUSEHWHEEL) goes to DefWindowProc.
  * hwheel: the view handles the sideways wheel itself (the control). toplevel: no view, the main
- * window scrolls. SECONDS: how long it listens (default 8).
+ * window scrolls. thread: the view belongs to a thread of its own, not the main window's. nested:
+ * the main window takes the view's sideways wheel and, while it does, sends it on to a second view,
+ * as an app that keeps two views side by side might. SECONDS: how long it listens (default 8).
  *
  * PASS: a sideways scroll to the right moved the view right and not up or down (with send-down: down
- * and not sideways). Exit status 0 or 1.
-  *
+ * and not sideways); with nested, it moved the second view right and the first not at all. Exit
+ * status 0 or 1.
+ *
  * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o scroll-target.exe tests/win/scroll-target.c -luser32 -lgdi32
  */
 #define _WIN32_WINNT 0x0A00
@@ -25,10 +28,11 @@
 #include <stdio.h>
 #include <string.h>
 
-static BOOL handles_hwheel, toplevel;
+static BOOL handles_hwheel, toplevel, own_thread, nested, in_nested;
 static UINT send_message;
-static HWND view;
-static long scroll_x, scroll_y;
+static HWND main_window, view, second_view;
+static HANDLE view_ready;
+static long scroll_x, scroll_y, second_x;
 static wchar_t last_event[128] = L"Scroll over this window.";
 
 /* what the window shows, live: the last wheel message and the totals */
@@ -54,7 +58,8 @@ static LRESULT scroll_messages(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam
             /* wheel up is to the left */
             shift_wheel++;
             if (GetKeyState(VK_SHIFT) < 0) shift_key_down++;
-            scroll_x -= delta;
+            if (hwnd == second_view) second_x -= delta;
+            else scroll_x -= delta;
             show(hwnd, L"Shift + wheel", delta);
         }
         else
@@ -125,10 +130,19 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
     switch (msg)
     {
     case WM_MOUSEHWHEEL:
+        if (nested && !in_nested)
+        {
+            /* take it, and send it on to the second view, which leaves it to DefWindowProc */
+            in_nested = TRUE;
+            SendMessageW(second_view, WM_MOUSEHWHEEL, wparam, lparam);
+            in_nested = FALSE;
+            return 0;
+        }
         if (!toplevel) hwheel_at_top++;
         break;
     case WM_SIZE:
-        if (view) MoveWindow(view, 0, 0, LOWORD(lparam), HIWORD(lparam), TRUE);
+        if (view) MoveWindow(view, 0, 0, LOWORD(lparam) / (nested ? 2 : 1), HIWORD(lparam), TRUE);
+        if (second_view) MoveWindow(second_view, LOWORD(lparam) / 2, 0, LOWORD(lparam) / 2, HIWORD(lparam), TRUE);
         return 0;
     case WM_TIMER:
         if (wparam == 2)
@@ -151,11 +165,36 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
+static HWND create_view(const wchar_t *name, int x, int width)
+{
+    RECT client;
+    GetClientRect(main_window, &client);
+    return CreateWindowExW(0, L"scroll-target view", name, WS_CHILD | WS_VISIBLE | WS_HSCROLL | WS_VSCROLL,
+                           x, 0, width ? width : client.right, client.bottom, main_window, NULL,
+                           GetModuleHandleW(NULL), NULL);
+}
+
+/* thread: the view, and the messages that reach it, on a thread of its own */
+static DWORD WINAPI view_thread(void *arg)
+{
+    MSG msg;
+    view = create_view(L"view", 0, 0);
+    SetEvent(view_ready);
+    while (GetMessageW(&msg, NULL, 0, 0) > 0)
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    (void)arg;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int seconds = 8;
     wchar_t title[64];
-    HWND main_window;
+    HANDLE thread = NULL;
+    DWORD thread_id;
     MSG msg;
     BOOL pass;
 
@@ -164,12 +203,14 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "hwheel")) handles_hwheel = TRUE;
         else if (!strcmp(argv[i], "legacy")) handles_hwheel = FALSE;
         else if (!strcmp(argv[i], "toplevel")) toplevel = TRUE;
+        else if (!strcmp(argv[i], "thread")) own_thread = TRUE;
+        else if (!strcmp(argv[i], "nested")) nested = TRUE;
         else if (!strcmp(argv[i], "send-right")) send_message = WM_MOUSEHWHEEL;
         else if (!strcmp(argv[i], "send-down")) send_message = WM_MOUSEWHEEL;
         else if (atoi(argv[i]) > 0) seconds = atoi(argv[i]);
         else
         {
-            printf("usage: scroll-target.exe legacy|hwheel [toplevel] [send-right|send-down] [SECONDS]\n");
+            printf("usage: scroll-target.exe legacy|hwheel [toplevel|thread|nested] [send-right|send-down] [SECONDS]\n");
             return 2;
         }
     }
@@ -185,16 +226,25 @@ int main(int argc, char **argv)
     RegisterClassW(&view_class);
 
     swprintf(title, 64, L"scroll-target (%ls%ls)", handles_hwheel ? L"hwheel" : L"legacy",
-             toplevel ? L", toplevel" : L"");
+             toplevel ? L", toplevel" : own_thread ? L", thread" : nested ? L", nested" : L"");
     main_window = CreateWindowExW(0, L"scroll-target", title, WS_OVERLAPPEDWINDOW | (toplevel ? WS_HSCROLL | WS_VSCROLL : 0),
                                   200, 200, 1200, 800, NULL, NULL, GetModuleHandleW(NULL), NULL);
-    if (!toplevel)
+    if (own_thread)
+    {
+        view_ready = CreateEventW(NULL, FALSE, FALSE, NULL);
+        thread = CreateThread(NULL, 0, view_thread, NULL, 0, &thread_id);
+        /* creating the view sends the main window WM_PARENTNOTIFY: keep taking messages meanwhile */
+        while (MsgWaitForMultipleObjects(1, &view_ready, FALSE, INFINITE, QS_ALLINPUT) != WAIT_OBJECT_0)
+            while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+    }
+    else if (nested)
     {
         RECT client;
         GetClientRect(main_window, &client);
-        view = CreateWindowExW(0, L"scroll-target view", L"view", WS_CHILD | WS_VISIBLE | WS_HSCROLL | WS_VSCROLL,
-                               0, 0, client.right, client.bottom, main_window, NULL, GetModuleHandleW(NULL), NULL);
+        view = create_view(L"view", 0, client.right / 2);
+        second_view = create_view(L"second view", client.right / 2, client.right / 2);
     }
+    else if (!toplevel) view = create_view(L"view", 0, 0);
     ShowWindow(main_window, SW_SHOWNORMAL);
     SetForegroundWindow(main_window);
     SetFocus(view ? view : main_window);
@@ -207,7 +257,16 @@ int main(int argc, char **argv)
         DispatchMessageW(&msg);
     }
 
-    pass = send_message == WM_MOUSEWHEEL ? scroll_y > 0 && scroll_x == 0 : scroll_x > 0 && scroll_y == 0;
+    if (thread)
+    {
+        PostThreadMessageW(thread_id, WM_QUIT, 0, 0);
+        WaitForSingleObject(thread, INFINITE);
+    }
+
+    if (send_message == WM_MOUSEWHEEL) pass = scroll_y > 0 && scroll_x == 0;
+    else if (nested) pass = second_x > 0 && scroll_x == 0 && scroll_y == 0;
+    else pass = scroll_x > 0 && scroll_y == 0;
+    if (nested) printf("the second view scrolled %ld to the right\n", second_x);
     printf("sideways wheel: %d to the %s, %d of them unhandled at the main window\n", hwheel_seen,
            toplevel ? "main window" : "view", hwheel_at_top);
     printf("Shift + wheel: %d (Shift down by GetKeyState: %d); wheel: %d; WM_HSCROLL: %d\n",

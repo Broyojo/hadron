@@ -1996,17 +1996,31 @@ the target up to its top-level window handled is sent to the target as `WM_MOUSE
 and the up-and-down wheel is untouched. This touches shared Wine code, not only the Mac driver, but
 nothing in it is specific to the Mac.
 
+A child window's parent may belong to another thread, and a program may send another sideways
+wheel while it handles one, so the patch keeps no state per thread: each pass from a window up to
+its parent is noted in a list for the process, and the window it reaches marks the pass when nothing
+took the wheel there. A parent in another process can't see that list, so when a child's parent
+belongs to another process, the fallback goes to the parent instead of the child (from reading the
+code; not tested).
+
 `tests/win/scroll-target.c` counts what reaches a view: `legacy` handles only the wheel and Shift +
-wheel, `hwheel` handles the sideways wheel itself, `toplevel` has no child view, and `send-right`
-and `send-down` post ten wheel messages of 40 to it, as Wine does for a swipe. With Hadron 0.3.3's
-runtime, and the same runtime with this patch's `win32u.so`:
+wheel, `hwheel` handles the sideways wheel itself, `toplevel` has no child view, `thread` puts the
+view on a thread of its own, `nested` has the main window take the sideways wheel and send it on to
+a second view, and `send-right` and `send-down` post ten wheel messages of 40 to the view, as Wine
+does for a swipe. With Hadron 0.3.3's runtime, and the same runtime with this patch's `win32u.so`:
 
 | Case | 0.3.3 | Patched |
 |---|---|---|
 | `legacy send-right` | nothing scrolled | 400 to the right, as Shift + wheel |
 | `legacy toplevel send-right` | nothing scrolled | 400 to the right |
+| `legacy thread send-right` | nothing scrolled | 400 to the right |
+| `legacy nested send-right` | nothing scrolled | the second view 400 to the right, the first not at all |
 | `legacy send-down` (control) | 400 down | 400 down |
 | `hwheel send-right` (control) | 400 to the right | 400 to the right |
+| `hwheel thread send-right` (control) | 400 to the right | 400 to the right |
+
+A first version kept its state per thread: with `thread` nothing scrolled, and with `nested` the
+first view scrolled instead of the second. The `thread` and `nested` rows are the tests for that.
 
 A real swipe and a mouse's sideways wheel scrolled Enterprise Architect's diagrams sideways with the
 patch (owner's runs, 2026-11-15). Posting is used here because macOS gives scroll events that one
