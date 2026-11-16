@@ -1,0 +1,172 @@
+From 620e7bd83ec0fcda5d46597ab8fc42382de06783 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 24 Oct 2026 14:28:45 -0400
+Subject: [PATCH 4/4] Set Wine's present rect for a fullscreen window, and test
+ a view's cover against its bounds
+
+Entering exclusive fullscreen, on a Reset that keeps it and on reactivation,
+tell win32u where the frame is presented (D3DKMT_ESCAPE_SET_PRESENT_RECT_WINE),
+and clear it on leaving, as Wine's own D3D does. Under an emulated mode whose
+shape differs from the screen's, win32u then maps the window to the whole
+monitor, so the window covers the screen instead of staying an ordinary
+window under the menu bar.
+
+The cover test that clears the window's background used the view's visible
+rectangle alone, which a view that does not clip to its bounds (the default
+since macOS 14) reports larger than itself; a letterboxed view then passed
+for covering its window and the desktop showed through around it. A view now
+covers only where its bounds do too, and a background a pass cleared while the
+view covered is made opaque black again once it no longer does.
+
+Work in progress: Wine's Mac driver still clips and places the letterboxed
+client area wrongly, so a 16:9 mode on a 3024x1964 panel is not yet right.
+---
+ unix/unix/src/metal/macdrv.rs  | 34 ++++++++++++++----
+ windows/d3d9/src/fullscreen.rs | 65 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 92 insertions(+), 7 deletions(-)
+
+diff --git a/unix/unix/src/metal/macdrv.rs b/unix/unix/src/metal/macdrv.rs
+index f79a235..ea9c07d 100644
+--- a/unix/unix/src/metal/macdrv.rs
++++ b/unix/unix/src/metal/macdrv.rs
+@@ -3138,13 +3138,14 @@ fn clear_covered_window_layers(view: &NSView, _mtm: MainThreadMarker) {
+         );
+         return;
+     };
+-    let covered = rect_covers(
+-        view.convertRect_toView(view.visibleRect(), None),
+-        frame_view.convertRect_toView(frame_view.bounds(), None),
+-    );
+-    if !covered {
+-        return;
+-    }
++    // The visible rectangle alone is not the view: a view that does not clip
++    // to its bounds, the default since macOS 14, can report one larger than
++    // itself, and Wine's letterboxed client view (a fullscreen mode of another
++    // shape than the screen's) then passed for covering the whole window. The
++    // view covers only where both its bounds and its visible part do.
++    let window_frame = frame_view.convertRect_toView(frame_view.bounds(), None);
++    let covered = rect_covers(view.convertRect_toView(view.visibleRect(), None), window_frame)
++        && rect_covers(view.convertRect_toView(view.bounds(), None), window_frame);
+     let (Some(content_layer), Some(frame_layer)) = (content.layer(), frame_view.layer()) else {
+         mtld3d_shared::log_once_warn!(
+             target: LOG_TARGET,
+@@ -3153,6 +3154,25 @@ fn clear_covered_window_layers(view: &NSView, _mtm: MainThreadMarker) {
+         );
+         return;
+     };
++    if !covered {
++        // A view that covered its window when a pass cleared the background
++        // can stop covering it: under a fullscreen present rect Wine grows the
++        // window to the whole monitor and keeps the client view, and with it
++        // this view, at the present rect, so a mode of another shape than the
++        // screen's leaves a strip of the window uncovered. A cleared background
++        // shows the desktop through that strip. Opaque black is what a
++        // display shows around a scaled mode on Windows, so the strip gets it.
++        if frame_layer.backgroundColor().is_none() {
++            let black = CGColor::new_generic_gray(0.0, 1.0);
++            frame_layer.setBackgroundColor(Some(&black));
++            mtld3d_shared::log_once_info!(
++                target: LOG_TARGET,
++                "present: the metal view no longer covers its window; the frame view's \
++                 background is opaque black again under the uncovered strip",
++            );
++        }
++        return;
++    }
+     if frame_layer.backgroundColor().is_some() {
+         frame_layer.setBackgroundColor(None);
+         mtld3d_shared::log_once_info!(
+diff --git a/windows/d3d9/src/fullscreen.rs b/windows/d3d9/src/fullscreen.rs
+index c2d8a53..f4c7ba8 100644
+--- a/windows/d3d9/src/fullscreen.rs
++++ b/windows/d3d9/src/fullscreen.rs
+@@ -592,6 +592,69 @@ fn set_window_pos(hwnd: *mut c_void, insert_after: *mut c_void, rect: Rect, flag
+     }
+ }
+ 
++/// `D3DKMT_ESCAPE_SET_PRESENT_RECT_WINE`, Wine's own escape code (`include/ddk/d3dkmthk.h`).
++const D3DKMT_ESCAPE_SET_PRESENT_RECT_WINE: u32 = 0x8000_0001;
++
++/// Win32 `D3DKMT_ESCAPE`, as `D3DKMTEscape` takes it.
++#[repr(C)]
++struct D3dkmtEscape {
++    adapter: u32,
++    device: u32,
++    escape_type: u32,
++    flags: u32,
++    private_driver_data: *mut c_void,
++    private_driver_data_size: u32,
++    context: u32,
++}
++
++#[link(name = "gdi32")]
++unsafe extern "system" {
++    fn D3DKMTEscape(desc: *const D3dkmtEscape) -> u32;
++}
++
++/// Tell win32u where the fullscreen frame of `hwnd` is presented, or that it no longer is.
++///
++/// What Wine's own D3D (wined3d's `set_window_present_rect`) does on entering
++/// exclusive fullscreen, on a mode change while fullscreen, and with an empty
++/// rect on leaving it. With a present rect, win32u treats the window as
++/// covering its whole monitor: under an emulated mode whose shape differs
++/// from the screen's (1280x720 on a 3024x1964 panel) the window then maps to
++/// the whole physical screen and the driver makes it fullscreen, where
++/// without it the window maps to the mode's scaled share of the screen and
++/// stays an ordinary window under the menu bar. A Wine without the escape
++/// fails the call, which is logged once and changes nothing else.
++fn set_present_rect(hwnd: *mut c_void, rect: Rect) {
++    // The escape names the window by its handle, which Wine keeps within 32 bits.
++    let (Ok(context), Ok(size)) = (u32::try_from(hwnd as usize), u32::try_from(size_of::<Rect>())) else {
++        mtld3d_shared::log_once_warn!(
++            target: LOG_TARGET,
++            "fullscreen: window {hwnd:p} has no 32-bit handle; no present rect set",
++        );
++        return;
++    };
++    let mut rect = rect;
++    let escape = D3dkmtEscape {
++        adapter: 0,
++        device: 0,
++        escape_type: D3DKMT_ESCAPE_SET_PRESENT_RECT_WINE,
++        flags: 0,
++        private_driver_data: (&raw mut rect).cast(),
++        private_driver_data_size: size,
++        context,
++    };
++    // SAFETY: the descriptor and the RECT it points at are locals that
++    // outlive the call; win32u reads the RECT only when the size matches and
++    // fails the call for an unknown window.
++    let status = unsafe { D3DKMTEscape(&raw const escape) };
++    if status != 0 {
++        mtld3d_shared::log_once_warn!(
++            target: LOG_TARGET,
++            "fullscreen: this Wine does not take a present rect (D3DKMTEscape {status:#x}); a mode of \
++             another shape than the screen's may not cover it",
++        );
++    }
++}
++
+ fn is_window(hwnd: *mut c_void) -> bool {
+     // SAFETY: IsWindow accepts any pointer-shaped handle, valid or not —
+     // that is the entire point of the call.
+@@ -1122,6 +1185,7 @@ fn apply_fullscreen_window(hwnd: *mut c_void, saved: &SavedWindow) -> WindowPlac
+         warn!(target: LOG_TARGET, "GetMonitorInfo failed — device window not resized to the monitor");
+         return WindowPlacement::NoMonitor;
+     };
++    set_present_rect(hwnd, rect);
+     // Deliberately `SWP_NOZORDER` rather than `HWND_TOPMOST`. Raising a
+     // window to the topmost level makes Wine's mac driver re-derive the Cocoa
+     // window's level and parent (`set_cocoa_window_properties` →
+@@ -1266,6 +1330,7 @@ pub fn leave(saved: &SavedWindow, kind: LeaveKind, reason: &LeaveReason) {
+         (None, _) => KeptRect::Unread,
+     };
+     drop(watch);
++    set_present_rect(saved.hwnd, Rect::EMPTY);
+     let placement = restore_window(saved, kind, &kept);
+     log!(
+         target: LOG_TARGET,
+-- 
+2.54.0 (Apple Git-157)
+

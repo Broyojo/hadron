@@ -1,8 +1,8 @@
-From b72a649ad2514f1f27783e34fc7c142de2b21e31 Mon Sep 17 00:00:00 2001
+From d4b50f3c8254a3eefa091b8a111a779fc2ed314c Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 12:01:31 -0400
-Subject: [PATCH] Present with display sync when the game asks for vsync, as
- Windows does
+Subject: [PATCH 3/4] Present with display sync when the game asks for vsync,
+ as Windows does
 
 mtld3d always turned Metal-side vsync off (displaySyncEnabled = false) and
 mapped a vsync request to a present throttle only, so every game could
@@ -28,12 +28,12 @@ for present.maxFps and divided intervals.
  7 files changed, 172 insertions(+), 28 deletions(-)
 
 diff --git a/mtld3d.conf b/mtld3d.conf
-index 2a2be8b..4328ca3 100644
+index 657d627..5b45b82 100644
 --- a/mtld3d.conf
 +++ b/mtld3d.conf
-@@ -446,6 +446,21 @@
+@@ -474,6 +474,21 @@
  
- # present.maxFps = 0
+ # present.maxFrameLatency = auto
  
 +# Whether presents wait for a display refresh (vsync).
 +#
@@ -54,18 +54,18 @@ index 2a2be8b..4328ca3 100644
  ##############
  # Rendering  #
 diff --git a/unix/unix/src/metal/macdrv.rs b/unix/unix/src/metal/macdrv.rs
-index 4e6e9de..7d8e8bd 100644
+index 0b329a8..f79a235 100644
 --- a/unix/unix/src/metal/macdrv.rs
 +++ b/unix/unix/src/metal/macdrv.rs
-@@ -2147,6 +2147,7 @@ fn refresh_attachment_on_main(att: &Arc<Attachment>) {
+@@ -2553,6 +2553,7 @@ fn refresh_attachment_on_main(att: &Arc<Attachment>) {
      if let Some(screen) = screen.as_deref() {
          follow_screen_layer_mode(att, screen, mtm);
          follow_screen_present_throttle(att, screen);
 +        follow_display_sync(att, mtm);
          follow_layer_backing_scale(att, mtm);
+         clear_covered_window_layers(&view_obj, mtm);
      }
-     log_headroom_change_if_any(att, headroom, &view_obj, mtm);
-@@ -2240,12 +2241,14 @@ fn configure_metal_layer(
+@@ -2647,12 +2648,14 @@ fn configure_metal_layer(
      // on the main thread. Sound on x86_64 — pointers fit in `u64`
      // losslessly.
      let layer_addr = layer as u64;
@@ -80,7 +80,7 @@ index 4e6e9de..7d8e8bd 100644
              LayerColorRefs {
                  mode: color.mode,
                  color_space: color.color_space,
-@@ -2263,6 +2266,7 @@ fn configure_metal_layer_inner(
+@@ -2670,6 +2673,7 @@ fn configure_metal_layer_inner(
      device_handle: u64,
      width: u32,
      height: u32,
@@ -88,10 +88,10 @@ index 4e6e9de..7d8e8bd 100644
      color: LayerColorRefs<'_>,
  ) {
      use objc2_quartz_core::{CAMetalLayer, kCAGravityResizeAspect};
-@@ -2307,22 +2311,20 @@ fn configure_metal_layer_inner(
-     // guest compat: D3D9 games commonly GetBackBuffer + StretchRect,
-     // lock, or read the backbuffer.
-     layer.setFramebufferOnly(false);
+@@ -2717,22 +2721,20 @@ fn configure_metal_layer_inner(
+     // and eligible for direct-to-display; one that is not keeps an EDR layer
+     // in the compositor.
+     layer.setFramebufferOnly(true);
 -    // We always disable Metal-side vsync and instead throttle presents
 -    // via `presentDrawable:afterMinimumDuration:` set to `1/panel_max_hz`
 -    // when the guest asked for vsync. On a fixed-Hz panel that matches
@@ -125,7 +125,7 @@ index 4e6e9de..7d8e8bd 100644
      layer.setMaximumDrawableCount(DRAWABLE_POOL_DEPTH);
      // Default true; surface stalls surface as errors, not hangs.
      layer.setAllowsNextDrawableTimeout(true);
-@@ -2616,6 +2618,25 @@ fn follow_screen_present_throttle(att: &Arc<Attachment>, screen: &objc2_app_kit:
+@@ -3045,6 +3047,25 @@ fn follow_screen_present_throttle(att: &Arc<Attachment>, screen: &objc2_app_kit:
      );
  }
  
@@ -152,13 +152,13 @@ index 4e6e9de..7d8e8bd 100644
  ///
  /// The PE side drives the cursor upscale from it. winemac sets the scale from
 diff --git a/windows/core/src/config.rs b/windows/core/src/config.rs
-index e2ebdb7..cc978ff 100644
+index c929fba..c2ef88d 100644
 --- a/windows/core/src/config.rs
 +++ b/windows/core/src/config.rs
-@@ -266,6 +266,10 @@ pub struct Mtld3dConfig {
-     /// otherwise-unthrottled free-run. `0` = uncapped. Default: `0`.
-     /// File key: `present.maxFps`.
-     pub present_max_fps: u32,
+@@ -293,6 +293,10 @@ pub struct Mtld3dConfig {
+     /// whose frame times vary. Default: `auto`. File key:
+     /// `present.maxFrameLatency`.
+     pub present_max_frame_latency: u32,
 +    /// Whether presents sync to the display: the game's choice, or always on or off.
 +    ///
 +    /// Default: `game`. File key: `present.vsync`.
@@ -166,17 +166,17 @@ index e2ebdb7..cc978ff 100644
      /// Render resolution as a percentage of the reported back buffer, `MetalFX`-upscaled.
      ///
      /// `100` (the default) renders at the size the game sees, which is an
-@@ -384,6 +388,7 @@ impl Default for Mtld3dConfig {
-             },
+@@ -426,6 +430,7 @@ impl Default for Mtld3dConfig {
              pagebox_pool_cap_bytes: DEFAULT_PAGEBOX_POOL_CAP_BYTES,
              present_max_fps: 0,
+             present_max_frame_latency: 0,
 +            present_vsync: crate::present::VsyncPolicy::Game,
              render_scale_percent: 100,
              render_lod_bias: true,
              adapter_spoof: AdapterSpoof::None,
-@@ -559,6 +564,10 @@ pub fn log_options(cfg: &Mtld3dConfig) {
-         target: crate::LOG_TARGET,
-         "config: present.maxFps = {}", cfg.present_max_fps
+@@ -615,6 +620,10 @@ pub fn log_options(cfg: &Mtld3dConfig) {
+         "config: present.maxFrameLatency = {}",
+         frame_latency_label(cfg.present_max_frame_latency)
      );
 +    info!(
 +        target: crate::LOG_TARGET,
@@ -185,15 +185,15 @@ index e2ebdb7..cc978ff 100644
      info!(
          target: crate::LOG_TARGET,
          "config: render.scale = {}",
-@@ -636,6 +645,7 @@ fn apply(cfg: &mut Mtld3dConfig, source: &str, key: &str, value: &str) {
-             assign_cap_mb(source, key, value, &mut cfg.pagebox_pool_cap_bytes);
+@@ -711,6 +720,7 @@ fn apply(cfg: &mut Mtld3dConfig, source: &str, key: &str, value: &str) {
+         "present.maxFrameLatency" => {
+             assign_frame_latency(source, value, &mut cfg.present_max_frame_latency);
          }
-         "present.maxFps" => assign_max_fps(source, value, &mut cfg.present_max_fps),
 +        "present.vsync" => assign_vsync(source, value, &mut cfg.present_vsync),
          "render.scale" => assign_render_scale(source, value, &mut cfg.render_scale_percent),
          "render.lodBias" => assign_bool(source, key, value, &mut cfg.render_lod_bias),
          "adapter.spoof" => assign_adapter_spoof(source, value, &mut cfg.adapter_spoof),
-@@ -721,6 +731,20 @@ fn assign_cap_mb(source: &str, key: &str, value: &str, slot: &mut u64) {
+@@ -812,6 +822,20 @@ fn assign_count(source: &str, key: &str, value: &str, slot: &mut u32) {
      }
  }
  
@@ -215,7 +215,7 @@ index e2ebdb7..cc978ff 100644
      // `0` means uncapped; any other value is a frame-rate ceiling in Hz.
      if let Ok(fps) = value.parse::<u32>() {
 diff --git a/windows/core/src/encoder_config.rs b/windows/core/src/encoder_config.rs
-index fcd9100..52abe6d 100644
+index f9090ea..de4bea2 100644
 --- a/windows/core/src/encoder_config.rs
 +++ b/windows/core/src/encoder_config.rs
 @@ -11,6 +11,7 @@ use crate::{
@@ -226,23 +226,23 @@ index fcd9100..52abe6d 100644
  };
  
  #[cfg(test)]
-@@ -42,6 +43,7 @@ impl WireValue for Mtld3dConfig {
-         self.vram_budget_cap_bytes.write_wire(writer)?;
+@@ -45,6 +46,7 @@ impl WireValue for Mtld3dConfig {
          self.pagebox_pool_cap_bytes.write_wire(writer)?;
          self.present_max_fps.write_wire(writer)?;
+         self.present_max_frame_latency.write_wire(writer)?;
 +        self.present_vsync.write_wire(writer)?;
          self.render_scale_percent.write_wire(writer)?;
          self.render_lod_bias.write_wire(writer)?;
          self.adapter_spoof.write_wire(writer)?;
-@@ -75,6 +77,7 @@ impl WireValue for Mtld3dConfig {
-             vram_budget_cap_bytes: <u64>::read_wire(reader)?,
+@@ -82,6 +84,7 @@ impl WireValue for Mtld3dConfig {
              pagebox_pool_cap_bytes: <u64>::read_wire(reader)?,
              present_max_fps: <u32>::read_wire(reader)?,
+             present_max_frame_latency: <u32>::read_wire(reader)?,
 +            present_vsync: <VsyncPolicy>::read_wire(reader)?,
              render_scale_percent: <u32>::read_wire(reader)?,
              render_lod_bias: <bool>::read_wire(reader)?,
              adapter_spoof: <AdapterSpoof>::read_wire(reader)?,
-@@ -83,6 +86,24 @@ impl WireValue for Mtld3dConfig {
+@@ -91,6 +94,24 @@ impl WireValue for Mtld3dConfig {
      }
  }
  
@@ -268,10 +268,10 @@ index fcd9100..52abe6d 100644
      fn write_wire(&self, writer: &mut WireWriter<'_>) -> Result<(), WireError> {
          writer.u8(match self {
 diff --git a/windows/core/src/present.rs b/windows/core/src/present.rs
-index 7d379ab..5aff7bc 100644
+index fc67ceb..17c2f64 100644
 --- a/windows/core/src/present.rs
 +++ b/windows/core/src/present.rs
-@@ -29,6 +29,20 @@ impl DisplaySync {
+@@ -31,6 +31,20 @@ impl DisplaySync {
      }
  }
  
@@ -292,7 +292,7 @@ index 7d379ab..5aff7bc 100644
  /// The pacing a device hands its layer: the vsync request and the frame-rate ceiling.
  ///
  /// `max_fps` is in Hz and `0` means no ceiling. It is the effective ceiling
-@@ -92,10 +106,25 @@ pub const fn effective_max_fps(interval: u32, refresh_hz: u32, configured: u32)
+@@ -130,10 +144,25 @@ pub const fn effective_max_fps(interval: u32, refresh_hz: u32, configured: u32)
  }
  
  /// The pacing `interval` asks for on a `refresh_hz` mode under a `configured` ceiling.
@@ -321,7 +321,7 @@ index 7d379ab..5aff7bc 100644
      }
  }
 diff --git a/windows/core/src/present/tests.rs b/windows/core/src/present/tests.rs
-index f745074..1b137dc 100644
+index 735ed8b..835f0bd 100644
 --- a/windows/core/src/present/tests.rs
 +++ b/windows/core/src/present/tests.rs
 @@ -12,8 +12,8 @@ use mtld3d_types::{
@@ -407,10 +407,10 @@ index f745074..1b137dc 100644
  fn a_reset_at_the_pacing_the_layer_holds_queues_nothing() {
      assert_eq!(queued_pacing(pacing(true, 0), pacing(true, 0)), None);
 diff --git a/windows/d3d9/src/device.rs b/windows/d3d9/src/device.rs
-index dd02f20..d944ad3 100644
+index 706d5bc..4efda76 100644
 --- a/windows/d3d9/src/device.rs
 +++ b/windows/d3d9/src/device.rs
-@@ -13748,5 +13748,11 @@ pub fn resolve_layer_pacing(
+@@ -16211,5 +16211,11 @@ pub fn resolve_layer_pacing(
      } else {
          0
      };
