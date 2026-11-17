@@ -2049,3 +2049,64 @@ version made it `AXStandardWindow`, resizable to AppKit).
 
 A `nccalc` window without a region starts with a Mac title bar, until it's first sized, on 0.3.3 as
 with these patches: asked for 800×500 before that, it comes out 800×468, 32 points short.
+
+## A maximized window's hidden border showed past the screen's edges (fixed, #64)
+
+Windows maximizes a window with a sizing border so that the border hangs past the edges of the area
+it maximizes over: off the monitor, or under the taskbar, where the user never sees it. winemac
+showed it. A maximized window that draws its own frame but leaves `WM_GETMINMAXINFO` to Windows
+(Enterprise Architect's frame, `tests/win/own-frame.c nccalc default-minmax`) hung 2 to 3 points
+past both sides of the display, and, started maximized, 5 points into the Dock. A popup without a
+caption, which Windows maximizes over the whole monitor, hung past every edge.
+
+Wine patch 0052 (win32u) clips the visible rect of a maximized top-level window to that area, but
+only for a window that sits where the default maximize puts it: within the area, and past it by
+no more than the border `get_min_max_info` gives it. The area comes from `get_maximized_rect`'s
+rule, which the two now share: the work area for a window with a caption and a maximize box, the
+whole monitor for any other. A window the program placed itself is left as it is, such as a game
+that strips its caption and maximizes for borderless fullscreen, or one whose `WM_GETMINMAXINFO`
+puts it over the whole monitor. What the program reads (`GetWindowRect`, `GetClientRect`,
+`WM_NCCALCSIZE`, `GetWindowPlacement`) doesn't change.
+
+Patch 0053 keeps winemac in step. The driver took a window whose visible rect is its whole window
+rect for one that draws its own frame; a clipped one isn't, and would get a Mac title bar. It now
+asks what win32u asks, with no monitor queries: the window is all client area, it's shaped, or its
+style has no frame Wine draws. A frame the Mac side then gives such a window (a window tool) is the
+whole window; it isn't at the default maximize's place any more, so win32u shows all of it.
+
+On a second display, Windows shows the hanging border on the neighbouring display, where it
+bleeds over. This hides it there too.
+
+0052 and 0053 build on #63 (patches 0050 and 0051).
+
+Measured with `tests/win/own-frame.c` and `tests/mac/ax-window.swift`, on a display of 1728×1117
+points (usable 0,33 1728×1024). Each window was started maximized (`hold-maximized`) or maximized as
+a title-bar double-click does it (`hold`, then `tests/win/win-info.c own-frame maximize`). Hadron
+0.3.3's runtime; the first version of these patches (#173, which clipped every maximized window);
+this one:
+
+| Frame | How | DPI | 0.3.3 | First version | Patched |
+|---|---|---|---|---|---|
+| `nccalc default-minmax` | started maximized | 192 | -3,33 1733×1029 | 0,33 1728×1024 | 0,33 1728×1024, the usable area |
+| `nccalc default-minmax` | started maximized | 96 | -2,33 1732×1028 | | 0,33 1728×1024 |
+| `nccalc default-minmax` | double-click | 192 | -3,65 1733×992 | 0,65 1728×992 | 0,65 1728×992 |
+| `nccalc default-minmax` | double-click | 96 | -2,65 1732×992 | | 0,65 1728×992 |
+| `popup default-minmax` | double-click | 192 | -2,-2 1732×1121 | 0,0 1728×1117 | 0,0 1728×1117, the whole display |
+| `standard strip` (a game's borderless fullscreen) | started maximized | 192 | 0,0 1728×1117 | 0,33 1728×1024, cropped | 0,0 1728×1117 |
+| `nccalc monitor-minmax` | started maximized | 192 | 0,0 1728×1117 | 0,33 1728×1024, cropped | 0,0 1728×1117 |
+| `standard monitor-minmax` | started maximized | 192 | 2,33 1723×1024, Mac title bar | | the same |
+
+No frame gained or lost a Mac title bar. The window rect the program reads, started maximized at
+192 DPI, keeps its border past the work area: -5,61 3466×2058 pixels (0.3.3: -6,66 3466×2058). A
+window tool's left half of the maximized `nccalc default-minmax` window gives 0,33 864×1024 with
+window rect 0,66 1728×2048 pixels, the whole frame. It stays maximized, as Hadron keeps such windows
+(#65 changes that).
+
+**Still open:** a window maximized after it was shown, as with the double-click here, comes out
+32 points short at the top at 96 and 192 DPI, with and without these patches. The `nccalc` window
+still has a Mac title bar when it is maximized, so Cocoa keeps the frame Wine sets below the menu
+bar and moves the window down by the bar's height when it loses it. Its window rect's top then is
+130 pixels, not 61. With these patches, that move is a frame from the Mac side, and the window
+rect loses its hidden border: 0,130 3456×1984 pixels (0.3.3: -6,130 3466×1984). Also, with Wine's
+`Decorated=N` option, which winemac can't read, a clipped maximized window with a caption would get
+a Mac title bar (not tested).

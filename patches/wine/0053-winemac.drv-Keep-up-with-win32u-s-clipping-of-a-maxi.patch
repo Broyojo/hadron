@@ -1,0 +1,123 @@
+From 9f18022dbc0e792bb0dfc3bc5cc339d8825c3ef8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
+Date: Tue, 17 Nov 2026 09:34:36 +0100
+Subject: [PATCH 53/53] winemac.drv: Keep up with win32u's clipping of a
+ maximized window.
+
+The driver took a window whose visible rect is its whole window rect
+for one that draws its own frame. A maximized window at the default
+maximize's place now shows only within the area it maximizes over, so
+its visible rect is smaller than its window rect even when the app
+draws its frame, and it got a Mac title bar.
+
+Ask what win32u's rule asks instead, with no monitor queries: the
+window is all client area, it's shaped, or its style has no frame Wine
+draws. And as a window that draws its own frame hangs its border past
+the work area, a frame the Mac side gives it (a window tool, a restore)
+is the whole window, or the hidden border would show past the frame's
+edges; a frame that is the visible rect, as macOS reports it back, is
+still mapped to the window rect.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/winemac.drv/macdrv.h |  1 +
+ dlls/winemac.drv/window.c | 36 +++++++++++++++++++++++++++++++++---
+ 2 files changed, 34 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
+index 67aa1af66c..b89cd1160c 100644
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -238,6 +238,7 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+     unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
+     unsigned int        minimized : 1;          /* is window minimized? */
+     unsigned int        fullscreen : 1;         /* is the window visible rect fullscreen? (unrelated to native AppKit/Cocoa fullscreen) */
++    unsigned int        own_frame : 1;          /* does the app draw the window's whole frame (draws_own_frame)? */
+ };
+ 
+ struct macdrv_client_surface
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index ba8b33a3a7..4e5456ceed 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -103,6 +103,27 @@ static BOOL region_covers_window(HWND hwnd)
+ }
+ 
+ 
++/***********************************************************************
++ *              draws_own_frame
++ *
++ * Whether the app draws the window's whole frame, so Wine draws none: win32u then leaves the
++ * visible rect the whole window rect. A maximized window at the default maximize's place shows
++ * only within its work area (win32u's get_visible_rect), so for one, the reasons win32u has are
++ * asked instead: the window is all client area, it's shaped, or its style has no frame Wine
++ * draws.
++ */
++static BOOL draws_own_frame(HWND hwnd, UINT style, UINT ex_style, BOOL shaped, const struct window_rects *rects)
++{
++    struct macdrv_window_features wf;
++
++    if (EqualRect(&rects->window, &rects->visible)) return TRUE;
++    if (!(style & WS_MAXIMIZE) || (style & WS_CHILD)) return FALSE;
++    if (EqualRect(&rects->window, &rects->client) || shaped) return TRUE;
++    wf = get_window_features_for_style(style, ex_style, FALSE);
++    return !wf.title_bar && !wf.shadow;
++}
++
++
+ /***********************************************************************
+  *              get_cocoa_window_features
+  */
+@@ -111,7 +132,7 @@ static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win
+     struct macdrv_window_features wf = {0};
+ 
+     if (ex_style & WS_EX_NOACTIVATE) wf.prevents_app_activation = TRUE;
+-    if (EqualRect(&data->rects.window, &data->rects.visible))
++    if (data->own_frame)
+     {
+         /* The app draws its own frame, but a sizing border still lets the user resize the
+          * window. The Cocoa window stays borderless, so its edges are the app's, as on Windows
+@@ -566,6 +587,7 @@ static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const struct wi
+ 
+     if (!(data = alloc_win_data(hwnd))) return NULL;
+     data->rects = *rects;
++    data->own_frame = EqualRect(&rects->window, &rects->visible); /* updated by WindowPosChanged */
+ 
+     if (parent == NtUserGetDesktopWindow())
+     {
+@@ -1682,6 +1704,7 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
+ 
+     old_rects = data->rects;
+     data->rects = *new_rects;
++    data->own_frame = draws_own_frame(hwnd, new_style, NtUserGetWindowLongW(hwnd, GWL_EXSTYLE), data->shaped, new_rects);
+ 
+     TRACE("win %p/%p new_rects %s style %08x flags %08x surface %p\n", hwnd, data->cocoa_window,
+           debugstr_window_rects(new_rects), new_style, swp_flags, surface);
+@@ -1790,7 +1813,12 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+           event->window_frame_changed.fullscreen, event->window_frame_changed.in_resize);
+ 
+     rect = rect_from_cgrect(event->window_frame_changed.frame);
+-    rect = window_rect_from_visible(&data->rects, rect);
++    /* A maximized window that draws its own frame hangs its border past the work area, where win32u
++     * hides it. Moved or sized from the Mac side, it isn't where the default maximize put it any
++     * more, so win32u shows all of it: the new frame is the whole window, or the border would show
++     * past the frame's edges, and the Mac window and win32u's visible rect wouldn't agree. */
++    if (!data->own_frame || EqualRect(&rect, &data->rects.visible))
++        rect = window_rect_from_visible(&data->rects, rect);
+     width = rect.right - rect.left;
+     height = rect.bottom - rect.top;
+ 
+@@ -2012,7 +2040,9 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
+         if ((style & WS_MAXIMIZE) && (style & WS_VISIBLE) && (data = get_win_data(hwnd)))
+         {
+             RECT rect = rect_from_cgrect(event->window_restore_requested.frame);
+-            rect = window_rect_from_visible(&data->rects, rect);
++            /* restored, a window that draws its own frame is all visible: its hidden border (see
++             * macdrv_window_frame_changed) doesn't come back past the frame */
++            if (!data->own_frame) rect = window_rect_from_visible(&data->rects, rect);
+             release_win_data(data);
+ 
+             NtUserSetRawWindowPos(hwnd, rect, 0, TRUE);
+-- 
+2.56.1
+

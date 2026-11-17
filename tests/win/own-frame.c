@@ -6,6 +6,7 @@
  *
  * Usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] [default-minmax]
  *                      [region|shape] [hit-client] [no-sizing] [layered] [unaware]
+ *                      [monitor-minmax] [strip]
  *   standard        WS_OVERLAPPEDWINDOW: Wine gives it a Mac title bar (the control)
  *   popup           no caption, a sizing border, its own title strip (WS_POPUP | WS_THICKFRAME)
  *   nccalc          caption styles, but the app takes the whole window as client area
@@ -34,6 +35,11 @@
  *                   shadow and snapping), as CEF, Qt and launchers do. Windows resizes such a
  *                   window from no edge, so a drag at its edge is expected to resize nothing
  *   no-sizing       popup only: no WS_THICKFRAME, so nothing may resize the window
+ *   monitor-minmax  answer WM_GETMINMAXINFO with the whole monitor, as games maximizing for borderless
+ *                   fullscreen do: the window is expected to cover the menu bar and the Dock
+ *   strip           standard only: take WS_CAPTION and WS_THICKFRAME away after creating the window,
+ *                   keeping WS_MAXIMIZEBOX, as games do for borderless fullscreen. Windows maximizes
+ *                   it over the whole monitor
  *   layered         a layered window (WS_EX_LAYERED, opaque): Wine draws no frame for it either
  *   unaware         stay DPI unaware: Windows scales the window, and its region, from 96 DPI,
  *                   which in Retina mode is half the Mac window's pixels
@@ -49,7 +55,7 @@
 enum frame { STANDARD, POPUP, NCCALC, BORDER };
 
 static enum frame frame = POPUP;
-static BOOL hold, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware;
+static BOOL hold, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware, monitor_minmax, strip;
 static int step, result = 2;
 static char last[512];
 
@@ -224,6 +230,17 @@ static LRESULT CALLBACK window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         if (frame != STANDARD) return hit_client ? HTCLIENT : hit_test( hwnd, lp );
         break;
     case WM_GETMINMAXINFO:
+        if (monitor_minmax)
+        {
+            MINMAXINFO *info = (MINMAXINFO *)lp;
+            RECT work, mon;
+
+            monitor_rects( hwnd, &work, &mon );
+            info->ptMaxPosition.x = info->ptMaxPosition.y = 0;
+            info->ptMaxSize.x = mon.right - mon.left;
+            info->ptMaxSize.y = mon.bottom - mon.top;
+            return 0;
+        }
         if (frame != STANDARD && frame != BORDER && !default_minmax)
         {
             MINMAXINFO *info = (MINMAXINFO *)lp;
@@ -305,10 +322,13 @@ int main( int argc, char **argv )
         else if (!strcmp( argv[i], "no-sizing" )) no_sizing = TRUE;
         else if (!strcmp( argv[i], "layered" )) layered = TRUE;
         else if (!strcmp( argv[i], "unaware" )) unaware = TRUE;
+        else if (!strcmp( argv[i], "monitor-minmax" )) monitor_minmax = TRUE;
+        else if (!strcmp( argv[i], "strip" )) strip = TRUE;
         else
         {
             fprintf( stderr, "usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] "
-                             "[default-minmax] [region|shape] [hit-client] [no-sizing] [layered] [unaware]\n" );
+                             "[default-minmax] [region|shape] [hit-client] [no-sizing] [layered] [unaware] "
+                             "[monitor-minmax] [strip]\n" );
             return 2;
         }
     }
@@ -336,6 +356,11 @@ int main( int argc, char **argv )
         return 2;
     }
     if (layered) SetLayeredWindowAttributes( hwnd, 0, 255, LWA_ALPHA );
+    if (strip)
+    {
+        SetWindowLongW( hwnd, GWL_STYLE, GetWindowLongW( hwnd, GWL_STYLE ) & ~(WS_CAPTION | WS_THICKFRAME) );
+        SetWindowPos( hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED );
+    }
     if (shape)
     {
         RECT rect;
