@@ -1980,3 +1980,50 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## A DPI-aware program's cursors were twice the Mac pointer's size at 192 DPI (fixed, #67)
+
+Hadron runs programs at 96 DPI: `LogPixels` is never set, and winemac gives every display the
+system DPI. There this changes nothing. At 192 DPI, which a user or a tool such as Gentes sets
+by hand (`LogPixels` in `HKCU\Control Panel\Desktop`), the cursors went wrong.
+
+Since issue #98 (#45, Wine patch 0039), a cursor covers a point per pixel, as the Mac's own do.
+Windows shows every cursor at its size in pixels, and loads a cursor in the size for the DPI: 32
+pixels at 96 DPI, 64 at 192 (200% scaling, what Windows would use on a Retina panel). So at 192 DPI
+a DPI-aware program's hourglass, and any cursor it loaded from a resource, a `.cur` or an `.ani`
+file, was 64×64 points, twice the Mac pointer.
+
+Wine patch 0050 shows every cursor at 96 / DPI points per pixel in Retina mode, the DPI of the window
+it is set for: a point per pixel at 96 DPI, as 0039 has it, and a display pixel per pixel at 192, as
+on Windows. One rule for every cursor, however it was made. The cursor cache keeps the frames as
+they were made, and the scale goes on each time the cursor is set, so one cursor set over windows of
+two DPIs is right over each. Without Retina mode a pixel is a point, as for the program's windows,
+and nothing changes. Wine swaps the arrow and a few other standard cursors for the Mac's own; they
+were never affected.
+
+`tests/win/cursor-size.c` sets a cursor over a small window under the pointer: `bitmap` (a game's
+own, from `CreateIconIndirect`, not DPI aware), `wait` (the hourglass, per-monitor DPI aware),
+`wait-unaware`, `file` (a `.cur` file with 32 and 64 pixel images, `LoadCursorFromFile`), `ani` (an
+animated cursor of two such frames) and `cache` (one hourglass over a window that isn't DPI aware,
+then over one that is). `tests/mac/nscursor-log.m` logs each `NSCursor` the process makes. With
+Hadron 0.3.3's runtime, and the same runtime with this patch's `winemac.so`, at 192 DPI unless said:
+
+| Case | Windows cursor | Window DPI | 0.3.3 | Patched |
+|---|---|---|---|---|
+| `bitmap` | 32×32 px, hot spot 5,9 | 96 | 32×32 points, 5,9 | 32×32 points, 5,9 |
+| `wait` | 64×64 px, hot spot 30,30 | 192 | 64×64 points, 30,30 | 32×32 points, 15,15 |
+| `wait-unaware` | 32×32 px, hot spot 15,15 | 96 | 32×32 points | 32×32 points |
+| `file` | 64×64 px, hot spot 10,18 | 192 | 64×64 points, 10,18 | 32×32 points, 5,9 |
+| `ani` | 64×64 px, hot spot 10,18 | 192 | 64×64 points | 32×32 points, 5,9 |
+| `cache`, first | 64×64 px | 96 | 64×64 points | 64×64 points |
+| `cache`, then | the same cursor | 192 | 64×64 points (cached) | 32×32 points, 15,15 |
+| `wait`, `file` at 96 DPI | 32×32 px | 96 | 32×32 points | 32×32 points |
+
+Over a window that isn't DPI aware, a 64-pixel cursor stays 64 points: Windows enlarges a program's
+cursors with its windows when it scales a program that isn't DPI aware, and 96 / DPI is 1 there.
+
+`scripts/play` drops `STEAM_DYLD_INSERT_LIBRARIES` for a program (`HADRON_PROGRAM`), so the logger
+went in through a copy of `play` without that line. The same cases run with `play` as shipped, and
+`WINEDEBUG=+cursor` shows winemac's scale: `cursor shown at 0.5 points per pixel` for `file` and for
+`cache`'s second window. (macOS shows only the active app's cursor, and a program started from a
+script can't make itself active, so the cursor on screen can't be read from outside.)
