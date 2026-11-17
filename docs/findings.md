@@ -1980,3 +1980,50 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## A window tool's tile left a maximized window maximized (fixed, #65)
+
+A Mac window tool that tiles a maximized window, such as Rectangle, left it maximized as far as the
+program knew: it kept its restore button, and restoring it, from a double-click on its title bar
+or the program's own button, sent it back to its old rect, wherever the tool had put it.
+
+winemac already restores a maximized window, keeping its frame, when the user starts to resize it
+live or drags it by its title bar (`windowWillStartLiveResize`, `WINDOW_RESTORE_REQUESTED` with
+`keep_frame`). Wine patch 0050 does the same for any frame change from the Mac side, at the first
+change: no timer, no judging of where the window ended up. Excluded:
+
+- Wine's own frame changes: the handler finds nothing changed.
+- Frames macOS adjusts from what Wine set: they come with `skip_size_move_loop` (when a window is
+  shown, after `setFrame`). So now does the move Cocoa makes when a window's style changes. A
+  window that loses its title bar as it is maximized (`own-frame nccalc`) was moved down by the
+  title bar's height and reported as the user's move. With the rule alone, maximizing it with a
+  double-click un-maximized it again.
+- Fullscreen, a live resize and a drag, which have their own paths.
+
+A window tool sets a frame in steps (Rectangle: the size, the position, then the size again). A
+restore posted at the first step came after the others and set the Cocoa frame back to the first
+step's. The restore is therefore sent while the frame event is handled, when win32u doesn't set
+the Cocoa frame back. A program that keeps the window maximized takes the frame, as before.
+
+Measured with `tests/win/own-frame.c standard hold-maximized` (a window started maximized), with
+`tests/mac/ax-window.swift --frame` setting a frame as Rectangle does, and then `tests/win/win-info.c
+restore`, a title-bar double-click. A display of 1728×1117 points (usable 0,33 1728×1024) with a
+2560×1440 one at its right. Hadron 0.3.3's runtime, and the same runtime with this patch:
+
+| Window tool's frame | 0.3.3 | Patched |
+|---|---|---|
+| left half, 0,33 864×1024, at 192 and 96 DPI | on the half, still maximized; restores to its old rect | on the half, not maximized |
+| the other display's left half, 1728,0 1280×1440 | 1728,30 1280×1087, still maximized; restores to the first display | the same frame, not maximized |
+| the whole other display | 1728,30 2560×1087, still maximized | the same frame, not maximized |
+| moved, 100,100 1728×1024 | moved, still maximized | moved, not maximized |
+
+Unchanged, and still maximized: `standard hold-maximized` (started maximized: 0,33 1728×1024),
+`standard hold` and `nccalc default-minmax hold` maximized with `win-info maximize` (as a
+double-click), on the main display and after moving it to the other one, and `popup default-minmax
+hold` maximized over the whole display. The heights of 1087 on the other display are macOS
+holding a frame a tool sets to the height of the display the window is leaving, with and without
+this patch.
+
+A self-framed window (`nccalc`) can't be resized by a window tool on 0.3.3 (#63): the tool's size is
+refused and only the move applies, so with this patch alone, such a window restores at its full
+size where the tool moved it.
