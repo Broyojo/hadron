@@ -33,6 +33,13 @@ func describe(_ b: CGRect) -> String {
     "\(Int(b.minX)),\(Int(b.minY)) \(Int(b.width))x\(Int(b.height))"
 }
 
+// Without permission to post events, macOS drops them silently and the window would stay "the same
+// size", which reads as AppKit refusing the drag.
+guard CGPreflightPostEventAccess(), AXIsProcessTrusted() else {
+    print("The terminal needs Accessibility permission to post mouse events: System Settings › Privacy & Security › Accessibility.")
+    exit(2)
+}
+
 guard let (number, bounds) = frontWindow() else {
     FileHandle.standardError.write("drag-pid: no window for pid \(pid)\n".data(using: .utf8)!)
     exit(1)
