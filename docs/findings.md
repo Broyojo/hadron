@@ -2038,6 +2038,7 @@ hold` maximized over the whole display. The heights of 1087 on the other display
 holding a frame a tool sets to the height of the display the window is leaving, with and without
 this patch.
 
-A self-framed window (`nccalc`) can't be resized by a window tool on 0.3.3 (#63): the tool's size is
+A self-framed window (`nccalc`) can't be resized by a window tool on 0.3.3 (#63, in pull request
+#183): the tool's size is
 refused and only the move applies, so with this patch alone, such a window restores at its full
 size where the tool moved it.

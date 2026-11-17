@@ -1,6 +1,6 @@
 /* A window that draws its own frame, as many desktop apps do (ribbon toolbars, apps with their
  * own title bar), to see how Wine's Mac driver shows it and how Mac window tools (Rectangle, the
- * green button's tiles) treat it (docs/findings.md #63). Mac-side, read the window and resize it
+ * green button's tiles) treat it (Broyojo/hadron#183, docs/findings.md #63 there). Mac-side, read the window and resize it
  * with tests/mac/ax-window.swift, and drag its edge with tests/mac/drag-pid.swift; Windows-side,
  * hold logs every move and size.
  *

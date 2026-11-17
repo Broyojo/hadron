@@ -16,6 +16,7 @@
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -41,11 +42,22 @@ static void print_rect(const char *label, RECT r)
 
 static BOOL CALLBACK each_window(HWND hwnd, LPARAM lparam)
 {
-    wchar_t title[256];
     (void)lparam;
     if (!IsWindowVisible(hwnd)) return TRUE;
-    GetWindowTextW(hwnd, title, 256);
-    if (!wcsstr(title, needle)) return TRUE;
+    /* the whole title, however long */
+    int length = GetWindowTextLengthW(hwnd);
+    wchar_t *title = calloc(length + 1, sizeof(*title));
+    if (!title)
+    {
+        printf("no memory for a title of %d characters\n", length);
+        exit(1);
+    }
+    GetWindowTextW(hwnd, title, length + 1);
+    if (!wcsstr(title, needle))
+    {
+        free(title);
+        return TRUE;
+    }
 
     LONG style = GetWindowLongW(hwnd, GWL_STYLE), exstyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
     RECT window, client, region_box;
@@ -92,6 +104,7 @@ static BOOL CALLBACK each_window(HWND hwnd, LPARAM lparam)
         each_window(hwnd, 0);
         command = sent;
     }
+    free(title);
     return TRUE;
 }
 
