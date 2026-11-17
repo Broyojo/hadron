@@ -1,0 +1,100 @@
+From bb47bfc2f406f967da568859762182fc756868b3 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 16 Nov 2026 19:29:45 -0500
+Subject: [PATCH] winemac.drv: Show a letterboxed window's surface in its
+ letterbox.
+
+A fullscreen window at a display mode of another shape than the screen's
+covers the whole screen, but its window surface is the size of the mode
+scaled to fit, 3024x1701 pixels for 1280x720 on a 3024x1964 panel, with
+its origin at the letterbox's top-left corner. The content view's layer
+stretched the surface to the whole window instead: what a program drew
+with GDI, or a frame before its first present, showed taller than it is
+and from the top of the screen, and a strip of it showed above the
+picture of a client surface, which win32u places in the letterbox.
+
+Keep the letterbox rect in the content view, crop the surface image to
+its size, and show it there with the layer's contentsRect. The image's
+edge pixels, which a contentsRect past the unit square repeats outward,
+are under the black bars.
+---
+ dlls/winemac.drv/cocoa_window.m | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index ed104ca68c..6f146bdfbc 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -243,6 +243,7 @@ - (id) initWithFrame:(NSRect)frame device:(id<MTLDevice>)device;
+ @interface WineContentView : WineBaseView <NSTextInputClient, NSViewLayerContentScaleDelegate>
+ {
+     CGRect surfaceRect;
++    CGRect letterboxRect;
+     CGImageRef colorImage;
+     CGImageRef shapeImage;
+ 
+@@ -276,6 +277,7 @@ - (void) addExternalMetalView:(int)delta;
+     - (BOOL) hasExternalMetalView;
+     - (void) addCALayerHostViewWithContextId:(CAContextID)contextId;
+     - (void) removeCALayerHostView:(CAContextID)contextId;
++    - (void) setLetterboxRect:(CGRect)rect;
+ 
+ @end
+ 
+@@ -415,7 +417,11 @@ - (void) updateLayer
+         if (window.closing)
+             return;
+ 
++        /* A letterboxed window's surface covers its letterbox rect, not the
++           whole view: crop the image to that rect's size, and place it there. */
+         imageRect = layer.bounds;
++        if (!CGRectIsEmpty(letterboxRect))
++            imageRect.size = letterboxRect.size;
+         imageRect.origin.x *= layer.contentsScale;
+         imageRect.origin.y *= layer.contentsScale;
+         imageRect.size.width *= layer.contentsScale;
+@@ -430,6 +436,17 @@ - (void) updateLayer
+         {
+             layer.position = surfaceRect.origin;
+             layer.contents = (id)image;
++            /* The contents fill the layer's bounds unless contentsRect says
++               otherwise. One that extends past the unit square shows the
++               whole image within the letterbox rect; the image's edges
++               stretch past it, under the black bars of -setMask:. */
++            if (!CGRectIsEmpty(letterboxRect))
++                layer.contentsRect = CGRectMake(-letterboxRect.origin.x / letterboxRect.size.width,
++                                                -letterboxRect.origin.y / letterboxRect.size.height,
++                                                layer.bounds.size.width / letterboxRect.size.width,
++                                                layer.bounds.size.height / letterboxRect.size.height);
++            else
++                layer.contentsRect = CGRectMake(0, 0, 1, 1);
+             CFRelease(image);
+             [window windowDidDrawContent];
+ 
+@@ -449,6 +466,13 @@ - (void) setSurfaceRect:(CGRect)rect
+         surfaceRect = rect;
+     }
+ 
++    - (void) setLetterboxRect:(CGRect)rect
++    {
++        if (CGRectEqualToRect(letterboxRect, rect)) return;
++        letterboxRect = rect;
++        [self setNeedsDisplay:YES];
++    }
++
+     - (void) setColorImage:(CGImageRef)image
+     {
+         CGImageRelease(colorImage);
+@@ -2592,6 +2616,9 @@ - (void) setMask:(CGRect)rect
+         int count = 0;
+ 
+         rect = CGRectIntersection(rect, bounds);
++        if (CGRectIsNull(rect))
++            rect = CGRectZero;
++        [view setLetterboxRect:rect];
+ 
+         /* Replace the bars at once, without Core Animation's implicit fades. */
+         [CATransaction begin];
+-- 
+2.54.0 (Apple Git-157)
+
