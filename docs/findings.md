@@ -2005,6 +2005,11 @@ restore posted at the first step came after the others and set the Cocoa frame b
 step's. The restore is therefore sent while the frame event is handled, when win32u doesn't set
 the Cocoa frame back. A program that keeps the window maximized takes the frame, as before.
 
+The restore comes between `WM_ENTERSIZEMOVE` and `WM_EXITSIZEMOVE`, as on Windows when a maximized
+window is dragged or snapped, so a program that saves its placement or commits a resized surface at
+the end of a move or size still hears it. `own-frame hold` prints the pair: with the tool's left
+half at 192 DPI, both arrive around the restore (before: neither), and the frames are unchanged.
+
 Measured with `tests/win/own-frame.c standard hold-maximized` (a window started maximized), with
 `tests/mac/ax-window.swift --frame` setting a frame as Rectangle does, and then `tests/win/win-info.c
 restore`, a title-bar double-click. A display of 1728×1117 points (usable 0,33 1728×1024) with a

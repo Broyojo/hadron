@@ -105,7 +105,11 @@ int main(int argc, char **argv)
     }
     if (argc == 3) command = !strcmp(argv[2], "restore") ? SC_RESTORE : SC_MAXIMIZE;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, wide, 256);
+    if (!MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, wide, 256))
+    {
+        printf("the title part is too long or not UTF-8: at most 255 characters\n");
+        return 2;
+    }
     needle = wide;
     EnumWindows(each_window, 0);
     fflush(stdout);

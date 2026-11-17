@@ -1,4 +1,4 @@
-From 637533fb1391f24eb336d8a2564f95db84ae8e91 Mon Sep 17 00:00:00 2001
+From 7f63422b6069dca1c09974f0a47e71ca52fcd093 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:26:57 +0100
 Subject: [PATCH] winemac.drv: Restore a maximized window a window tool moves
@@ -26,8 +26,8 @@ and would have been restored.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  dlls/winemac.drv/cocoa_window.m |  9 +++++++++
- dlls/winemac.drv/window.c       | 22 ++++++++++++++++++++++
- 2 files changed, 31 insertions(+)
+ dlls/winemac.drv/window.c       | 28 +++++++++++++++++++++++++++-
+ 2 files changed, 36 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 index 62425f1a49..17c4760e89 100644
@@ -60,10 +60,10 @@ index 62425f1a49..17c4760e89 100644
              BOOL isNonActivating = (currentStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
              BOOL shouldBeNonActivating = (newStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 872e317ad7..b48e4537ae 100644
+index 872e317ad7..a6a36466b0 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -1783,6 +1783,28 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1783,9 +1783,35 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
      if (!(flags & SWP_NOSIZE) || !(flags & SWP_NOMOVE))
      {
          bool send_sizemove = !event->window_frame_changed.in_resize && !being_dragged && !event->window_frame_changed.skip_size_move_loop;
@@ -74,6 +74,13 @@ index 872e317ad7..b48e4537ae 100644
 +         * frames macOS adjusts from what Wine set come with skip_size_move_loop. The restore is
 +         * sent, not posted: a window tool sets a frame in steps, and while this event is handled,
 +         * win32u's restore doesn't set the Cocoa frame back over a step still to come. */
++        BOOL restored = FALSE;
++
++        /* The restore is part of the move or size, as on Windows when a maximized window is
++         * dragged or snapped: both come between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE. */
+         if (send_sizemove)
+             send_message(hwnd, WM_ENTERSIZEMOVE, 0, 0);
+-        NtUserSetRawWindowPos(hwnd, rect, flags, FALSE);
 +        if (send_sizemove && !event->window_frame_changed.fullscreen &&
 +            (NtUserGetWindowLongW(hwnd, GWL_STYLE) & (WS_MAXIMIZE | WS_VISIBLE | WS_DISABLED)) == (WS_MAXIMIZE | WS_VISIBLE))
 +        {
@@ -85,13 +92,14 @@ index 872e317ad7..b48e4537ae 100644
 +                if (data->cocoa_window) set_cocoa_window_properties(data);
 +                release_win_data(data);
 +            }
-+            if (!(NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZE)) return;
-+            /* the app kept it maximized: it takes the new frame, as before */
++            /* if the app kept it maximized, it takes the new frame, as before */
++            restored = !(NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZE);
 +        }
-+
++        if (!restored)
++            NtUserSetRawWindowPos(hwnd, rect, flags, FALSE);
          if (send_sizemove)
-             send_message(hwnd, WM_ENTERSIZEMOVE, 0, 0);
-         NtUserSetRawWindowPos(hwnd, rect, flags, FALSE);
+             send_message(hwnd, WM_EXITSIZEMOVE, 0, 0);
+     }
 -- 
 2.56.1
 

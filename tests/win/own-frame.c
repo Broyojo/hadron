@@ -16,7 +16,8 @@
  *                   print PASS or FAIL and exit with 0 or 1 (the default). It counts the sizing
  *                   border that Windows hangs past the work area's edges, so for what the Mac
  *                   shows, use hold and ax-window
- *   hold            stay open and log every move and size: try a window tool on it, or run
+ *   hold            stay open and log every move and size, and the size/move loop's start and end:
+ *                   try a window tool on it, or run
  *                   tests/mac/ax-window from a Mac terminal
  *   hold-maximized  the same, starting maximized
  *   default-minmax  leave WM_GETMINMAXINFO to Windows. Without it, the own-frame kinds answer as
@@ -256,6 +257,15 @@ static LRESULT CALLBACK window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         break;
     case WM_WINDOWPOSCHANGED:
         describe( hwnd, "moved or sized" );
+        break;
+    case WM_ENTERSIZEMOVE:
+    case WM_EXITSIZEMOVE:
+        /* a move or size from the Mac side (a window tool) comes between these, as a drag does */
+        if (hold)
+        {
+            printf( "%s\n", msg == WM_ENTERSIZEMOVE ? "enter size/move" : "exit size/move" );
+            fflush( stdout );
+        }
         break;
     case WM_SIZE:
         if (region)
