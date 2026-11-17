@@ -16,7 +16,8 @@
  *                   print PASS or FAIL and exit with 0 or 1 (the default). It counts the sizing
  *                   border that Windows hangs past the work area's edges, so for what the Mac
  *                   shows, use hold and ax-window
- *   hold            stay open and log every move and size, and the size/move loop's start and end:
+ *   hold            stay open and log every move and size, the size/move loop's start and end, and
+ *                   when it is activated or deactivated:
  *                   try a window tool on it, or run
  *                   tests/mac/ax-window from a Mac terminal
  *   hold-maximized  the same, starting maximized
@@ -44,6 +45,8 @@
  *   layered         a layered window (WS_EX_LAYERED, opaque): Wine draws no frame for it either
  *   unaware         stay DPI unaware: Windows scales the window, and its region, from 96 DPI,
  *                   which in Retina mode is half the Mac window's pixels
+ *   second          also open a plain window in front, so a window tool (ax-window sets every
+ *                   window's frame) arranges the first one while it is in the background
  *
  * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o own-frame.exe tests/win/own-frame.c -luser32 -lgdi32 */
 #define _WIN32_WINNT 0x0A00
@@ -56,7 +59,7 @@
 enum frame { STANDARD, POPUP, NCCALC, BORDER };
 
 static enum frame frame = POPUP;
-static BOOL hold, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware, monitor_minmax, strip;
+static BOOL hold, second, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware, monitor_minmax, strip;
 static int step, result = 2;
 static char last[512];
 
@@ -267,6 +270,17 @@ static LRESULT CALLBACK window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
             fflush( stdout );
         }
         break;
+    case WM_ACTIVATE:
+        /* a window tool arranging a window in the background mustn't activate it */
+        if (hold)
+        {
+            char title[64];
+
+            GetWindowTextA( hwnd, title, sizeof(title) );
+            printf( "%s %s\n", LOWORD( wp ) == WA_INACTIVE ? "deactivated" : "activated", title );
+            fflush( stdout );
+        }
+        break;
     case WM_SIZE:
         if (region)
         {
@@ -334,11 +348,12 @@ int main( int argc, char **argv )
         else if (!strcmp( argv[i], "unaware" )) unaware = TRUE;
         else if (!strcmp( argv[i], "monitor-minmax" )) monitor_minmax = TRUE;
         else if (!strcmp( argv[i], "strip" )) strip = TRUE;
+        else if (!strcmp( argv[i], "second" )) second = TRUE;
         else
         {
             fprintf( stderr, "usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] "
                              "[default-minmax] [region|shape] [hit-client] [no-sizing] [layered] [unaware] "
-                             "[monitor-minmax] [strip]\n" );
+                             "[monitor-minmax] [strip] [second]\n" );
             return 2;
         }
     }
@@ -380,6 +395,13 @@ int main( int argc, char **argv )
     }
     ShowWindow( hwnd, start_maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL );
     UpdateWindow( hwnd );
+    if (second)
+    {
+        HWND front = CreateWindowExW( 0, class_name, L"own-frame second", WS_OVERLAPPEDWINDOW, MulDiv( 300, dpi, 96 ),
+                                      MulDiv( 300, dpi, 96 ), MulDiv( 500, dpi, 96 ), MulDiv( 300, dpi, 96 ),
+                                      NULL, NULL, wc.hInstance, NULL );
+        if (front) ShowWindow( front, SW_SHOWNORMAL );
+    }
     if (hold) printf( "own-frame (%s): close the window to end\n", frame_name() );
     else SetTimer( hwnd, 1, 700, NULL );
 

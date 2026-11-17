@@ -1,4 +1,4 @@
-From 7f63422b6069dca1c09974f0a47e71ca52fcd093 Mon Sep 17 00:00:00 2001
+From 3126161e7a46bbd3e222464bbd8561a8b51a1872 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:26:57 +0100
 Subject: [PATCH] winemac.drv: Restore a maximized window a window tool moves
@@ -26,8 +26,8 @@ and would have been restored.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  dlls/winemac.drv/cocoa_window.m |  9 +++++++++
- dlls/winemac.drv/window.c       | 28 +++++++++++++++++++++++++++-
- 2 files changed, 36 insertions(+), 1 deletion(-)
+ dlls/winemac.drv/window.c       | 33 ++++++++++++++++++++++++++++++++-
+ 2 files changed, 41 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 index 62425f1a49..17c4760e89 100644
@@ -60,10 +60,10 @@ index 62425f1a49..17c4760e89 100644
              BOOL isNonActivating = (currentStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
              BOOL shouldBeNonActivating = (newStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 872e317ad7..a6a36466b0 100644
+index 872e317ad7..09c36633aa 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -1783,9 +1783,35 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1783,9 +1783,40 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
      if (!(flags & SWP_NOSIZE) || !(flags & SWP_NOMOVE))
      {
          bool send_sizemove = !event->window_frame_changed.in_resize && !being_dragged && !event->window_frame_changed.skip_size_move_loop;
@@ -86,7 +86,12 @@ index 872e317ad7..a6a36466b0 100644
 +        {
 +            TRACE("%p maximized, its frame changed on the Mac side: restoring it to %s\n", hwnd, wine_dbgstr_rect(&rect));
 +            NtUserSetRawWindowPos(hwnd, rect, 0, TRUE);
-+            send_message(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
++            /* A window tool may arrange a window in the background: only the one in front takes
++             * the title bar's restore, which activates it; any other restores where it is. */
++            if (hwnd == NtUserGetForegroundWindow())
++                send_message(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
++            else
++                NtUserShowWindow(hwnd, SW_SHOWNOACTIVATE);
 +            if ((data = get_win_data(hwnd)))
 +            {
 +                if (data->cocoa_window) set_cocoa_window_properties(data);
