@@ -82,11 +82,15 @@ static BOOL CALLBACK each_window(HWND hwnd, LPARAM lparam)
     printf("  dpi              %u\n", GetDpiForWindow(hwnd));
     if (command)
     {
+        WPARAM sent = command;
+
         printf("sending %s\n", command == SC_RESTORE ? "restore" : "maximize");
         PostMessageW(hwnd, WM_SYSCOMMAND, command, 0);
         Sleep(1500);
+        /* print it again without sending the command again; the next matching window gets it too */
         command = 0;
         each_window(hwnd, 0);
+        command = sent;
     }
     return TRUE;
 }
