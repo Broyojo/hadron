@@ -1,29 +1,31 @@
-From 99183ef839d69bc3652fe89d0823e947d9e37088 Mon Sep 17 00:00:00 2001
-From: Ondrej Simon <ondrej@dorhawk.software>
-Date: Sun, 15 Nov 2026 09:45:51 +0100
+From e4c91ddfc08367189785b0c07dedf9fb278406e8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
+Date: Tue, 17 Nov 2026 09:18:07 +0100
 Subject: [PATCH 51/51] winemac.drv: A region that covers the whole window
  isn't a shape.
 
 Ribbon libraries give a window that isn't maximized a window region:
 one rectangle a pixel larger than the window, set again on every size
 change. It leaves the window's outline as it is, but the driver counted
-any region as a shape and doesn't let macOS resize a shaped window, so
-window tools that resize through the Accessibility API, such as
-Rectangle, couldn't resize the window (Enterprise Architect, restored).
+any region as a shape, and window tools can't resize a shaped window
+(Enterprise Architect, restored).
 
 Let a window that draws its own frame stay resizable when its region
-covers the whole window.
+covers the whole window. The region is in the window's coordinates, at
+its DPI, so compare it with the window's rect at that DPI, not with the
+driver's rects, which are in raw monitor pixels: a DPI-unaware window's
+region is half its raw size in Retina mode at 192 DPI.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- dlls/winemac.drv/window.c | 25 ++++++++++++++++++++++++-
- 1 file changed, 24 insertions(+), 1 deletion(-)
+ dlls/winemac.drv/window.c | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index ff03d5cb4b..fabe7037bc 100644
+index 13fb515270..ba8b33a3a7 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -78,6 +78,27 @@ static struct macdrv_window_features get_window_features_for_style(DWORD style,
+@@ -78,6 +78,31 @@ static struct macdrv_window_features get_window_features_for_style(DWORD style,
      return wf;
  }
  
@@ -32,17 +34,21 @@ index ff03d5cb4b..fabe7037bc 100644
 + *
 + * Whether the window's region is one rectangle that covers the whole window. Ribbon libraries set
 + * such a region: it doesn't change the window's outline, so it isn't a shape.
++ *
++ * The region is in the window's own coordinates, at its DPI, so it is compared with the window's
++ * rect at that DPI, never with the driver's rects, which are in raw monitor pixels.
 + */
-+static BOOL region_covers_window(HWND hwnd, const RECT *window)
++static BOOL region_covers_window(HWND hwnd)
 +{
 +    HRGN region = NtGdiCreateRectRgn(0, 0, 0, 0);
-+    RECT box;
++    RECT box, window;
 +    BOOL ret = FALSE;
 +
 +    if (!region) return FALSE;
-+    if (NtUserGetWindowRgnEx(hwnd, region, 0) != ERROR && NtGdiGetRgnBox(region, &box) == SIMPLEREGION)
-+        ret = box.left <= 0 && box.top <= 0 && box.right >= window->right - window->left &&
-+              box.bottom >= window->bottom - window->top;
++    if (NtUserGetWindowRgnEx(hwnd, region, 0) == SIMPLEREGION && NtGdiGetRgnBox(region, &box) == SIMPLEREGION &&
++        NtUserGetWindowRect(hwnd, &window, NtUserGetDpiForWindow(hwnd)))
++        ret = box.left <= 0 && box.top <= 0 && box.right >= window.right - window.left &&
++              box.bottom >= window.bottom - window.top;
 +    NtGdiDeleteObjectApp(region);
 +    return ret;
 +}
@@ -51,13 +57,12 @@ index ff03d5cb4b..fabe7037bc 100644
  /***********************************************************************
   *              get_cocoa_window_features
   */
-@@ -90,7 +111,9 @@ static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win
-     {
+@@ -91,7 +116,8 @@ static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win
          /* The app draws its own frame, but a sizing border still lets the user resize the
-          * window: let macOS and its window tools resize it too. */
+          * window. The Cocoa window stays borderless, so its edges are the app's, as on Windows
+          * (WM_NCHITTEST); resizable lets window tools resize it through Accessibility. */
 -        if ((style & WS_THICKFRAME) && !data->shaped) wf.resizable = TRUE;
-+        if ((style & WS_THICKFRAME) &&
-+            (!data->shaped || region_covers_window(data->hwnd, &data->rects.window)))
++        if ((style & WS_THICKFRAME) && (!data->shaped || region_covers_window(data->hwnd)))
 +            wf.resizable = TRUE;
          return wf;
      }

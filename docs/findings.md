@@ -1991,22 +1991,61 @@ Two causes in winemac:
 
 - A program that takes the whole window as its client area (`WM_NCCALCSIZE`), or a popup with a
   sizing border and no caption, has no frame Wine draws, and `get_cocoa_window_features` gave its
-  Cocoa window no features at all, so it wasn't resizable. Wine patch 0050 keeps it resizable when
-  the window has a sizing border (`WS_THICKFRAME`), and lets a borderless Cocoa window be resizable.
+  Cocoa window no features at all, and AppKit refuses Accessibility's size requests for a window it
+  doesn't count as resizable. Wine patch 0050 keeps such a window resizable when it has a sizing
+  border (`WS_THICKFRAME`), and answers Accessibility's size requests itself for a resizable
+  window that is borderless to AppKit. The Cocoa window stays borderless, so AppKit doesn't resize
+  it from its edges or offer it a fullscreen Space: a drag at its edge goes to the program, and
+  resizes the window only where its `WM_NCHITTEST` answers `HTLEFT`, `HTBOTTOMRIGHT` and so on, as
+  on Windows. A program that answers `HTCLIENT` everywhere (CEF, Qt and launchers keep
+  `WS_THICKFRAME` for the shadow and snapping) isn't resized from its edges. Window tools can resize
+  it, as `SetWindowPos` from FancyZones can on Windows. The same holds for a popup with a sizing
+  border that Wine frames, and for a layered window with one.
 - Some ribbon libraries give a window that isn't maximized a window region: one rectangle a pixel
   larger than the window, set again after every size change. It doesn't change the window's outline,
   but winemac counted any region as a shape, and a shaped window isn't resizable from the Mac side.
   Wine patch 0051 doesn't count a region that covers the whole window as a shape, for a window that
-  draws its own frame.
+  draws its own frame. The region is in the window's own coordinates, at its DPI, so it's compared
+  with the window's rect at that DPI (`NtUserGetWindowRect` at `NtUserGetDpiForWindow`), not with the
+  driver's rects, which are raw monitor pixels. The first version compared it with those, so at
+  192 DPI in Retina mode a DPI-unaware ribbon program's region, half the raw size, didn't count.
 
 `tests/win/own-frame.c` opens each kind of frame and `tests/mac/ax-window.swift` asks for a new size
-through the Accessibility API, as Rectangle does (`ax-window <pid> --resize 800 500`). Measured at
-96 DPI, with Hadron 0.3.3's runtime, and the same runtime with this patch's `winemac.so`:
+through the Accessibility API, as Rectangle does (`ax-window <pid> --resize 800 500`).
+`tests/mac/drag-pid.swift` drags inside the window from a point near its edge, posted to the
+process. Measured in a scratch prefix with Hadron 0.3.3's runtime ("0.3.3"), the same runtime with
+the first version of 0050 and 0051 ("first"), and with these ("now"); `LogPixels` set to each DPI
+by hand (Hadron leaves it at 96), Retina mode on (Hadron's default):
 
-| Frame | 0.3.3 | Patched |
+| Frame | DPI | 0.3.3 | first | now |
+|---|---|---|---|---|
+| `standard` (Wine's frame, the control) | 96 | 800×500 | 800×500 | 800×500 |
+| `popup` | 96 | refused (`kAXErrorFailure`) | 800×500 | 800×500 |
+| `popup region` | 96 | refused | 800×500 | 800×500 |
+| `nccalc region` | 96 | refused | 800×500 | 800×500 |
+| `popup layered` | 96 | refused | 800×500 | 800×500 |
+| `popup region` | 192 | refused | 800×500 | 800×500 |
+| `popup region unaware` | 192 | refused | **refused** | 800×500 |
+| `nccalc region unaware` | 192 | refused | **refused** | 800×500 |
+| `popup no-sizing` (no `WS_THICKFRAME`) | 96, 192 unaware | refused | refused | refused |
+| `popup shape`, `nccalc shape` (an elliptic region) | 96; 192 unaware (popup) | refused | refused | refused |
+
+At 96 DPI the window's DPI and the monitor's are the same, so the first version passed the unaware
+cases there too.
+
+Edges, now, at 192 DPI (`drag-pid` by 100 points to the right, from 1 point inside the right edge,
+then from 20 points inside as the control):
+
+| Frame | From the edge | From inside |
 |---|---|---|
-| `standard` (Wine's frame, the control) | 800×500 | 800×500 |
-| `popup` | refused (`kAXErrorFailure`) | 800×500 |
-| `popup region` | refused | 800×500 |
-| `nccalc region` | refused | 800×500 |
+| `popup`, `nccalc` (`HTRIGHT` at the edge) | resized by the program: 1000 points wide | unchanged |
+| `popup hit-client`, `nccalc hit-client` (`HTCLIENT` everywhere) | unchanged | unchanged |
 
+Window tools resize every one of them. Ruling out AppKit's own edge zones takes the style mask: a
+drag posted to the process doesn't start AppKit's edge resizing even on a window with a Mac title
+bar, so `drag-pid` can't show them. With these patches the Cocoa window keeps the borderless style
+it has on 0.3.3 (`ax-window` reports subrole `AXUnknown` for `popup`, as 0.3.3 does; the first
+version made it `AXStandardWindow`, resizable to AppKit).
+
+A `nccalc` window without a region starts with a Mac title bar, until it's first sized, on 0.3.3 as
+with these patches: asked for 800×500 before that, it comes out 800×468, 32 points short.

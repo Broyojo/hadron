@@ -1,9 +1,11 @@
 /* A window that draws its own frame, as many desktop apps do (ribbon toolbars, apps with their
  * own title bar), to see how Wine's Mac driver shows it and how Mac window tools (Rectangle, the
- * green button's tiles) treat it (docs/findings.md #63 to #65). Mac-side, read the window with
- * tests/mac/ax-window.swift; Windows-side, with tests/win/win-info.c.
+ * green button's tiles) treat it (docs/findings.md #63). Mac-side, read the window and resize it
+ * with tests/mac/ax-window.swift, and drag its edge with tests/mac/drag-pid.swift; Windows-side,
+ * hold logs every move and size.
  *
- * Usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] [default-minmax] [region]
+ * Usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] [default-minmax]
+ *                      [region|shape] [hit-client] [no-sizing] [layered] [unaware]
  *   standard        WS_OVERLAPPEDWINDOW: Wine gives it a Mac title bar (the control)
  *   popup           no caption, a sizing border, its own title strip (WS_POPUP | WS_THICKFRAME)
  *   nccalc          caption styles, but the app takes the whole window as client area
@@ -26,6 +28,15 @@
  *                   larger than the window, set again on every size change, and none while it is
  *                   maximized, as some ribbon libraries do. It changes nothing on screen, but Wine
  *                   counted any region as a shape and wouldn't let macOS resize a shaped window.
+ *   shape           a region that does change the outline (an ellipse): the window is shaped, and
+ *                   window tools are expected not to resize it
+ *   hit-client      answer WM_NCHITTEST with HTCLIENT everywhere, keeping WS_THICKFRAME (for the
+ *                   shadow and snapping), as CEF, Qt and launchers do. Windows resizes such a
+ *                   window from no edge, so a drag at its edge is expected to resize nothing
+ *   no-sizing       popup only: no WS_THICKFRAME, so nothing may resize the window
+ *   layered         a layered window (WS_EX_LAYERED, opaque): Wine draws no frame for it either
+ *   unaware         stay DPI unaware: Windows scales the window, and its region, from 96 DPI,
+ *                   which in Retina mode is half the Mac window's pixels
  *
  * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o own-frame.exe tests/win/own-frame.c -luser32 -lgdi32 */
 #define _WIN32_WINNT 0x0A00
@@ -38,7 +49,7 @@
 enum frame { STANDARD, POPUP, NCCALC, BORDER };
 
 static enum frame frame = POPUP;
-static BOOL hold, start_maximized, default_minmax, region;
+static BOOL hold, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware;
 static int step, result = 2;
 static char last[512];
 
@@ -210,7 +221,7 @@ static LRESULT CALLBACK window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         if (frame != STANDARD && wp) return 0; /* the whole window is client area */
         break;
     case WM_NCHITTEST:
-        if (frame != STANDARD) return hit_test( hwnd, lp );
+        if (frame != STANDARD) return hit_client ? HTCLIENT : hit_test( hwnd, lp );
         break;
     case WM_GETMINMAXINFO:
         if (frame != STANDARD && frame != BORDER && !default_minmax)
@@ -289,14 +300,20 @@ int main( int argc, char **argv )
         else if (!strcmp( argv[i], "check" )) hold = FALSE;
         else if (!strcmp( argv[i], "default-minmax" )) default_minmax = TRUE;
         else if (!strcmp( argv[i], "region" )) region = TRUE;
+        else if (!strcmp( argv[i], "shape" )) shape = TRUE;
+        else if (!strcmp( argv[i], "hit-client" )) hit_client = TRUE;
+        else if (!strcmp( argv[i], "no-sizing" )) no_sizing = TRUE;
+        else if (!strcmp( argv[i], "layered" )) layered = TRUE;
+        else if (!strcmp( argv[i], "unaware" )) unaware = TRUE;
         else
         {
-            fprintf( stderr, "usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] [default-minmax] [region]\n" );
+            fprintf( stderr, "usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] "
+                             "[default-minmax] [region|shape] [hit-client] [no-sizing] [layered] [unaware]\n" );
             return 2;
         }
     }
 
-    SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 );
+    if (!unaware) SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 );
     dpi = GetDpiForSystem();
     wc.lpfnWndProc = window_proc;
     wc.hInstance = GetModuleHandleW( NULL );
@@ -306,7 +323,8 @@ int main( int argc, char **argv )
 
     style = frame == POPUP ? WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
                            : WS_OVERLAPPEDWINDOW;
-    hwnd = CreateWindowExW( 0, class_name, frame == STANDARD ? L"own-frame (standard)"
+    if (no_sizing) style &= ~WS_THICKFRAME;
+    hwnd = CreateWindowExW( layered ? WS_EX_LAYERED : 0, class_name, frame == STANDARD ? L"own-frame (standard)"
                                          : frame == POPUP    ? L"own-frame (popup)"
                                          : frame == NCCALC   ? L"own-frame (nccalc)"
                                                              : L"own-frame (border)",
@@ -316,6 +334,14 @@ int main( int argc, char **argv )
     {
         fprintf( stderr, "CreateWindowEx failed: %lu\n", GetLastError() );
         return 2;
+    }
+    if (layered) SetLayeredWindowAttributes( hwnd, 0, 255, LWA_ALPHA );
+    if (shape)
+    {
+        RECT rect;
+
+        GetWindowRect( hwnd, &rect );
+        SetWindowRgn( hwnd, CreateEllipticRgn( 0, 0, rect.right - rect.left, rect.bottom - rect.top ), FALSE );
     }
     ShowWindow( hwnd, start_maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL );
     UpdateWindow( hwnd );
