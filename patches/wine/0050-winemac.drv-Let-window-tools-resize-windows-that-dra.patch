@@ -1,0 +1,104 @@
+From 0647a29c9b7e5f92c735083f759ad75a6b116f13 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
+Date: Tue, 17 Nov 2026 09:18:06 +0100
+Subject: [PATCH 50/51] winemac.drv: Let window tools resize windows that draw
+ their own frame.
+
+An app that draws its own title bar and border takes the whole window
+as its client area, so the window has no frame Wine draws, and
+get_cocoa_window_features gave it no features at all. Window tools that
+resize through the Accessibility API, such as Rectangle, could move such
+a window but not resize it, though its sizing border (WS_THICKFRAME)
+lets the user resize it on the Windows side.
+
+Keep resizable for such windows, and let window tools resize a
+borderless Cocoa window that is resizable, answering Accessibility's
+size requests itself. The Cocoa window stays borderless, so AppKit
+neither resizes it from its edges nor offers it a fullscreen Space: a
+drag at its edge goes to the app, which resizes the window only where
+its WM_NCHITTEST says so, as on Windows. This also lets window tools
+resize a popup with a sizing border that Wine frames, and a layered
+window with one.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/winemac.drv/cocoa_window.m | 42 +++++++++++++++++++++++++++++++++
+ dlls/winemac.drv/window.c       |  9 ++++++-
+ 2 files changed, 50 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 62425f1a49..1cb3dbb12d 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -1034,6 +1034,48 @@ - (BOOL) preventResizing
+         return ([self styleMask] & NSWindowStyleMaskResizable) && (disabled || !resizable || preventForClipping);
+     }
+ 
++    /* A window that draws its own frame is borderless to AppKit, so AppKit doesn't resize it from
++     * its edges: those are the app's, through WM_NCHITTEST, as on Windows. AppKit also refuses to
++     * let window tools resize it through Accessibility, but its sizing border lets the user resize
++     * it, so they may. */
++    - (BOOL) allowsAccessibilityResize
++    {
++        BOOL preventForClipping = cursor_clipping_locks_windows && [[WineApplicationController sharedController] clippingCursor];
++        return !([self styleMask] & NSWindowStyleMaskResizable) && resizable && !disabled && !preventForClipping;
++    }
++
++    /* AppKit answers other apps' Accessibility requests for a window through these. */
++    - (BOOL) accessibilityIsAttributeSettable:(NSString*)attribute
++    {
++        if ([attribute isEqualToString:NSAccessibilitySizeAttribute] && [self allowsAccessibilityResize])
++            return YES;
++        return [super accessibilityIsAttributeSettable:attribute];
++    }
++
++    - (void) accessibilitySetValue:(id)value forAttribute:(NSString*)attribute
++    {
++        if ([attribute isEqualToString:NSAccessibilitySizeAttribute] && [self allowsAccessibilityResize] &&
++            [value isKindOfClass:[NSValue class]])
++            [self resizeForAccessibility:[value sizeValue]];
++        else
++            [super accessibilitySetValue:value forAttribute:attribute];
++    }
++
++    - (void) resizeForAccessibility:(NSSize)size
++    {
++        NSRect frame = [self frame], content;
++
++        content = [self contentRectForFrameRect:NSMakeRect(0, 0, size.width, size.height)];
++        content.size.width = MIN(MAX(content.size.width, savedContentMinSize.width), savedContentMaxSize.width);
++        content.size.height = MIN(MAX(content.size.height, savedContentMinSize.height), savedContentMaxSize.height);
++        size = [self frameRectForContentRect:content].size;
++
++        /* Keep the top left corner where it is, as AppKit does for a resizable window. */
++        frame.origin.y = NSMaxY(frame) - size.height;
++        frame.size = size;
++        [self setFrame:frame display:YES];
++    }
++
+     - (BOOL) allowsMovingWithMaximized:(BOOL)inMaximized
+     {
+         if (allow_immovable_windows && (disabled || inMaximized))
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index 872e317ad7..13fb515270 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -86,7 +86,14 @@ static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win
+     struct macdrv_window_features wf = {0};
+ 
+     if (ex_style & WS_EX_NOACTIVATE) wf.prevents_app_activation = TRUE;
+-    if (EqualRect(&data->rects.window, &data->rects.visible)) return wf;
++    if (EqualRect(&data->rects.window, &data->rects.visible))
++    {
++        /* The app draws its own frame, but a sizing border still lets the user resize the
++         * window. The Cocoa window stays borderless, so its edges are the app's, as on Windows
++         * (WM_NCHITTEST); resizable lets window tools resize it through Accessibility. */
++        if ((style & WS_THICKFRAME) && !data->shaped) wf.resizable = TRUE;
++        return wf;
++    }
+ 
+     return get_window_features_for_style(style, ex_style, data->shaped);
+ }
+-- 
+2.56.1
+

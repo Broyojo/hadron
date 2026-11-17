@@ -1980,3 +1980,137 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## Window tools could move a window that draws its own frame, but not resize it (fixed, #63)
+
+Many desktop programs draw their own title bar and border: ribbon toolbars, and programs with a
+title bar of their own. Mac window tools such as Rectangle work through the Accessibility API. They
+could move such a window but not resize it.
+
+Two causes in winemac:
+
+- A program that takes the whole window as its client area (`WM_NCCALCSIZE`), or a popup with a
+  sizing border and no caption, has no frame Wine draws, and `get_cocoa_window_features` gave its
+  Cocoa window no features at all, and AppKit refuses Accessibility's size requests for a window it
+  doesn't count as resizable. Wine patch 0050 keeps such a window resizable when it has a sizing
+  border (`WS_THICKFRAME`), and answers Accessibility's size requests itself for a resizable
+  window that is borderless to AppKit. The Cocoa window stays borderless, so AppKit doesn't resize
+  it from its edges or offer it a fullscreen Space: a drag at its edge goes to the program, and
+  resizes the window only where its `WM_NCHITTEST` answers `HTLEFT`, `HTBOTTOMRIGHT` and so on, as
+  on Windows. A program that answers `HTCLIENT` everywhere (CEF, Qt and launchers keep
+  `WS_THICKFRAME` for the shadow and snapping) isn't resized from its edges. Window tools can resize
+  it, as `SetWindowPos` from FancyZones can on Windows. The same holds for a popup with a sizing
+  border that Wine frames, and for a layered window with one.
+- Some ribbon libraries give a window that isn't maximized a window region: one rectangle a pixel
+  larger than the window, set again after every size change. It doesn't change the window's outline,
+  but winemac counted any region as a shape, and a shaped window isn't resizable from the Mac side.
+  Wine patch 0051 doesn't count a region that covers the whole window as a shape, for a window that
+  draws its own frame. The region is in the window's own coordinates, at its DPI, so it's compared
+  with the window's rect at that DPI (`NtUserGetWindowRect` at `NtUserGetDpiForWindow`), not with the
+  driver's rects, which are raw monitor pixels. The first version compared it with those, so at
+  192 DPI in Retina mode a DPI-unaware ribbon program's region, half the raw size, didn't count.
+
+`tests/win/own-frame.c` opens each kind of frame and `tests/mac/ax-window.swift` asks for a new size
+through the Accessibility API, as Rectangle does (`ax-window <pid> --resize 800 500`).
+`tests/mac/drag-pid.swift` drags inside the window from a point near its edge, posted to the
+process. Measured in a scratch prefix with Hadron 0.3.3's runtime ("0.3.3"), the same runtime with
+the first version of 0050 and 0051 ("first"), and with these ("now"); `LogPixels` set to each DPI
+by hand (Hadron leaves it at 96), Retina mode on (Hadron's default):
+
+| Frame | DPI | 0.3.3 | first | now |
+|---|---|---|---|---|
+| `standard` (Wine's frame, the control) | 96 | 800×500 | 800×500 | 800×500 |
+| `popup` | 96 | refused (`kAXErrorFailure`) | 800×500 | 800×500 |
+| `popup region` | 96 | refused | 800×500 | 800×500 |
+| `nccalc region` | 96 | refused | 800×500 | 800×500 |
+| `popup layered` | 96 | refused | 800×500 | 800×500 |
+| `popup region` | 192 | refused | 800×500 | 800×500 |
+| `popup region unaware` | 192 | refused | **refused** | 800×500 |
+| `nccalc region unaware` | 192 | refused | **refused** | 800×500 |
+| `popup no-sizing` (no `WS_THICKFRAME`) | 96, 192 unaware | refused | refused | refused |
+| `popup shape`, `nccalc shape` (an elliptic region) | 96; 192 unaware (popup) | refused | refused | refused |
+
+At 96 DPI the window's DPI and the monitor's are the same, so the first version passed the unaware
+cases there too.
+
+Edges, now, at 192 DPI (`drag-pid` by 100 points to the right, from 1 point inside the right edge,
+then from 20 points inside as the control):
+
+| Frame | From the edge | From inside |
+|---|---|---|
+| `popup`, `nccalc` (`HTRIGHT` at the edge) | resized by the program: 1000 points wide | unchanged |
+| `popup hit-client`, `nccalc hit-client` (`HTCLIENT` everywhere) | unchanged | unchanged |
+
+Window tools resize every one of them. Ruling out AppKit's own edge zones takes the style mask: a
+drag posted to the process doesn't start AppKit's edge resizing even on a window with a Mac title
+bar, so `drag-pid` can't show them. With these patches the Cocoa window keeps the borderless style
+it has on 0.3.3 (`ax-window` reports subrole `AXUnknown` for `popup`, as 0.3.3 does; the first
+version made it `AXStandardWindow`, resizable to AppKit).
+
+A `nccalc` window without a region starts with a Mac title bar, until it's first sized, on 0.3.3 as
+with these patches: asked for 800×500 before that, it comes out 800×468, 32 points short.
+
+## A maximized window's hidden border showed past the screen's edges (fixed, #64)
+
+Windows maximizes a window with a sizing border so that the border hangs past the edges of the area
+it maximizes over: off the monitor, or under the taskbar, where the user never sees it. winemac
+showed it. A maximized window that draws its own frame but leaves `WM_GETMINMAXINFO` to Windows
+(Enterprise Architect's frame, `tests/win/own-frame.c nccalc default-minmax`) hung 2 to 3 points
+past both sides of the display, and, started maximized, 5 points into the Dock. A popup without a
+caption, which Windows maximizes over the whole monitor, hung past every edge.
+
+Wine patch 0052 (win32u) clips the visible rect of a maximized top-level window to that area, but
+only for a window that sits where the default maximize puts it: within the area, and past it by
+no more than the border `get_min_max_info` gives it. The area comes from `get_maximized_rect`'s
+rule, which the two now share: the work area for a window with a caption and a maximize box, the
+whole monitor for any other. A window the program placed itself is left as it is, such as a game
+that strips its caption and maximizes for borderless fullscreen, or one whose `WM_GETMINMAXINFO`
+puts it over the whole monitor. What the program reads (`GetWindowRect`, `GetClientRect`,
+`WM_NCCALCSIZE`, `GetWindowPlacement`) doesn't change.
+
+Patch 0053 keeps winemac in step. The driver took a window whose visible rect is its whole window
+rect for one that draws its own frame; a clipped one isn't, and would get a Mac title bar. It now
+asks what win32u asks, with no monitor queries: the window is all client area, it's shaped, or its
+style has no frame Wine draws. A frame the Mac side then gives such a window (a window tool) is the
+whole window; it isn't at the default maximize's place any more, so win32u shows all of it.
+
+On a second display, Windows shows the hanging border on the neighbouring display, where it
+bleeds over. This hides it there too.
+
+0052 and 0053 build on #63 (patches 0050 and 0051).
+
+Measured with `tests/win/own-frame.c` and `tests/mac/ax-window.swift`, on a display of 1728×1117
+points (usable 0,33 1728×1024). Each window was started maximized (`hold-maximized`) or maximized as
+a title-bar double-click does it (`hold`, then `tests/win/win-info.c own-frame maximize`). Hadron
+0.3.3's runtime; the first version of these patches (#173, which clipped every maximized window);
+this one:
+
+| Frame | How | DPI | 0.3.3 | First version | Patched |
+|---|---|---|---|---|---|
+| `nccalc default-minmax` | started maximized | 192 | -3,33 1733×1029 | 0,33 1728×1024 | 0,33 1728×1024, the usable area |
+| `nccalc default-minmax` | started maximized | 96 | -2,33 1732×1028 | | 0,33 1728×1024 |
+| `nccalc default-minmax` | double-click | 192 | -3,65 1733×992 | 0,65 1728×992 | 0,65 1728×992 |
+| `nccalc default-minmax` | double-click | 96 | -2,65 1732×992 | | 0,65 1728×992 |
+| `popup default-minmax` | double-click | 192 | -2,-2 1732×1121 | 0,0 1728×1117 | 0,0 1728×1117, the whole display |
+| `standard strip` (a game's borderless fullscreen) | started maximized | 192 | 0,0 1728×1117 | 0,33 1728×1024, cropped | 0,0 1728×1117 |
+| `nccalc monitor-minmax` | started maximized | 192 | 0,0 1728×1117 | 0,33 1728×1024, cropped | 0,0 1728×1117 |
+| `standard monitor-minmax` | started maximized | 192 | 2,33 1723×1024, Mac title bar | | the same |
+
+No frame gained or lost a Mac title bar. The window rect the program reads, started maximized at
+192 DPI, keeps its border past the work area: -5,61 3466×2058 pixels (0.3.3: -6,66 3466×2058). A
+window tool's left half of the maximized `nccalc default-minmax` window gives 0,33 864×1024 with
+window rect 0,66 1728×2048 pixels, the whole frame. It stays maximized, as Hadron keeps such windows
+(#65 changes that).
+
+**Still open:** a window maximized after it was shown, as with the double-click here, comes out
+32 points short at the top at 96 and 192 DPI, with and without these patches. The `nccalc` window
+still has a Mac title bar when it is maximized, so Cocoa keeps the frame Wine sets below the menu
+bar and moves the window down by the bar's height when it loses it. Its window rect's top then is
+130 pixels, not 61. With these patches, that move is a frame from the Mac side, and the window
+rect loses its hidden border: 0,130 3456×1984 pixels (0.3.3: -6,130 3466×1984).
+
+With Wine's `Decorated=N` option, win32u draws no window's frame, so every window draws its own.
+winemac reads the option as win32u does (the `X11 Driver` key, and the app's own under
+`AppDefaults`), so a clipped maximized window with a caption is still taken as drawing its own
+frame. Measured with `standard hold-maximized` at 192 DPI and `Decorated=N`: 0,33 1728×1024 with
+no Mac title bar (0.3.3: -3,33 1733×1029, no Mac title bar).
