@@ -1,0 +1,139 @@
+From ef81309ba9e3024054664a6b2f16f6096924027b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
+Date: Tue, 17 Nov 2026 09:28:37 +0100
+Subject: [PATCH] winemac.drv: Show a cursor at 96 / DPI points per pixel in
+ Retina mode.
+
+Since 0039 a cursor covers a point per pixel, as the Mac's own cursors
+do. But Windows loads a cursor in the size for the DPI: 64 pixels at
+192 DPI, so a DPI-aware program's hourglass was 64 points, twice the
+Mac pointer.
+
+Windows shows every cursor at its size in pixels. In Retina mode, show
+each one at 96 / DPI points per pixel, the DPI of the window it is set
+for: a point per pixel at 96 DPI, as before, and a display pixel per
+pixel at 192, as on Windows. The cursor cache keeps the frames as they
+are, and the scale goes on each time the cursor is set, so a cursor
+shared by windows of different DPIs is right over each one.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/winemac.drv/cocoa_app.m | 10 +++---
+ dlls/winemac.drv/mouse.c     | 67 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 73 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index f3a23ce5d2..7c0398959a 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -1084,16 +1084,18 @@ - (void) setCursor
+     {
+         NSDictionary* frame = cursorFrames[cursorFrame];
+         CGImageRef cgimage = (CGImageRef)frame[@"image"];
+-        /* A cursor covers a point for each of its pixels, in Retina mode too, as the Mac's own
+-           cursors do: halved to the display's pixels, a game's cursor is half the size of the
+-           Mac's pointer and of what the game shows on a display without Retina mode. */
+-        CGSize size = CGSizeMake(CGImageGetWidth(cgimage), CGImageGetHeight(cgimage));
++        /* A cursor covers as many points per pixel as the frame says (macdrv_SetCursor): at 96
++           DPI a point for each pixel, in Retina mode too, as the Mac's own cursors do. */
++        double pointsPerPixel = frame[@"pointsPerPixel"] ? [frame[@"pointsPerPixel"] doubleValue] : 1;
++        CGSize size = CGSizeMake(CGImageGetWidth(cgimage) * pointsPerPixel, CGImageGetHeight(cgimage) * pointsPerPixel);
+         NSImage* image = [[NSImage alloc] initWithCGImage:cgimage size:NSSizeFromCGSize(size)];
+         CFDictionaryRef hotSpotDict = (CFDictionaryRef)frame[@"hotSpot"];
+         CGPoint hotSpot;
+ 
+         if (!CGPointMakeWithDictionaryRepresentation(hotSpotDict, &hotSpot))
+             hotSpot = CGPointZero;
++        hotSpot.x *= pointsPerPixel;
++        hotSpot.y *= pointsPerPixel;
+         self.cursor = [[[NSCursor alloc] initWithImage:image hotSpot:NSPointFromCGPoint(hotSpot)] autorelease];
+         [image release];
+         [self unhideCursor];
+diff --git a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
+index 0c9ba0393b..d107ea6551 100644
+--- a/dlls/winemac.drv/mouse.c
++++ b/dlls/winemac.drv/mouse.c
+@@ -780,6 +780,63 @@ static BOOL get_icon_info(HICON handle, ICONINFOEXW *ret)
+ }
+ 
+ 
++/***********************************************************************
++ *              cursor_points_per_pixel
++ *
++ * How many points a cursor covers per pixel. Windows shows every cursor at its size in pixels, and
++ * loads one from a resource in the size for the DPI: 32 pixels at 96 DPI, 64 at 192. In Retina
++ * mode a cursor covers 96 / DPI points per pixel, the DPI of the window it's set for: at 96 DPI a
++ * point per pixel, as the Mac's own cursors do; at 192 a display pixel per pixel, as on Windows.
++ * Without Retina mode a pixel is a point.
++ */
++static double cursor_points_per_pixel(HWND hwnd)
++{
++    UINT dpi;
++
++    if (!retina_on) return 1;
++    if (!hwnd || !(dpi = NtUserGetDpiForWindow(hwnd))) dpi = NtUserGetSystemDpiForProcess(NULL);
++    return dpi ? 96.0 / dpi : 1;
++}
++
++
++/***********************************************************************
++ *              copy_with_points_per_pixel
++ *
++ * A copy of the cursor's frames, each with "pointsPerPixel", or NULL when they need none. The
++ * cache keeps the frames unscaled: the same cursor can be set for windows of different DPIs.
++ */
++static CFArrayRef copy_with_points_per_pixel(CFArrayRef frames, double points_per_pixel)
++{
++    CFMutableArrayRef scaled;
++    CFNumberRef number;
++    CFIndex i, count = CFArrayGetCount(frames);
++
++    if (points_per_pixel == 1) return NULL;
++    if (!(scaled = CFArrayCreateMutable(NULL, count, &kCFTypeArrayCallBacks))) return NULL;
++    if (!(number = CFNumberCreate(NULL, kCFNumberDoubleType, &points_per_pixel)))
++    {
++        CFRelease(scaled);
++        return NULL;
++    }
++    for (i = 0; i < count; i++)
++    {
++        CFMutableDictionaryRef frame = CFDictionaryCreateMutableCopy(NULL, 0, CFArrayGetValueAtIndex(frames, i));
++        if (!frame) break;
++        CFDictionarySetValue(frame, CFSTR("pointsPerPixel"), number);
++        CFArrayAppendValue(scaled, frame);
++        CFRelease(frame);
++    }
++    CFRelease(number);
++    if (i < count)
++    {
++        CFRelease(scaled);
++        return NULL;
++    }
++    TRACE("cursor shown at %g points per pixel\n", points_per_pixel);
++    return scaled;
++}
++
++
+ /***********************************************************************
+  *              SetCursor (MACDRV.@)
+  */
+@@ -866,6 +923,16 @@ void macdrv_SetCursor(HWND hwnd, HCURSOR cursor)
+     }
+ 
+ done:
++    if (cursor_frames)
++    {
++        CFArrayRef scaled = copy_with_points_per_pixel(cursor_frames, cursor_points_per_pixel(hwnd));
++
++        if (scaled)
++        {
++            CFRelease(cursor_frames);
++            cursor_frames = scaled;
++        }
++    }
+     TRACE("setting cursor with cursor_name %s cursor_frames %p\n", debugstr_cf(cursor_name), cursor_frames);
+     macdrv_set_cursor(cursor_name, cursor_frames);
+     if (cursor_name) CFRelease(cursor_name);
+-- 
+2.56.1
+
