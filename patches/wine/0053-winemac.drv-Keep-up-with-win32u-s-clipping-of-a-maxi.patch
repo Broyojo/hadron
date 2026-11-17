@@ -1,4 +1,4 @@
-From 9f18022dbc0e792bb0dfc3bc5cc339d8825c3ef8 Mon Sep 17 00:00:00 2001
+From 2300d2fc83e0fe8b4958b1604c865f9703885a6f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:34:36 +0100
 Subject: [PATCH 53/53] winemac.drv: Keep up with win32u's clipping of a
@@ -20,15 +20,24 @@ still mapped to the window rect.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- dlls/winemac.drv/macdrv.h |  1 +
- dlls/winemac.drv/window.c | 36 +++++++++++++++++++++++++++++++++---
- 2 files changed, 34 insertions(+), 3 deletions(-)
+ dlls/winemac.drv/macdrv.h      |  2 ++
+ dlls/winemac.drv/macdrv_main.c | 24 +++++++++++++++++++++++
+ dlls/winemac.drv/window.c      | 36 +++++++++++++++++++++++++++++++---
+ 3 files changed, 59 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
-index 67aa1af66c..b89cd1160c 100644
+index 67aa1af66c..053dedfc30 100644
 --- a/dlls/winemac.drv/macdrv.h
 +++ b/dlls/winemac.drv/macdrv.h
-@@ -238,6 +238,7 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+@@ -214,6 +214,7 @@ extern INT macdrv_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyStat
+ extern INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size);
+ extern void macdrv_NotifyIMEStatus(HWND hwnd, UINT status);
+ extern BOOL macdrv_SetIMECompositionRect(HWND hwnd, RECT rect);
++extern BOOL decorated_mode;
+ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_param,
+                                         UINT flags);
+ extern BOOL macdrv_ProcessEvents(DWORD mask);
+@@ -238,6 +239,7 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
      unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
      unsigned int        minimized : 1;          /* is window minimized? */
      unsigned int        fullscreen : 1;         /* is the window visible rect fullscreen? (unrelated to native AppKit/Cocoa fullscreen) */
@@ -36,8 +45,50 @@ index 67aa1af66c..b89cd1160c 100644
  };
  
  struct macdrv_client_surface
+diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+index fb20525788..a673ccf1f9 100644
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -42,6 +42,7 @@ bool capture_displays_for_fullscreen = false;
+ bool allow_vsync = true;
+ bool allow_set_gamma = true;
+ bool left_option_is_alt = false;
++BOOL decorated_mode = TRUE;
+ bool right_option_is_alt = false;
+ bool left_command_is_ctrl = false;
+ bool right_command_is_ctrl = false;
+@@ -385,6 +386,29 @@ static void setup_options(void)
+ 
+     if (appkey) NtClose(appkey);
+     if (hkey) NtClose(hkey);
++
++    /* win32u's "Decorated" option, read as win32u reads it: with it off, Wine draws no window's
++       frame, so every window draws its own (see draws_own_frame).
++       @@ Wine registry key: HKCU\Software\Wine\X11 Driver
++       @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\X11 Driver */
++    appkey = 0;
++    hkey = open_hkcu_key("Software\\Wine\\X11 Driver");
++    if (len && len < MAX_PATH)
++    {
++        static const WCHAR x11driverW[] = {'\\','X','1','1',' ','D','r','i','v','e','r',0};
++        HKEY tmpkey;
++        memcpy(buffer, appname, len * sizeof(WCHAR));
++        memcpy(buffer + len, x11driverW, sizeof(x11driverW));
++        if ((tmpkey = open_hkcu_key("Software\\Wine\\AppDefaults")))
++        {
++            appkey = reg_open_key(tmpkey, buffer, lstrlenW(buffer) * sizeof(WCHAR));
++            NtClose(tmpkey);
++        }
++    }
++    if (!get_config_key(hkey, appkey, "Decorated", buffer, sizeof(buffer)))
++        decorated_mode = IS_OPTION_TRUE(buffer[0]);
++    if (appkey) NtClose(appkey);
++    if (hkey) NtClose(hkey);
+ }
+ 
+ 
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index ba8b33a3a7..4e5456ceed 100644
+index ba8b33a3a7..2c9bb32948 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
 @@ -103,6 +103,27 @@ static BOOL region_covers_window(HWND hwnd)
@@ -50,8 +101,8 @@ index ba8b33a3a7..4e5456ceed 100644
 + * Whether the app draws the window's whole frame, so Wine draws none: win32u then leaves the
 + * visible rect the whole window rect. A maximized window at the default maximize's place shows
 + * only within its work area (win32u's get_visible_rect), so for one, the reasons win32u has are
-+ * asked instead: the window is all client area, it's shaped, or its style has no frame Wine
-+ * draws.
++ * asked instead: the window is all client area, it's shaped, Wine draws no frames (the
++ * "Decorated" option off), or its style has no frame Wine draws.
 + */
 +static BOOL draws_own_frame(HWND hwnd, UINT style, UINT ex_style, BOOL shaped, const struct window_rects *rects)
 +{
@@ -59,7 +110,7 @@ index ba8b33a3a7..4e5456ceed 100644
 +
 +    if (EqualRect(&rects->window, &rects->visible)) return TRUE;
 +    if (!(style & WS_MAXIMIZE) || (style & WS_CHILD)) return FALSE;
-+    if (EqualRect(&rects->window, &rects->client) || shaped) return TRUE;
++    if (EqualRect(&rects->window, &rects->client) || shaped || !decorated_mode) return TRUE;
 +    wf = get_window_features_for_style(style, ex_style, FALSE);
 +    return !wf.title_bar && !wf.shadow;
 +}

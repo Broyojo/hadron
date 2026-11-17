@@ -2107,6 +2107,10 @@ window rect 0,66 1728×2048 pixels, the whole frame. It stays maximized, as Hadr
 still has a Mac title bar when it is maximized, so Cocoa keeps the frame Wine sets below the menu
 bar and moves the window down by the bar's height when it loses it. Its window rect's top then is
 130 pixels, not 61. With these patches, that move is a frame from the Mac side, and the window
-rect loses its hidden border: 0,130 3456×1984 pixels (0.3.3: -6,130 3466×1984). Also, with Wine's
-`Decorated=N` option, which winemac can't read, a clipped maximized window with a caption would get
-a Mac title bar (not tested).
+rect loses its hidden border: 0,130 3456×1984 pixels (0.3.3: -6,130 3466×1984).
+
+With Wine's `Decorated=N` option, win32u draws no window's frame, so every window draws its own.
+winemac reads the option as win32u does (the `X11 Driver` key, and the app's own under
+`AppDefaults`), so a clipped maximized window with a caption is still taken as drawing its own
+frame. Measured with `standard hold-maximized` at 192 DPI and `Decorated=N`: 0,33 1728×1024 with
+no Mac title bar (0.3.3: -3,33 1733×1029, no Mac title bar).
