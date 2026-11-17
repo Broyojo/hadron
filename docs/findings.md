@@ -2011,11 +2011,13 @@ the end of a move or size still hears it. `own-frame hold` prints the pair: with
 half at 192 DPI, both arrive around the restore (before: neither), and the frames are unchanged.
 
 A window tool may arrange a window in the background (it sets every window's frame without
-activating the app). Only the window in front takes the title bar's restore, which activates it;
-any other is restored where it is, without activation (`SW_SHOWNOACTIVATE`). `own-frame
-hold-maximized second` opens a plain window in front of the maximized one: with the tool's left
-half, the window behind was activated and the one in front deactivated; now neither, and the
-window behind is restored to the same frame. The single-window case is unchanged.
+activating the app). Only the window in front is restored: the title bar's restore activates a
+window, and restoring another some other way would pass over a program's own `SC_RESTORE`
+handling. A window in the background takes the frame as on 0.3.3. Window tools such as Rectangle
+act on the window in front. `own-frame hold-maximized second` opens a plain window in front of the
+maximized one: with the tool's left half, the window behind was activated (the one in front
+deactivated) and restored; now neither changes and it stays maximized, as on 0.3.3. The
+single-window case is unchanged.
 
 Measured with `tests/win/own-frame.c standard hold-maximized` (a window started maximized), with
 `tests/mac/ax-window.swift --frame` setting a frame as Rectangle does, and then `tests/win/win-info.c

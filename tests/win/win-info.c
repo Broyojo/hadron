@@ -11,7 +11,7 @@
  * Wine doesn't give out another program's restore rect (GetWindowPlacement returns the window's
  * current rect for it), so to see where a window restores to, restore it.
   *
- * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o win-info.exe tests/win/win-info.c -luser32 -lgdi32
+ * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -municode -o win-info.exe tests/win/win-info.c -luser32 -lgdi32
  */
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
@@ -95,22 +95,17 @@ static BOOL CALLBACK each_window(HWND hwnd, LPARAM lparam)
     return TRUE;
 }
 
-int main(int argc, char **argv)
+/* wmain: the title part arrives as Windows has it, whatever the ANSI code page */
+int wmain(int argc, wchar_t **argv)
 {
-    static wchar_t wide[256];
-    if (argc < 2 || argc > 3 || (argc == 3 && strcmp(argv[2], "restore") && strcmp(argv[2], "maximize")))
+    if (argc < 2 || argc > 3 || (argc == 3 && wcscmp(argv[2], L"restore") && wcscmp(argv[2], L"maximize")))
     {
         printf("usage: win-info.exe <part of the window title> [restore|maximize]\n");
         return 2;
     }
-    if (argc == 3) command = !strcmp(argv[2], "restore") ? SC_RESTORE : SC_MAXIMIZE;
+    if (argc == 3) command = !wcscmp(argv[2], L"restore") ? SC_RESTORE : SC_MAXIMIZE;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    if (!MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, wide, 256))
-    {
-        printf("the title part is too long or not UTF-8: at most 255 characters\n");
-        return 2;
-    }
-    needle = wide;
+    needle = argv[1];
     EnumWindows(each_window, 0);
     fflush(stdout);
     return 0;
