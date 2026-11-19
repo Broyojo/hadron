@@ -187,6 +187,30 @@ static void wait_for_job( HANDLE job, HANDLE port )
     }
 }
 
+/* Windows gives a console program that a windowed program (Steam) starts a console of its own.
+ * Started by this console program, which has none, the game would inherit none, and a game that
+ * sets its console's title or clears it at start dies (#184). So: is the executable a console
+ * program? The subsystem is at the same offset in the 32- and 64-bit optional headers. */
+static BOOL is_console_program( const WCHAR *path )
+{
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS64 nt;
+    DWORD got;
+    BOOL ret = FALSE;
+    HANDLE file = CreateFileW( path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_EXISTING, 0, NULL );
+
+    if (file == INVALID_HANDLE_VALUE) return FALSE;
+    if (ReadFile( file, &dos, sizeof(dos), &got, NULL ) && got == sizeof(dos) && dos.e_magic == IMAGE_DOS_SIGNATURE &&
+        SetFilePointer( file, dos.e_lfanew, NULL, FILE_BEGIN ) != INVALID_SET_FILE_POINTER &&
+        ReadFile( file, &nt, sizeof(nt), &got, NULL ) &&
+        got >= offsetof( IMAGE_NT_HEADERS64, OptionalHeader.Subsystem ) + sizeof(WORD) &&
+        nt.Signature == IMAGE_NT_SIGNATURE)
+        ret = nt.OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI;
+    CloseHandle( file );
+    return ret;
+}
+
 int wmain( int argc, WCHAR **argv )
 {
     int forwarded = forward_steam_request( argc, argv );
@@ -196,7 +220,7 @@ int wmain( int argc, WCHAR **argv )
     PROCESS_INFORMATION pi;
     HANDLE job, port;
     WCHAR *cmdline;
-    DWORD exit_code = 1;
+    DWORD exit_code = 1, flags = CREATE_SUSPENDED;
 
     if (forwarded >= 0) return forwarded;
 
@@ -230,7 +254,8 @@ int wmain( int argc, WCHAR **argv )
 
     /* the game starts in the directory this was started in: Steam's working directory for the
      * launch, which is not always the executable's own */
-    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi ))
+    if (is_console_program( argv[1] )) flags |= CREATE_NEW_CONSOLE;
+    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi ))
     {
         fwprintf( stderr, L"hadron-steam: failed to start %ls: error %lu\n", argv[1], GetLastError() );
         clear_steam_process();
