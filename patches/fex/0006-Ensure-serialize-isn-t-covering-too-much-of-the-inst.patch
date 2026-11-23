@@ -1,0 +1,351 @@
+From df78b5a4dbfdac572a3a861ae2f4f0ec6c91c352 Mon Sep 17 00:00:00 2001
+From: Ryan Houdek <Sonicadvance1@gmail.com>
+Date: Mon, 9 Nov 2026 12:22:14 -0800
+Subject: [PATCH] Ensure serialize isn't covering too much of the instruction
+ space
+
+Makes sure to jump to the second indirect table so it doesn't cover the
+whole row. This time with unittests to ensure it is correct.
+
+Supercedes #6113.
+
+(cherry picked from commit bfad5d69255b41d39ee901df5843a3e25ee80d35)
+---
+ FEXCore/Source/Interface/Core/DiskCache.h     |   2 +-
+ FEXCore/Source/Interface/Core/Frontend.cpp    |  13 ++-
+ .../OpcodeDispatcher/SecondaryGroupTables.h   |   2 -
+ .../OpcodeDispatcher/SecondaryModRMTables.h   |   7 +-
+ .../Core/X86Tables/SecondaryGroupTables.cpp   |  20 ++--
+ .../Core/X86Tables/SecondaryModRMTables.cpp   |  30 ++++--
+ .../Interface/Core/X86Tables/X86Tables.h      |   3 +-
+ .../tests/signal/invalid_group_7_row5.cpp     | 102 ++++++++++++++++++
+ 8 files changed, 152 insertions(+), 27 deletions(-)
+ create mode 100644 unittests/FEXLinuxTests/tests/signal/invalid_group_7_row5.cpp
+
+diff --git a/FEXCore/Source/Interface/Core/DiskCache.h b/FEXCore/Source/Interface/Core/DiskCache.h
+index 4899cd2506..67f837b2bf 100644
+--- a/FEXCore/Source/Interface/Core/DiskCache.h
++++ b/FEXCore/Source/Interface/Core/DiskCache.h
+@@ -249,7 +249,7 @@ namespace DiskCache {
+   // The current version of the diskcache.
+   // This must be changed any time codegen changes occur!
+   // Be aware of the impact of changing this frequently!
+-  static constexpr uint16_t FormatVersion = 43;
++  static constexpr uint16_t FormatVersion = 44;
+ 
+   static constexpr uint32_t LOOKUP_KEY_MAX_BUCKET_DEPTH = 500;
+ 
+diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
+index 8d1d8db471..94e4ac5226 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.cpp
++++ b/FEXCore/Source/Interface/Core/Frontend.cpp
+@@ -390,6 +390,10 @@ Decoder::DecodedBlockStatus Decoder::NormalOp(const FEXCore::X86Tables::X86InstI
+     return DecodedBlockStatus::INVALID_INST;
+   }
+ 
++  if (Info->Type == FEXCore::X86Tables::TYPE_UNIMPLEMENTED) {
++    return DecodedBlockStatus::UNIMPLEMENTED_INST;
++  }
++
+   if (!(Info->Flags & FEXCore::X86Tables::InstFlags::FLAGS_SUPPORTS_LOCK) && (DecodeInst->Flags & DecodeFlags::FLAG_LOCK)) {
+     // Instruction has lock prefix but doesn't support lock.
+     return DecodedBlockStatus::UNIMPLEMENTED_INST;
+@@ -699,6 +703,10 @@ Decoder::DecodedBlockStatus Decoder::NormalOpHeader(const FEXCore::X86Tables::X8
+     return DecodedBlockStatus::INVALID_INST;
+   }
+ 
++  if (Info->Type == FEXCore::X86Tables::TYPE_UNIMPLEMENTED) {
++    return DecodedBlockStatus::UNIMPLEMENTED_INST;
++  }
++
+   LOGMAN_THROW_A_FMT(Info->Type != FEXCore::X86Tables::TYPE_REX_PREFIX, "REX PREFIX should have been decoded before this!");
+ 
+   // A normal instruction is the most likely.
+@@ -749,7 +757,7 @@ Decoder::DecodedBlockStatus Decoder::NormalOpHeader(const FEXCore::X86Tables::X8
+     if (LocalInfo->Type == FEXCore::X86Tables::TYPE_SECOND_GROUP_MODRM && ModRM.mod == 0b11) {
+       // Everything in this group is privileged instructions aside from XGETBV
+       constexpr std::array<uint8_t, 8> RegToField = {
+-        255, 0, 1, 2, 255, 255, 255, 3,
++        255, 0, 1, 2, 255, 3, 255, 4,
+       };
+       uint8_t Field = RegToField[ModRM.reg];
+       if (Field == 255) {
+@@ -758,6 +766,9 @@ Decoder::DecodedBlockStatus Decoder::NormalOpHeader(const FEXCore::X86Tables::X8
+ 
+       LocalOp = (Field << 3) | ModRM.rm;
+       return NormalOp(&SecondModRMTableOps[LocalOp], LocalOp);
++    } else if (LocalInfo->Type == FEXCore::X86Tables::TYPE_SECOND_GROUP_MODRM && ModRM.reg == 5) {
++      // Special case 0x0F 0x01 /5 group as they are currently all reserved.
++      return DecodedBlockStatus::UNIMPLEMENTED_INST;
+     } else {
+       return NormalOp(&SecondInstGroupOps[LocalOp], LocalOp);
+     }
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryGroupTables.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryGroupTables.h
+index ac26b3af6f..0d53ca4407 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryGroupTables.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryGroupTables.h
+@@ -41,8 +41,6 @@ constexpr DispatchTableEntry OpDispatch_SecondaryGroupTables[] = {
+   {OPD(FEXCore::X86Tables::TYPE_GROUP_7, PF_66, 4), 1, &OpDispatchBuilder::SMSWOp},
+   {OPD(FEXCore::X86Tables::TYPE_GROUP_7, PF_F2, 4), 1, &OpDispatchBuilder::SMSWOp},
+ 
+-  {OPD(FEXCore::X86Tables::TYPE_GROUP_7, PF_NONE, 5), 1, &OpDispatchBuilder::SerializeOp},
+-
+   {OPD(FEXCore::X86Tables::TYPE_GROUP_7, PF_NONE, 6), 1, &OpDispatchBuilder::PermissionRestrictedOp},
+   {OPD(FEXCore::X86Tables::TYPE_GROUP_7, PF_F3, 6), 1, &OpDispatchBuilder::PermissionRestrictedOp},
+   {OPD(FEXCore::X86Tables::TYPE_GROUP_7, PF_66, 6), 1, &OpDispatchBuilder::PermissionRestrictedOp},
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryModRMTables.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryModRMTables.h
+index 87146d746e..ed8bbe36e0 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryModRMTables.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/SecondaryModRMTables.h
+@@ -15,9 +15,12 @@ constexpr DispatchTableEntry OpDispatch_SecondaryModRMTables[] = {
+   // REG /3
+   {((2 << 3) | 7), 1, &OpDispatchBuilder::PermissionRestrictedOp},
+ 
++  // REG /5
++  {((3 << 3) | 0), 1, &OpDispatchBuilder::SerializeOp},
++
+   // REG /7
+-  {((3 << 3) | 1), 1, &OpDispatchBuilder::RDTSCPOp},
+-  {((3 << 3) | 4), 1, &OpDispatchBuilder::CLZeroOp},
++  {((4 << 3) | 1), 1, &OpDispatchBuilder::RDTSCPOp},
++  {((4 << 3) | 4), 1, &OpDispatchBuilder::CLZeroOp},
+ };
+ 
+ } // namespace FEXCore::IR
+diff --git a/FEXCore/Source/Interface/Core/X86Tables/SecondaryGroupTables.cpp b/FEXCore/Source/Interface/Core/X86Tables/SecondaryGroupTables.cpp
+index 66096d5c83..ae96c0a499 100644
+--- a/FEXCore/Source/Interface/Core/X86Tables/SecondaryGroupTables.cpp
++++ b/FEXCore/Source/Interface/Core/X86Tables/SecondaryGroupTables.cpp
+@@ -98,13 +98,13 @@ constexpr std::array<X86InstInfo, MAX_INST_SECOND_GROUP_TABLE_SIZE> SecondInstGr
+     {OPD(TYPE_GROUP_6, PF_F2, 7), 1, X86InstInfo{"",        TYPE_INVALID, FLAGS_NONE,    0}},
+ 
+     // GROUP 7
+-    {OPD(TYPE_GROUP_7, PF_NONE, 0), 1, X86InstInfo{"SGDT", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,         0}},
+-    {OPD(TYPE_GROUP_7, PF_NONE, 1), 1, X86InstInfo{"SIDT", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,         0}},
+-    {OPD(TYPE_GROUP_7, PF_NONE, 2), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE, 0}},
+-    {OPD(TYPE_GROUP_7, PF_NONE, 3), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE, 0}},
+-    {OPD(TYPE_GROUP_7, PF_NONE, 4), 1, X86InstInfo{"SMSW", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST,          0}},
+-    {OPD(TYPE_GROUP_7, PF_NONE, 5), 1, X86InstInfo{"SERIALIZE", TYPE_INST, FLAGS_NONE,            0}},
+-    {OPD(TYPE_GROUP_7, PF_NONE, 6), 1, X86InstInfo{"LMSW", TYPE_INST, FLAGS_MODRM,          0}},
++    {OPD(TYPE_GROUP_7, PF_NONE, 0), 1, X86InstInfo{"SGDT", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,   0}},
++    {OPD(TYPE_GROUP_7, PF_NONE, 1), 1, X86InstInfo{"SIDT", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,   0}},
++    {OPD(TYPE_GROUP_7, PF_NONE, 2), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,                       0}},
++    {OPD(TYPE_GROUP_7, PF_NONE, 3), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,                       0}},
++    {OPD(TYPE_GROUP_7, PF_NONE, 4), 1, X86InstInfo{"SMSW", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST,                 0}},
++    {OPD(TYPE_GROUP_7, PF_NONE, 5), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,                       0}},
++    {OPD(TYPE_GROUP_7, PF_NONE, 6), 1, X86InstInfo{"LMSW", TYPE_INST, FLAGS_MODRM,                                    0}},
+     {OPD(TYPE_GROUP_7, PF_NONE, 7), 1, X86InstInfo{"INVLPG", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST, 0}},
+ 
+     {OPD(TYPE_GROUP_7, PF_F3, 0), 1, X86InstInfo{"SGDT", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,           0}},
+@@ -112,7 +112,7 @@ constexpr std::array<X86InstInfo, MAX_INST_SECOND_GROUP_TABLE_SIZE> SecondInstGr
+     {OPD(TYPE_GROUP_7, PF_F3, 2), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,   0}},
+     {OPD(TYPE_GROUP_7, PF_F3, 3), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,   0}},
+     {OPD(TYPE_GROUP_7, PF_F3, 4), 1, X86InstInfo{"SMSW", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST,            0}},
+-    {OPD(TYPE_GROUP_7, PF_F3, 5), 1, X86InstInfo{"",     TYPE_INVALID, FLAGS_NONE,              0}},
++    {OPD(TYPE_GROUP_7, PF_F3, 5), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,                       0}},
+     {OPD(TYPE_GROUP_7, PF_F3, 6), 1, X86InstInfo{"LMSW", TYPE_INST, FLAGS_MODRM,            0}},
+     {OPD(TYPE_GROUP_7, PF_F3, 7), 1, X86InstInfo{"INVLPG", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,   0}},
+ 
+@@ -121,7 +121,7 @@ constexpr std::array<X86InstInfo, MAX_INST_SECOND_GROUP_TABLE_SIZE> SecondInstGr
+     {OPD(TYPE_GROUP_7, PF_66, 2), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,   0}},
+     {OPD(TYPE_GROUP_7, PF_66, 3), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,   0}},
+     {OPD(TYPE_GROUP_7, PF_66, 4), 1, X86InstInfo{"SMSW", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST,            0}},
+-    {OPD(TYPE_GROUP_7, PF_66, 5), 1, X86InstInfo{"",     TYPE_INVALID, FLAGS_NONE,              0}},
++    {OPD(TYPE_GROUP_7, PF_66, 5), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,                       0}},
+     {OPD(TYPE_GROUP_7, PF_66, 6), 1, X86InstInfo{"LMSW", TYPE_INST, FLAGS_MODRM,            0}},
+     {OPD(TYPE_GROUP_7, PF_66, 7), 1, X86InstInfo{"INVLPG", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,   0}},
+ 
+@@ -130,7 +130,7 @@ constexpr std::array<X86InstInfo, MAX_INST_SECOND_GROUP_TABLE_SIZE> SecondInstGr
+     {OPD(TYPE_GROUP_7, PF_F2, 2), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,   0}},
+     {OPD(TYPE_GROUP_7, PF_F2, 3), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,   0}},
+     {OPD(TYPE_GROUP_7, PF_F2, 4), 1, X86InstInfo{"SMSW", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST,            0}},
+-    {OPD(TYPE_GROUP_7, PF_F2, 5), 1, X86InstInfo{"",     TYPE_INVALID, FLAGS_NONE,              0}},
++    {OPD(TYPE_GROUP_7, PF_F2, 5), 1, X86InstInfo{"",     TYPE_SECOND_GROUP_MODRM, FLAGS_NONE,                       0}},
+     {OPD(TYPE_GROUP_7, PF_F2, 6), 1, X86InstInfo{"LMSW", TYPE_INST, FLAGS_MODRM,            0}},
+     {OPD(TYPE_GROUP_7, PF_F2, 7), 1, X86InstInfo{"INVLPG", TYPE_SECOND_GROUP_MODRM, FLAGS_MODRM | FLAGS_SF_MOD_DST,   0}},
+ 
+diff --git a/FEXCore/Source/Interface/Core/X86Tables/SecondaryModRMTables.cpp b/FEXCore/Source/Interface/Core/X86Tables/SecondaryModRMTables.cpp
+index 15e1f672e5..953481b6ac 100644
+--- a/FEXCore/Source/Interface/Core/X86Tables/SecondaryModRMTables.cpp
++++ b/FEXCore/Source/Interface/Core/X86Tables/SecondaryModRMTables.cpp
+@@ -13,12 +13,12 @@ $end_info$
+ namespace FEXCore::X86Tables {
+ using namespace InstFlags;
+ enum ModRM_LUT {
+-  ENTRY_3_0,
++  ENTRY_7_0,
+   ENTRY_MAX,
+ };
+ 
+ constexpr std::array<X86InstInfo[2], ENTRY_MAX> ModRM_ArchSelect_LUT = {{
+-  // ENTRY_3_0
++  // ENTRY_7_0
+   {
+     {"SWAPGS",   TYPE_INST,    FLAGS_NONE, 0, { .OpDispatch = &IR::OpDispatchBuilder::UnimplementedOp }},
+     {"SWAPGS",   TYPE_INST,    FLAGS_NONE, 0, { .OpDispatch = &IR::OpDispatchBuilder::PermissionRestrictedOp }},
+@@ -58,15 +58,25 @@ constexpr std::array<X86InstInfo, MAX_SECOND_MODRM_TABLE_SIZE> SecondModRMTableO
+     {((2 << 3) | 6), 1, X86InstInfo{"SKINIT",   TYPE_PRIV,    FLAGS_NONE, 0}},
+     {((2 << 3) | 7), 1, X86InstInfo{"INVLPGA",  TYPE_INST,    FLAGS_NONE, 0}},
+ 
++    // REG /5
++    {((3 << 3) | 0), 1, X86InstInfo{"SERIALIZE", TYPE_INST,          FLAGS_NONE, 0}},
++    {((3 << 3) | 1), 1, X86InstInfo{"",          TYPE_UNIMPLEMENTED, FLAGS_NONE, 0}},
++    {((3 << 3) | 2), 1, X86InstInfo{"",          TYPE_UNIMPLEMENTED, FLAGS_NONE, 0}},
++    {((3 << 3) | 3), 1, X86InstInfo{"",          TYPE_UNIMPLEMENTED, FLAGS_NONE, 0}},
++    {((3 << 3) | 4), 1, X86InstInfo{"",          TYPE_UNIMPLEMENTED, FLAGS_NONE, 0}},
++    {((3 << 3) | 5), 1, X86InstInfo{"",          TYPE_UNIMPLEMENTED, FLAGS_NONE, 0}},
++    {((3 << 3) | 6), 1, X86InstInfo{"RDPKRU",    TYPE_UNIMPLEMENTED, FLAGS_NONE, 0}},
++    {((3 << 3) | 7), 1, X86InstInfo{"WRPKRU",    TYPE_UNIMPLEMENTED, FLAGS_NONE, 0}},
++
+     // REG /7
+-    {((3 << 3) | 0), 1, X86InstInfo{"", TYPE_ARCH_DISPATCHER, FLAGS_NONE, 0, { .Indirect = ModRM_ArchSelect_LUT[ENTRY_3_0] }}},
+-    {((3 << 3) | 1), 1, X86InstInfo{"RDTSCP",   TYPE_INST,    FLAGS_NONE, 0}},
+-    {((3 << 3) | 2), 1, X86InstInfo{"MONITORX", TYPE_PRIV,    FLAGS_NONE, 0}},
+-    {((3 << 3) | 3), 1, X86InstInfo{"MWAITX",   TYPE_PRIV,    FLAGS_NONE, 0}},
+-    {((3 << 3) | 4), 1, X86InstInfo{"CLZERO",   TYPE_INST,    GenFlagsSameSize(SIZE_64BITDEF) | FLAGS_DEBUG_MEM_ACCESS, 0}},
+-    {((3 << 3) | 5), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0}},
+-    {((3 << 3) | 6), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0}},
+-    {((3 << 3) | 7), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0}},
++    {((4 << 3) | 0), 1, X86InstInfo{"", TYPE_ARCH_DISPATCHER, FLAGS_NONE, 0, { .Indirect = ModRM_ArchSelect_LUT[ENTRY_7_0] }}},
++    {((4 << 3) | 1), 1, X86InstInfo{"RDTSCP",   TYPE_INST,    FLAGS_NONE, 0}},
++    {((4 << 3) | 2), 1, X86InstInfo{"MONITORX", TYPE_PRIV,    FLAGS_NONE, 0}},
++    {((4 << 3) | 3), 1, X86InstInfo{"MWAITX",   TYPE_PRIV,    FLAGS_NONE, 0}},
++    {((4 << 3) | 4), 1, X86InstInfo{"CLZERO",   TYPE_INST,    GenFlagsSameSize(SIZE_64BITDEF) | FLAGS_DEBUG_MEM_ACCESS, 0}},
++    {((4 << 3) | 5), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0}},
++    {((4 << 3) | 6), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0}},
++    {((4 << 3) | 7), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0}},
+   };
+ 
+   GenerateTable(Table.data(), SecondaryModRMExtensionOpTable, std::size(SecondaryModRMExtensionOpTable));
+diff --git a/FEXCore/Source/Interface/Core/X86Tables/X86Tables.h b/FEXCore/Source/Interface/Core/X86Tables/X86Tables.h
+index a00f46d93f..8a06c84632 100644
+--- a/FEXCore/Source/Interface/Core/X86Tables/X86Tables.h
++++ b/FEXCore/Source/Interface/Core/X86Tables/X86Tables.h
+@@ -272,6 +272,7 @@ enum InstType {
+   TYPE_INST,
+   TYPE_X87 = TYPE_INST,
+   TYPE_INVALID,
++  TYPE_UNIMPLEMENTED,
+   TYPE_COPY_OTHER,
+   // Changes `X86InstInfo::OpcodeDispatcher` member to use the `Indirect` version.
+   // Points to a 2 member array of X86InstInfo to choose instruction description based on executing bitness.
+@@ -521,7 +522,7 @@ constexpr size_t MAX_INST_GROUP_TABLE_SIZE = 512;
+ // 12 (groups) | 3(max indexes) | 8 ops = 0b1111'11'111 = 9 bits
+ constexpr size_t MAX_INST_SECOND_GROUP_TABLE_SIZE = 512;
+ constexpr size_t MAX_X87_TABLE_SIZE = 1 << 11;
+-constexpr size_t MAX_SECOND_MODRM_TABLE_SIZE = 32;
++constexpr size_t MAX_SECOND_MODRM_TABLE_SIZE = 40;
+ // (3 bit prefixes) | 8 bit opcode
+ constexpr size_t MAX_0F_38_TABLE_SIZE = (1 << 11);
+ // 1 REX | 1 prefixes | 8 bit opcode
+diff --git a/unittests/FEXLinuxTests/tests/signal/invalid_group_7_row5.cpp b/unittests/FEXLinuxTests/tests/signal/invalid_group_7_row5.cpp
+new file mode 100644
+index 0000000000..94ad8b4c99
+--- /dev/null
++++ b/unittests/FEXLinuxTests/tests/signal/invalid_group_7_row5.cpp
+@@ -0,0 +1,102 @@
++#include "invalid_util.h"
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <signal.h>
++#include <sys/mman.h>
++#include <stdint.h>
++
++#ifndef REG_RIP
++#define REG_RIP REG_EIP
++#endif
++
++enum trapno {
++  X86_TRAPNO_UD = 6,
++  X86_TRAPNO_GP = 13,
++};
++
++#define CONCAT(x, y) x##y
++#define TestSymbols(num)                       \
++  extern "C" uint64_t CONCAT(TestBegin_, num); \
++  extern "C" uint64_t CONCAT(TestEnd_, num);
++
++#define Test(num, asm, trapno, errno, si_code, signal)                                                      \
++  capturing_handler_skip = (unsigned long)&CONCAT(TestEnd_, num) - (unsigned long)&CONCAT(TestBegin_, num); \
++  const unsigned long EXPECTED_RIP = (unsigned long)&CONCAT(TestBegin_, num);                               \
++  const int EXPECTED_TRAPNO = trapno;                                                                       \
++  const int EXPECTED_ERR = errno;                                                                           \
++  const int EXPECTED_SI_CODE = si_code;                                                                     \
++  const int EXPECTED_SIGNAL = signal;                                                                       \
++  __asm volatile("TestBegin_" #num ":" asm ";"                                                              \
++                                           "TestEnd_" #num ":" ::                                           \
++                                             : "memory");
++
++#define TEST(num, name, asm, trapno, errno, _si_code, _signal)      \
++  TestSymbols(num);                                                 \
++  TEST_CASE("Signals: " #name) {                                    \
++    struct sigaction act {};                                        \
++    act.sa_sigaction = CapturingHandler;                            \
++    act.sa_flags = SA_SIGINFO;                                      \
++    sigaction(SIGSEGV, &act, nullptr);                              \
++    sigaction(SIGTRAP, &act, nullptr);                              \
++    sigaction(SIGILL, &act, nullptr);                               \
++                                                                    \
++    Test(num, asm, trapno, errno, _si_code, _signal);               \
++                                                                    \
++    REQUIRE(from_handler.has_value());                              \
++    CHECK(from_handler->mctx.gregs[REG_RIP] == EXPECTED_RIP);       \
++    CHECK(from_handler->mctx.gregs[REG_TRAPNO] == EXPECTED_TRAPNO); \
++    CHECK(from_handler->mctx.gregs[REG_ERR] == EXPECTED_ERR);       \
++    CHECK(from_handler->si_code == EXPECTED_SI_CODE);               \
++    CHECK(from_handler->signal == EXPECTED_SIGNAL);                 \
++    from_handler.reset();                                           \
++  }
++
++// Invalid group 7 row 5 instructions
++// 0xe8 is serialize, so skipped.
++TEST(0, "0xe9", ".byte 0x0f, 0x01, 0xe9", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(1, "0xea", ".byte 0x0f, 0x01, 0xea", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(2, "0xeb", ".byte 0x0f, 0x01, 0xeb", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(3, "0xec", ".byte 0x0f, 0x01, 0xec", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(4, "0xed", ".byte 0x0f, 0x01, 0xed", X86_TRAPNO_UD, 0, 2, SIGILL);
++// Skipped as these are real instructions.
++// TEST(5, "rdpkru", "rdpkru", X86_TRAPNO_UD, 0, 2, SIGILL);
++// TEST(6, "wrpkru", "wrpkru", X86_TRAPNO_UD, 0, 2, SIGILL);
++
++// Testing with prefixes as well.
++TEST(5, "0x66 0xe9", ".byte 0x66, 0x0f, 0x01, 0xe9", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(6, "0x66 0xea", ".byte 0x66, 0x0f, 0x01, 0xea", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(7, "0x66 0xeb", ".byte 0x66, 0x0f, 0x01, 0xeb", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(8, "0x66 0xec", ".byte 0x66, 0x0f, 0x01, 0xec", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(9, "0x66 0xed", ".byte 0x66, 0x0f, 0x01, 0xed", X86_TRAPNO_UD, 0, 2, SIGILL);
++
++TEST(10, "0xf2 0xe9", ".byte 0xf2, 0x0f, 0x01, 0xe9", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(11, "0xf2 0xea", ".byte 0xf2, 0x0f, 0x01, 0xea", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(12, "0xf2 0xeb", ".byte 0xf2, 0x0f, 0x01, 0xeb", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(13, "0xf2 0xec", ".byte 0xf2, 0x0f, 0x01, 0xec", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(14, "0xf2 0xed", ".byte 0xf2, 0x0f, 0x01, 0xed", X86_TRAPNO_UD, 0, 2, SIGILL);
++
++TEST(15, "0xf3 0xe9", ".byte 0xf3, 0x0f, 0x01, 0xe9", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(16, "0xf3 0xea", ".byte 0xf3, 0x0f, 0x01, 0xea", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(17, "0xf3 0xeb", ".byte 0xf3, 0x0f, 0x01, 0xeb", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(18, "0xf3 0xec", ".byte 0xf3, 0x0f, 0x01, 0xec", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(19, "0xf3 0xed", ".byte 0xf3, 0x0f, 0x01, 0xed", X86_TRAPNO_UD, 0, 2, SIGILL);
++
++#ifdef __x86_64__
++TEST(20, "0x48 0xe9", ".byte 0x48, 0x0f, 0x01, 0xe9", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(21, "0x48 0xea", ".byte 0x48, 0x0f, 0x01, 0xea", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(22, "0x48 0xeb", ".byte 0x48, 0x0f, 0x01, 0xeb", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(23, "0x48 0xec", ".byte 0x48, 0x0f, 0x01, 0xec", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(24, "0x48 0xed", ".byte 0x48, 0x0f, 0x01, 0xed", X86_TRAPNO_UD, 0, 2, SIGILL);
++#endif
++
++// Test row 5 with modrm.mod != 11, aka r/m == memory
++// These are all reserved as #UD.
++TEST(25, "0x28 mod==0", ".byte 0x0f, 0x01, 0x28", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(26, "0x29 mod==0", ".byte 0x0f, 0x01, 0x29", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(27, "0x2a mod==0", ".byte 0x0f, 0x01, 0x2a", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(28, "0x2b mod==0", ".byte 0x0f, 0x01, 0x2b", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(29, "0x2c mod==0", ".byte 0x0f, 0x01, 0x2c", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(30, "0x2d mod==0", ".byte 0x0f, 0x01, 0x2d", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(31, "0x2e mod==0", ".byte 0x0f, 0x01, 0x2e", X86_TRAPNO_UD, 0, 2, SIGILL);
++TEST(32, "0x2f mod==0", ".byte 0x0f, 0x01, 0x2f", X86_TRAPNO_UD, 0, 2, SIGILL);
+-- 
+2.54.0 (Apple Git-157)
+
