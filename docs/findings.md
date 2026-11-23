@@ -1980,3 +1980,95 @@ automated test: mouse events that a command-line tool posts (`CGEventPost` at
 `kCGHIDEventTap`, or `CGEventPostToPid`) moved the pointer, and a posted click activated the
 test program, but winemac got none of them, neither the moves nor the click (`+cursor` traced
 no `macdrv_mouse_moved` or `macdrv_mouse_button`). Why was not found.
+
+## Fullscreen at a mode of another shape than the screen's was not letterboxed (fixed, #66, issue #137)
+
+A game in exclusive fullscreen at 1280×720 on a MacBook's 3024×1964 panel (16:9 on a 1.54 screen)
+should look as it does on Windows: the picture scaled to fit, 3024×1701 pixels, centered, black
+above and below, nothing else. Through Wine's d3d9 (wined3d on Zink) and DXMT's D3D11 alike, as #136
+found with mtld3d 0.15, the picture was cut off at the bottom, rows 132 to 1699 of the window (1568 of
+1701), under a black bar 264 rows tall, and the 132 rows above it showed the window's own GDI
+surface. At 1024×768 (pillarboxed) the picture began at column 406 instead of 203: a bar of
+twice the width covered its left side.
+
+win32u does its part. A window with a present rect (`D3DKMT_ESCAPE_SET_PRESENT_RECT_WINE`, which
+wined3d, DXMT and DXVK set on entering exclusive fullscreen), or any borderless window covering the
+monitor, reaches the driver with its visible rect as the whole screen and its window and client
+rects as the mode scaled to fit (`map_window_rects_virt_to_raw`), and win32u places client surfaces
+in the client rect. winemac's Cocoa window covers the screen, and the Direct3D view was where it
+belonged. Four things in winemac were wrong:
+
+- The black bars (upstream's 2d9a21350e, `-[WineWindow setMask:]`) were given the window rect as it
+  is on the desktop, in pixels, and drawn in the window's points: twice as far from the edges as
+  they should be in Retina mode, and off by the display's position on any display but the one at
+  the desktop's origin.
+- They were upside down. They were a `CAShapeLayer` path, and copying the content view layer's
+  `geometryFlipped` does not make a path follow it. A native test (a flipped, layer-backed view as
+  winemac's) put a path at y 0 to 50 at the bottom of the view; a plain layer framed with
+  `-[NSView convertRectToLayer:]` lands where the view's coordinates say. Wine patch 0050 draws the
+  bars that way, from the window rect relative to the window, in points.
+- They were never taken down: `BOOL fullscreen = swp_flags & WINE_SWP_FULLSCREEN` went into a
+  one-bit field, and the flag is bit 31, so the field always held 0 and leaving fullscreen did not
+  look like a change. Upside down, the bar left behind was at the bottom of the screen-sized layer,
+  outside the smaller window that came back; the right way up it blacked out the top 132 rows of
+  d3d11fs's 640×480 window. 0050 stores a boolean, as
+  winex11 does.
+- The window surface was anchored at the top of the screen. Its scaled surface starts at the
+  letterbox's corner and is the letterbox's size (3072×1920 for 3024×1701); the content view's layer
+  showed it from the top of the screen, 1964 rows tall. Wine patch 0051 crops it to the letterbox and
+  places it there with the layer's `contentsRect`, whose edge pixels, repeated outward past the
+  unit square, are under the bars.
+
+That left a strip of the window surface beside the picture with Retina mode off: at 1024×768 the
+window is 1310 points wide, from 101 to 1411, and the Direct3D view 1309, to 1410. win32u maps the
+window's edges one by one (`map_monitor_rect`, rounding each) but placed a client surface by
+scaling the present rect's size and adding the mapped origin (`get_client_surface_rects`), which
+rounds differently; in Retina mode the same mode gives a surface a pixel wider than the window, under
+the bar. Wine patch 0052 maps the present rect's edges as the window's.
+
+Measured on the built-in display, Retina mode on, capturing only the test's own window
+(`screencapture -l`) and counting rows and columns of its colour, 2026-11-16;
+`tests/mac/picture-bounds.swift` prints the picture's bounds and the black bars around it in such a
+capture, and on 2026-11-23 gave the same numbers for d3d9fs and letterbox-gdi at 1280×720. `tests/win/d3d9fs.c`
+(wined3d), `tests/win/d3d11fs.c` (DXMT) and `tests/win/letterbox-gdi.c`, which sets the present rect
+itself, draws only with GDI and marks the window's top-left quarter. "After" is with 0050 to 0052;
+in Retina mode 0052 changes none of these numbers.
+
+| Test | Before | After |
+|---|---|---|
+| d3d9fs, d3d11fs 1280×720 | picture rows 132–1699; GDI surface 0–131; black 1700–1963 | black 0–131, picture 132–1832 (1701), black 1833–1963 |
+| d3d11fs 1920×1080 | | as 1280×720 |
+| d3d9fs, d3d11fs 1024×768 | picture columns 406–2821; black 0–405, 2822–3023 | black 0–202, picture 203–2820 (2618), black 2821–3023 |
+| letterbox-gdi 1280×720 | surface from row 0, top-anchored; quarter rows 0–848 | quarter columns 0–1509, rows 132–980 (half of 3024×1701, then a blended line) |
+| letterbox-gdi 1024×768 | surface columns 406–2687 | quarter columns 203–1510, rows 0–979 |
+| 1512×982, 3024×1964 (the screen's shape) | whole window | unchanged |
+| d3d11fs back in a window | whole window | whole window (top 132 rows black with 0050's bars and the old flag) |
+| d3d11fs 1280×720, Retina mode off | black 0–131, picture 132–1831, black 1832–1963 (the bars, upside down, are alike) | same |
+| letterbox-gdi 1280×720, Retina mode off | quarter rows 132–849, surface ends at row 1701 | quarter rows 132–981 |
+| letterbox-gdi 1280×720 norect (a borderless popup over the monitor, no present rect) | | black 0–131, picture 132–1832, black 1833–1963: letterboxed like the rest |
+| d3d11fs 1024×768, Retina mode off | picture columns 202–2819 | 0050 and 0051: a 2-pixel strip of surface at 2820–2821; with 0052: picture 202–2821 (1310 points), black 0–201, 2822–3023; d3d9fs the same |
+
+The issue also saw the Dock and asked for the displays to be captured. winemac captures no display
+for fullscreen at any mode (that is the `CaptureDisplaysForFullscreen` option, off by default); it
+hides the menu bar (level 24) and the Dock (20) by putting an active fullscreen window above them, at
+level 27 here (`NSStatusWindowLevel` + 1, + 1 for a topmost window), and a letterboxed window is
+fullscreen to it like any other, as its frame covers the screen. With the test made active the way
+Steam's handoff does it (#35: a helper app, started with `open`, yields activation to it), d3d11fs
+at 1280×720 was at level 27 covering the screen with nothing in front, before and after; with Finder
+made active instead, at level 0 under the menu bar, still letterboxed; active again, level 27. DXMT
+kept the 1280×720 mode while Finder was active, where DXGI on Windows leaves fullscreen; that is
+DXMT's. A program started from a shell, which macOS does not let activate itself, stays at level 0
+under the menu bar and the Dock at any mode, which may be what was seen.
+
+Subnautica (DXMT) from Steam, fullscreen at 1920×1080, showed equal black bars above and below and
+came back letterboxed after Cmd-Tab out and back (owner's run, 2026-11-23).
+
+Not tested: mtld3d 0.15's patch 0004 and FNaF (#136), an external display, and Vulkan and D3D12
+(vkd3d-proton) programs, which take their surfaces' place from the same client rect.
+
+Left open: 0050 places the letterbox at the window rect clipped to the screen. A window whose
+window rect starts past the monitor's edge, a decorated window whose client area fills the mode,
+would have its surface anchored at the clipped corner rather than at the surface's own origin (the
+virtual visible rect's, in `get_surface_rect`). Whether such a window reaches the driver as
+fullscreen at all is unchecked. In the GDI-only test the window's last pixel row is off-colour at the screen's
+shape, before and after: win32u's scaled surface, not the letterbox.
