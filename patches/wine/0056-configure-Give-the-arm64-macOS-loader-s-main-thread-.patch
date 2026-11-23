@@ -1,0 +1,75 @@
+From 7c3465fa9f9045b71b8d8a54363558edd3e8cdbc Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 23 Nov 2026 11:24:02 -0500
+Subject: [PATCH] configure: Give the arm64 macOS loader's main thread stack
+ its size.
+
+Without a stack size in the executable, macOS reserves 64MB for the
+main thread's stack: 8MB of stack and, below it, the room it may grow
+into when RLIMIT_STACK is raised. Its top is placed at random between
+about 0x16ae00000 and 0x16fe00000, so the reservation always reaches
+below 0x16c000000, into the range of an executable without relocations
+as large as Black Myth: Wukong's (0x140000000-0x16c3d0000). The loader
+started again 32 times and the image then failed to map with
+STATUS_CONFLICTING_ADDRESSES.
+
+With -stack_size the kernel maps the 8MB stack and one guard page
+below it, and refuses to change RLIMIT_STACK, which nothing in Wine
+does. The stack itself is still in such a range about a third of the
+time, and the loader starts again then. Wine's threads do not run on
+this stack: on macOS the process's first thread runs the Core
+Foundation run loop.
+---
+ configure     | 2 +-
+ configure.ac  | 6 ++++--
+ loader/main.c | 4 ++++
+ 3 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/configure b/configure
+index 3115e94b01..966a204aa8 100755
+--- a/configure
++++ b/configure
+@@ -12346,7 +12346,7 @@ case $host_os in
+ 
+ 
+     case $HOST_ARCH in
+-      aarch64) WINELOADER_LDFLAGS="-Wl,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
++      aarch64) WINELOADER_LDFLAGS="-Wl,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist,-stack_size,0x800000" ;;
+       *) WINELOADER_LDFLAGS="-Wl,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
+     esac
+ 
+diff --git a/configure.ac b/configure.ac
+index 31c941169f..d512284f98 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -982,8 +982,10 @@ case $host_os in
+     AC_SUBST(SYSTEMCONFIGURATION_LIBS,"-framework SystemConfiguration")
+ 
+     case $HOST_ARCH in
+-      dnl arm64 macOS kills processes whose __PAGEZERO is smaller than 4GB
+-      aarch64) WINELOADER_LDFLAGS="-Wl,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
++      dnl arm64 macOS kills processes whose __PAGEZERO is smaller than 4GB.
++      dnl The main thread's stack is given its size, 8MB, so that macOS does not reserve 64MB
++      dnl for it, which reaches into the range of large executables based at 0x140000000.
++      aarch64) WINELOADER_LDFLAGS="-Wl,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist,-stack_size,0x800000" ;;
+       *) WINELOADER_LDFLAGS="-Wl,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist" ;;
+     esac
+ 
+diff --git a/loader/main.c b/loader/main.c
+index adbb635de4..b1ddff658a 100644
+--- a/loader/main.c
++++ b/loader/main.c
+@@ -272,6 +272,10 @@ static void set_runtime_defaults( const char *exe, char *argv[] )
+  * before libc runs. Here nothing can run that early, and libmalloc maps its metadata at a random
+  * 2MB-aligned address before main(), at times inside a range above 4GB such as Hogwarts
+  * Legacy's 0x140000000-0x15bcc2000, and the image then fails with STATUS_CONFLICTING_ADDRESSES.
++ * The main thread's stack is placed at random between about 0x16a600000 and 0x16fe00000, in
++ * the range of an executable as large as Black Myth: Wukong's (0x140000000-0x16c3d0000) about a
++ * third of the time; the loader is linked with its size (-stack_size), as otherwise macOS
++ * reserves 64MB below the stack's top, which reaches into that range at every start.
+  * Start the loader again while something is in the range: the next start draws new placements.
+  * The range is not reserved here: a reserved area there would be taken by the top-down
+  * allocations made before the image is mapped. */
+-- 
+2.54.0 (Apple Git-157)
+

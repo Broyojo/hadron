@@ -2169,3 +2169,46 @@ blocks. `FilePipeLocalInformation` (`GetNamedPipeInfo`, the instance count of
 `GetNamedPipeHandleState`) is still unanswered on these handles: its quotas and free space are not
 known for a Unix pipe, and a made-up value would mislead programs that wait for write space. Riot
 Client itself was not started with the fix.
+
+## A fixed-base executable reaching 0x16c000000 never loaded: the main thread's stack (fixed, #71)
+
+Black Myth: Wukong never started: `wine: 140000000-16c3d0000 still in use after 32 restarts`, then
+`failed to create main module ... b1-Win64-Shipping.exe, status c0000018`. Its 708 MB executable has
+no relocations, so it needs 0x140000000-0x16c3d0000, and patch 0046 (#56) starts the loader again
+while anything is mapped there. What was there every time is the main thread's stack. Listing the
+regions of a plain program at `main()` (`mach_vm_region_recurse`, 400 starts) shows macOS placing
+the stack's top at random between 0x16ae10000 and 0x16fddc000, with 8 MB of stack below it and,
+under that, 56 MB more of the same reservation (`VM_MEMORY_STACK`, no access, what `vmmap` calls
+Stack Guard), the room the stack may grow into when `RLIMIT_STACK` is raised. 64 MB below a top of
+at most 0x16fe00000 is always below 0x16c3d0000: every start had the reservation in the range, and
+129 of the 400 the 8 MB of stack itself. Hogwarts Legacy's range ends at 0x15bcc2000, below all of
+it, and was only hit by libmalloc (#56).
+
+An executable that sets its main thread's stack size (`ld -stack_size`, `LC_MAIN`'s `stacksize`) gets
+that much stack and one guard page below it, nothing more, and `setrlimit(RLIMIT_STACK)` then fails
+with `EINVAL`. Wine never sets `RLIMIT_STACK`, and no Windows code runs on that stack: on macOS the
+process's first thread runs the Core Foundation run loop (`apple_main_thread`), and Wine's own main
+thread is a new one with a Windows stack. Wine patch 0056 links the arm64 loader with `-stack_size
+0x800000`, the 8 MB it had. The stack region is then 8 MB and 16 KB; 104 of 300 starts of a probe
+linked that way had it in Wukong's range, and the loader starts again for those as it does for
+libmalloc's region. The patch also touches `loader/main.c`'s comment, so that an existing build
+tree relinks the loader: `make` reruns configure when `configure` changes but does not relink an
+executable whose flags alone changed.
+
+Shrinking the reservation from the loader at run time, or unmapping the part in the range, would
+leave the kernel believing the stack may grow there: a later `setrlimit` would change the
+protection of whatever was mapped in its place, the game's image. Placing the stack elsewhere is not
+possible: `LC_MAIN` takes only a size, and no public `posix_spawn` attribute sets a location.
+
+`tests/win/fixed-base.c` built with `-DBULK_SIZE=0x2c3c0000` maps at 0x140000000-0x16c3d7000.
+With the release runtime and the loader signed as its bundle is, 2026-11-23:
+
+| Test | Before | After |
+|---|---|---|
+| fixed-base, Wukong's size, direct starts | 0 of 20 loaded (32 restarts each) | 30 of 30 |
+| the same, 30 starts as a child | not run | 0 of 30 failed |
+| fixed-base, Hogwarts' size, direct / as a child | not run (#56: 30 of 30, 0 of 40) | 30 of 30 / 0 of 30 failed |
+| is-ec-code, a 32-bit hello | not run | pass |
+
+In a running Wine process `vmmap` shows thread 0's stack as 8192K with a 16K guard. The game itself
+was not started.
