@@ -1,4 +1,4 @@
-From 346a2916c663410a239e905d97a706adcb0a4e16 Mon Sep 17 00:00:00 2001
+From 2e3f22fe5ce0db8727ed6cbac4b5a3151c56d38f Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 10 Nov 2026 16:44:36 -0500
 Subject: [PATCH] kk: skip depth bounds copy for [0,1]

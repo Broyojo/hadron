@@ -1,4 +1,4 @@
-From 42748bbdd9f60a17da196b7bbd0aaf7ec3bf98f3 Mon Sep 17 00:00:00 2001
+From ac0fa6da7b3b1c2518dcac462572963caf581070 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 4 Oct 2026 02:04:01 -0400
 Subject: [PATCH] kk: Lock 64-bit atomics without lane turns and wait longer

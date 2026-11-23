@@ -1,4 +1,4 @@
-From 903035d4a8636c0800c34ec73b5bcb1b610f4d40 Mon Sep 17 00:00:00 2001
+From 80b2cb2187589c95255c6ba2e97b5295b104a881 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 21:33:13 -0400
 Subject: [PATCH] kk: Weigh custom border depth comparisons exactly

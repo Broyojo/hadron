@@ -1,4 +1,4 @@
-From d00b7f6900962bebcd53e4d0e0f4d362166a38cc Mon Sep 17 00:00:00 2001
+From 1235fb918b0f18019b24f8b5fc314f873db80aeb Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 24 Oct 2026 19:30:16 -0400
 Subject: [PATCH] kk: Support depth bounds on pre-family 10 Apple GPUs via

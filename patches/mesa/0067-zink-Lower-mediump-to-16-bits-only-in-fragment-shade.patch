@@ -1,4 +1,4 @@
-From 132b3af9b6f1d9358a15fae5149e7f56f9b09047 Mon Sep 17 00:00:00 2001
+From 22d2b2b9d6c89a52e4dbb674a7bd18099ff8cfc5 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 20:18:51 -0400
 Subject: [PATCH] zink: Lower mediump to 16 bits only in fragment shaders

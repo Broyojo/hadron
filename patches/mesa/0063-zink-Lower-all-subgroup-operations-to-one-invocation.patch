@@ -1,4 +1,4 @@
-From 50eac0c4523fed38c4eb583aa16e657b9b2bfffb Mon Sep 17 00:00:00 2001
+From c51684ac2088e74f7fd6a5e7fdf5a53837db4668 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 19:20:36 -0400
 Subject: [PATCH] zink: Lower all subgroup operations to one invocation in

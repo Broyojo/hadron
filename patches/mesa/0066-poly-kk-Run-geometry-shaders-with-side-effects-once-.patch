@@ -1,4 +1,4 @@
-From f674372506929a29180a8f0a2e7a85004ba3d7b0 Mon Sep 17 00:00:00 2001
+From 160aeabc91b95a890087d98b4b15162af95e7bdf Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 20:18:50 -0400
 Subject: [PATCH] poly,kk: Run geometry shaders with side effects once and keep
@@ -100,7 +100,7 @@ index 5e8420c1b25..6e5efd6cac0 100644
     struct kk_stats_state *stats = &cmd->state.stats;
     if (!kk_gs_is_passthrough(cmd) &&
 diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
-index 135f379937b..e463134f606 100644
+index 693479dfb63..07e974e0994 100644
 --- a/src/kosmickrisp/vulkan/kk_shader.c
 +++ b/src/kosmickrisp/vulkan/kk_shader.c
 @@ -1563,10 +1563,11 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
@@ -116,7 +116,7 @@ index 135f379937b..e463134f606 100644
           count->info.stage = MESA_SHADER_COMPUTE;
           memset(&count->info.cs, 0, sizeof(count->info.cs));
           count->xfb_info = NULL;
-@@ -1921,7 +1922,7 @@ gather_graphics_pipeline_create_info(
+@@ -1924,7 +1925,7 @@ gather_graphics_pipeline_create_info(
  
        if (s->info.stage == MESA_SHADER_GEOMETRY) {
           kk_msl_copy(&vs->gs_main, &s->gs_main);
@@ -125,16 +125,16 @@ index 135f379937b..e463134f606 100644
              kk_msl_copy(&vs->gs_count, &s->gs_count);
           if (s->info.gs.xfb)
              kk_msl_copy(&vs->gs_pre, &s->gs_pre);
-@@ -2072,7 +2073,7 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+@@ -2079,7 +2080,7 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
        if (result != VK_SUCCESS)
           return VK_ERROR_INVALID_SHADER_NV;
  
 -      if (vs->info.vs.gs.count_words) {
 +      if (vs->info.vs.gs.count_words && !vs->info.vs.gs.materialize) {
-          result = kk_compile_compute_pipeline(device, &vs->gs_count, 0u,
+          result = kk_compile_compute_pipeline(device, &vs->gs_count,
+                                               KK_POLY_WG_SIZE,
                                                &pipe->gfx.gs_count);
-          if (result != VK_SUCCESS)
-@@ -2505,7 +2506,7 @@ kk_shader_serialize(struct vk_device *vk_dev, const struct vk_shader *vk_shader,
+@@ -2513,7 +2514,7 @@ kk_shader_serialize(struct vk_device *vk_dev, const struct vk_shader *vk_shader,
        kk_msl_serialize(&shader->gs_main, blob);
  
     const struct poly_gs_info *gs = kk_shader_gs_info(&shader->info);
@@ -143,7 +143,7 @@ index 135f379937b..e463134f606 100644
        kk_msl_serialize(&shader->gs_count, blob);
     if (gs && gs->xfb)
        kk_msl_serialize(&shader->gs_pre, blob);
-@@ -2577,7 +2578,7 @@ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
+@@ -2585,7 +2586,7 @@ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
     }
  
     const struct poly_gs_info *gs = kk_shader_gs_info(&info);

@@ -1,4 +1,4 @@
-From fef816e889204202e1b32071bc1ecb061a7c1d7b Mon Sep 17 00:00:00 2001
+From 80b894abd4d0f7a2ac27e50dfd67bc4bdd302804 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 20:59:21 -0400
 Subject: [PATCH] kk: Dispatch emulation passes as indirect threadgroups with a
@@ -6,31 +6,15 @@ Subject: [PATCH] kk: Dispatch emulation passes as indirect threadgroups with a
 
 Generated-by: LLM
 ---
- src/kosmickrisp/bridge/mtl_compiler.m    |  3 +-
- src/kosmickrisp/libkk/kk_geometry.cl     |  7 ++++
- src/kosmickrisp/libkk/kk_tessellation.cl | 10 +----
- src/kosmickrisp/vulkan/kk_cmd_buffer.c   |  3 --
- src/kosmickrisp/vulkan/kk_cmd_buffer.h   | 11 ------
- src/kosmickrisp/vulkan/kk_cmd_draw.c     | 14 +++----
- src/kosmickrisp/vulkan/kk_shader.c       | 47 ++++++++++++++++++++++--
- src/kosmickrisp/vulkan/kk_shader.h       |  2 +
- src/poly/geometry.h                      | 13 +++++--
- 9 files changed, 71 insertions(+), 39 deletions(-)
+ src/kosmickrisp/libkk/kk_geometry.cl     |  7 +++++
+ src/kosmickrisp/libkk/kk_tessellation.cl | 10 ++-----
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c   |  3 ---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h   | 11 --------
+ src/kosmickrisp/vulkan/kk_cmd_draw.c     | 14 +++++-----
+ src/kosmickrisp/vulkan/kk_shader.c       | 33 ++++++++++++++++++++++++
+ src/poly/geometry.h                      | 13 +++++++---
+ 7 files changed, 57 insertions(+), 34 deletions(-)
 
-diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
-index 9e1f90d7391..a5a18e72a70 100644
---- a/src/kosmickrisp/bridge/mtl_compiler.m
-+++ b/src/kosmickrisp/bridge/mtl_compiler.m
-@@ -108,8 +108,7 @@
- 
-       MTL4ComputePipelineDescriptor *desc = [[MTL4ComputePipelineDescriptor new] autorelease];
-       desc.computeFunctionDescriptor = (MTL4FunctionDescriptor *)function;
--      if (max_total_threads_per_threadgroup)
--         desc.maxTotalThreadsPerThreadgroup = max_total_threads_per_threadgroup;
-+      desc.maxTotalThreadsPerThreadgroup = max_total_threads_per_threadgroup;
- 
-       NSError *error;
-       id<MTLComputePipelineState> pipeline = [comp newComputePipelineStateWithDescriptor:desc compilerTaskOptions:nil
 diff --git a/src/kosmickrisp/libkk/kk_geometry.cl b/src/kosmickrisp/libkk/kk_geometry.cl
 index 3042e8c3e72..25965a29dc4 100644
 --- a/src/kosmickrisp/libkk/kk_geometry.cl
@@ -159,7 +143,7 @@ index 6e5efd6cac0..669ffc2a8dc 100644
        grid_vs = grid_gs = kk_grid_2d(draw.grid.size.x, draw.grid.size.y);
        grid_gs.size.x = u_decomposed_prims_for_vertices(mode, draw.grid.size.x);
 diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
-index e463134f606..569c85bd6b9 100644
+index 07e974e0994..569c85bd6b9 100644
 --- a/src/kosmickrisp/vulkan/kk_shader.c
 +++ b/src/kosmickrisp/vulkan/kk_shader.c
 @@ -1450,6 +1450,35 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
@@ -230,59 +214,6 @@ index e463134f606..569c85bd6b9 100644
        kk_compile_msl(pdev, nir, state, &shader->gs_main,
                       &shader->info.atomic64_locked, apply_wa19);
  
-@@ -1920,6 +1953,9 @@ gather_graphics_pipeline_create_info(
- 
-       info->vs.additional_stages_bits |= BITFIELD_BIT(stage);
- 
-+      if (s->info.stage == MESA_SHADER_TESS_CTRL)
-+         info->vs.tess_local_thread_size = s->info.tess.tcs_output_patch_size;
-+
-       if (s->info.stage == MESA_SHADER_GEOMETRY) {
-          kk_msl_copy(&vs->gs_main, &s->gs_main);
-          if (s->info.gs.count_words && !s->info.gs.materialize)
-@@ -2055,7 +2091,11 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
-    uint32_t stages_bits = vs->info.vs.additional_stages_bits;
-    pipe->gfx.pre_render_count = util_bitcount(stages_bits) - 1u;
-    for (uint32_t i = 0u; i < pipe->gfx.pre_render_count; ++i) {
--      result = kk_compile_compute_pipeline(device, &vs->msl_data[vs_stage], 0u,
-+      uint32_t local_thread_size = vs_stage == MESA_SHADER_TESS_CTRL
-+                                      ? vs->info.vs.tess_local_thread_size
-+                                      : KK_POLY_WG_SIZE;
-+      result = kk_compile_compute_pipeline(device, &vs->msl_data[vs_stage],
-+                                           local_thread_size,
-                                            &pipe->gfx.pre_render[i]);
- 
-       if (result != VK_SUCCESS)
-@@ -2068,13 +2108,14 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
-    if (vs->info.vs.additional_stages_bits &
-        BITFIELD_BIT(MESA_SHADER_GEOMETRY)) {
-       result = kk_compile_compute_pipeline(
--         device, &vs->gs_main, 0u,
-+         device, &vs->gs_main, KK_POLY_WG_SIZE,
-          &pipe->gfx.pre_render[pipe->gfx.pre_render_count++]);
-       if (result != VK_SUCCESS)
-          return VK_ERROR_INVALID_SHADER_NV;
- 
-       if (vs->info.vs.gs.count_words && !vs->info.vs.gs.materialize) {
--         result = kk_compile_compute_pipeline(device, &vs->gs_count, 0u,
-+         result = kk_compile_compute_pipeline(device, &vs->gs_count,
-+                                              KK_POLY_WG_SIZE,
-                                               &pipe->gfx.gs_count);
-          if (result != VK_SUCCESS)
-             return VK_ERROR_INVALID_SHADER_NV;
-diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
-index ce5897ef378..973223e1dad 100644
---- a/src/kosmickrisp/vulkan/kk_shader.h
-+++ b/src/kosmickrisp/vulkan/kk_shader.h
-@@ -66,6 +66,8 @@ struct kk_shader_info {
-           * serialization. */
-          uint32_t additional_stages_bits;
- 
-+         uint32_t tess_local_thread_size;
-+
-          /* Data needed to start render pass and bind pipeline. */
-          uint32_t attribs_read;
-          uint32_t sample_count;
 diff --git a/src/poly/geometry.h b/src/poly/geometry.h
 index 6224929ae84..e4c25d2a23c 100644
 --- a/src/poly/geometry.h

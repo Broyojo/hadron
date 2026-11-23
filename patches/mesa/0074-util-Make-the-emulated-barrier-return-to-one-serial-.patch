@@ -1,4 +1,4 @@
-From 581fd0f413940fa59a7a46f8ffa7b476afee815f Mon Sep 17 00:00:00 2001
+From 309fb1a8d269780b1dc7337930774fe87b104f8b Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 4 Oct 2026 03:36:56 -0400
 Subject: [PATCH] util: Make the emulated barrier return to one serial thread

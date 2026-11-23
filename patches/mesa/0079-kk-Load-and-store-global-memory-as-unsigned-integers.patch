@@ -1,0 +1,74 @@
+From 1e8d02be8016d05df5d89242a9318836c35da901 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 23 Nov 2026 14:07:51 -0500
+Subject: [PATCH] kk: Load and store global memory as unsigned integers
+
+Generated-by: LLM
+---
+ src/kosmickrisp/compiler/msl_type_inference.c | 13 ++++---------
+ 1 file changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/src/kosmickrisp/compiler/msl_type_inference.c b/src/kosmickrisp/compiler/msl_type_inference.c
+index 304aa3b74bd..bb1175906ed 100644
+--- a/src/kosmickrisp/compiler/msl_type_inference.c
++++ b/src/kosmickrisp/compiler/msl_type_inference.c
+@@ -159,7 +159,6 @@ update_instr_type(struct hash_table *types, nir_instr *instr, ti_type type)
+       case nir_intrinsic_decl_reg:
+          set_type(types, &intr->def, type);
+          return true;
+-      case nir_intrinsic_load_global:
+       case nir_intrinsic_load_global_constant:
+       case nir_intrinsic_load_global_constant_bounded:
+       case nir_intrinsic_load_global_constant_offset:
+@@ -171,12 +170,11 @@ update_instr_type(struct hash_table *types, nir_instr *instr, ti_type type)
+       case nir_intrinsic_store_scratch:
+       case nir_intrinsic_load_shared:
+       case nir_intrinsic_store_shared:
++      case nir_intrinsic_load_global:
++      case nir_intrinsic_store_global:
+       case nir_intrinsic_load_constant:
+       case nir_intrinsic_load_frag_coord:
+          return false;
+-      case nir_intrinsic_store_global:
+-         set_type(types, &intr->src[0], type);
+-         return true;
+       case nir_intrinsic_read_first_invocation:
+       case nir_intrinsic_read_invocation:
+       case nir_intrinsic_quad_vote_all:
+@@ -301,7 +299,6 @@ infer_types_from_intrinsic(struct hash_table *types, nir_intrinsic_instr *instr)
+       set_type(types, &instr->src[0], TYPE_UINT);
+       set_type(types, &instr->src[1], TYPE_UINT);
+       break;
+-   case nir_intrinsic_load_global:
+    case nir_intrinsic_load_push_constant:
+       set_type(types, &instr->def, TYPE_GENERIC_DATA);
+       set_type(types, &instr->src[0], TYPE_UINT);
+@@ -319,10 +316,6 @@ infer_types_from_intrinsic(struct hash_table *types, nir_intrinsic_instr *instr)
+       set_type(types, &instr->src[2], type);
+       break;
+    }
+-   case nir_intrinsic_store_global:
+-      set_type(types, &instr->src[0], TYPE_GENERIC_DATA);
+-      set_type(types, &instr->src[1], TYPE_UINT);
+-      break;
+    case nir_intrinsic_store_output: {
+       ti_type ty = ti_type_from_nir(nir_intrinsic_src_type(instr));
+       set_type(types, &instr->src[0], ty);
+@@ -353,12 +346,14 @@ infer_types_from_intrinsic(struct hash_table *types, nir_intrinsic_instr *instr)
+       break;
+    case nir_intrinsic_load_scratch:
+    case nir_intrinsic_load_shared:
++   case nir_intrinsic_load_global:
+    case nir_intrinsic_load_constant:
+       set_type(types, &instr->def, TYPE_UINT);
+       set_type(types, &instr->src[0], TYPE_UINT);
+       break;
+    case nir_intrinsic_store_scratch:
+    case nir_intrinsic_store_shared:
++   case nir_intrinsic_store_global:
+       set_type(types, &instr->src[0], TYPE_UINT);
+       set_type(types, &instr->src[1], TYPE_UINT);
+       break;
+-- 
+2.54.0 (Apple Git-157)
+

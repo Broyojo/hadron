@@ -1,4 +1,4 @@
-From 2e7ef7ffcc3668ffbeaa433a009a659bb43f292f Mon Sep 17 00:00:00 2001
+From b2e5ce2a4d00ce747405816580de5ca0eb77b957 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 11 Oct 2026 21:39:28 -0400
 Subject: [PATCH] egl/surfaceless: Expose EGL_EXT_present_opaque for Metal

@@ -1,4 +1,4 @@
-From de148b7267e82ecdae6b20eb68a003cd0aa55100 Mon Sep 17 00:00:00 2001
+From cdd357e1624a350d572fd70f50a1837f082e030f Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 20:08:12 -0400
 Subject: [PATCH] kk: Apply custom border colours to depth comparisons
@@ -144,10 +144,10 @@ index c511a44d562..3f3233dd7c8 100644
     const VkSamplerReductionModeCreateInfo *reduction_info =
        vk_find_struct_const(pCreateInfo->pNext,
 diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
-index d8f3a24e4fc..ce5897ef378 100644
+index 69965e56f1d..973223e1dad 100644
 --- a/src/kosmickrisp/vulkan/kk_shader.h
 +++ b/src/kosmickrisp/vulkan/kk_shader.h
-@@ -209,6 +209,8 @@ bool kk_nir_lower_fs_multiview(nir_shader *nir, uint32_t view_mask);
+@@ -211,6 +211,8 @@ bool kk_nir_lower_fs_multiview(nir_shader *nir, uint32_t view_mask);
  #define KK_SAMPLER_MINMAX_MAG_LINEAR 0x8
  #define KK_SAMPLER_MINMAX_MIP_LINEAR 0x10
  #define KK_SAMPLER_MINMAX_UNNORMALIZED 0x20

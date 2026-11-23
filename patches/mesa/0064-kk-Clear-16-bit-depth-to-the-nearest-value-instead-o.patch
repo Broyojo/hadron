@@ -1,4 +1,4 @@
-From 7972f558a9f540a90fbfa87df4d1e4428f97a80b Mon Sep 17 00:00:00 2001
+From 0e6002faa9aa671defab2eba93b9135d8aa9a354 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 19:57:01 -0400
 Subject: [PATCH] kk: Clear 16-bit depth to the nearest value instead of the

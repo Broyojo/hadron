@@ -1,4 +1,4 @@
-From 13199d9f97a639ed6e74828faf0f9a9bb4dd1673 Mon Sep 17 00:00:00 2001
+From 593bf6f5671c719f3b5bbe5a66e287ebbc93ec59 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 3 Oct 2026 21:08:37 -0400
 Subject: [PATCH] zink: Keep the cube bit of a sampler view bound again to its

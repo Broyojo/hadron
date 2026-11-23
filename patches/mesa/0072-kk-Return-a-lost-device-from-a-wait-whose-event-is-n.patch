@@ -1,4 +1,4 @@
-From 91d98fb35588b4b1c63eab2a189fd6b26a10d025 Mon Sep 17 00:00:00 2001
+From 7ed7372218801ca8f5931185dd45a74d2dadd420 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 4 Oct 2026 02:14:49 -0400
 Subject: [PATCH] kk: Return a lost device from a wait whose event is never

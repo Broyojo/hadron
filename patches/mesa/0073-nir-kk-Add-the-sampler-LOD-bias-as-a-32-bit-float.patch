@@ -1,4 +1,4 @@
-From e5f55161ff1cda20f9f176280c39cb83e9d9c57e Mon Sep 17 00:00:00 2001
+From f0eb03accaf1c0daf3ab3c9b8be72e2fb030008e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 4 Oct 2026 03:33:07 -0400
 Subject: [PATCH] nir,kk: Add the sampler LOD bias as a 32-bit float

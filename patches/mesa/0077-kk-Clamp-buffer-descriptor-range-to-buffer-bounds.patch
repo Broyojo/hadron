@@ -1,4 +1,4 @@
-From 863f71ccc14bb93e2a7a09745da97be9564fb089 Mon Sep 17 00:00:00 2001
+From 8557bad1612e0eb720b12b414c0cf0a4e3e2fd2d Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 24 Oct 2026 19:30:16 -0400
 Subject: [PATCH] kk: Clamp buffer descriptor range to buffer bounds
