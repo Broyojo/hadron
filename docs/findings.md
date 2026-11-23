@@ -2127,3 +2127,45 @@ in the test; whether that is the game's hitch was not measured.
 Seen while testing: about one run in four of the test hung at process exit, after `MFShutdown`,
 with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
 `TerminateProcess`. Not looked into.
+
+## Node and Electron stopped with "open EBADF" when their output was a pipe (fixed, #70)
+
+Riot Client, and any Node or Electron program, stopped at once with `open EBADF` when Hadron logged
+it. `scripts/play` with `HADRON_LOG` points the game's stdout and stderr at a FIFO read by
+`scripts/logcap`, and Wine makes a Unix descriptor it is given into a file object, which
+`GetFileType` reports as `FILE_TYPE_PIPE` (`get_device_info`: `S_ISFIFO` or `S_ISSOCK`). Node takes
+such a standard handle for a pipe and libuv opens it with `SetNamedPipeHandleState(PIPE_READMODE_BYTE
+| PIPE_WAIT)`. On Windows the handle is an anonymous pipe, a named pipe end in byte mode, and that
+succeeds. In Wine the server's `set_named_pipe_info` took only named pipe ends and failed with
+`STATUS_OBJECT_TYPE_MISMATCH`, error 6, which libuv turns into `UV_EBADF`; querying the mode
+(`FilePipeInformation`, which `GetNamedPipeHandleState` reads) failed with
+`STATUS_NOT_IMPLEMENTED`. Neither upstream Wine (to 11.22, which moved setting the mode into the
+server's `set_file_info`) nor Proton's Wine (`bleeding-edge`) handles it.
+
+Wine patch 0054 answers on such a handle what a pipe from `CreatePipe` answers: its mode is byte mode,
+blocking; setting that mode succeeds, message mode fails with `STATUS_INVALID_PARAMETER` as on any
+byte pipe, and the access checks are the named pipe's (`FILE_READ_ATTRIBUTES` to query,
+`FILE_WRITE_ATTRIBUTES` to set). The server answers it, from the file's `st_mode`, so ntdll now sends
+`FilePipeInformation` queries there for every handle. Patch 0055 gives the standard handles that are
+pipes the access `CreatePipe` gives the same end: the read end also `FILE_WRITE_ATTRIBUTES`, the
+write end also `FILE_READ_ATTRIBUTES`. Without it `GetNamedPipeHandleState` on stdout failed with
+`ERROR_ACCESS_DENIED`. Each end of a CreatePipe pipe then has the same access as the standard handle
+of the same direction (0x120189 and 0x120196).
+
+`tests/win/stdio-pipe.c` checks a `CreatePipe` pair, then each standard handle that is a pipe, against
+the same expectations. Run with the release runtime, 2026-11-23:
+
+| Standard handles | Before | After |
+|---|---|---|
+| stdin, stdout, stderr pipes (`echo \| stdio-pipe.exe 2>&1 \| cat`), x64 and arm64 | 15 failures: set 6, query `c0000002`, access lacking | 0 failures |
+| stdout, stderr on a FIFO with a reader, as `play` does | 10 failures | 0 failures |
+| socket pairs (Python `socketpair`) | not run | 0 failures |
+| the same pipes through `cmd /c` (inherited by a child) | not run | 0 failures |
+| stdout a regular file | skipped | skipped |
+
+Open: non-blocking mode (`PIPE_NOWAIT`), which Windows allows on an anonymous pipe, is refused with
+`STATUS_NOT_SUPPORTED`, as the file's reads and writes are made on the Unix descriptor, which
+blocks. `FilePipeLocalInformation` (`GetNamedPipeInfo`, the instance count of
+`GetNamedPipeHandleState`) is still unanswered on these handles: its quotas and free space are not
+known for a Unix pipe, and a made-up value would mislead programs that wait for write space. Riot
+Client itself was not started with the fix.
