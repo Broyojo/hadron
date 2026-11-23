@@ -3,7 +3,8 @@
  * fullscreen (D3DKMT_ESCAPE_SET_PRESENT_RECT_WINE). The window is filled with one colour and its
  * top-left quarter with another, so a capture shows where the window surface lands: scaled into the
  * letterbox, with black around it (findings #66). Without a present rect ("norect") the window is an
- * ordinary fullscreen popup, the case that has no letterbox bars of its own.
+ * ordinary borderless popup covering the monitor; win32u gives it the whole screen as its visible
+ * rect and the mode scaled to fit as its window rect all the same, so it is letterboxed too.
  * Usage: letterbox-gdi.exe <width> <height> [seconds] [norect]
  * Build: x86_64-w64-mingw32-clang -O2 letterbox-gdi.c -o letterbox-gdi.exe -lgdi32 */
 #include <stdio.h>

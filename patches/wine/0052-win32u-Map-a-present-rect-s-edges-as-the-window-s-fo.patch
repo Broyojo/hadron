@@ -1,4 +1,4 @@
-From 8038f000457fd7c16880ac772c457adaabb499dc Mon Sep 17 00:00:00 2001
+From 295a8b8e1b1f93c144c19ae046c3e5102adc4b26 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Mon, 16 Nov 2026 19:42:00 -0500
 Subject: [PATCH] win32u: Map a present rect's edges as the window's for its

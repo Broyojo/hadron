@@ -2013,7 +2013,7 @@ belonged. Four things in winemac were wrong:
   outside the smaller window that came back; the right way up it blacked out the top 132 rows of
   d3d11fs's 640×480 window. 0050 stores a boolean, as
   winex11 does.
-- The window surface was stretched over the whole window. Its scaled surface starts at the
+- The window surface was anchored at the top of the screen. Its scaled surface starts at the
   letterbox's corner and is the letterbox's size (3072×1920 for 3024×1701); the content view's layer
   showed it from the top of the screen, 1964 rows tall. Wine patch 0051 crops it to the letterbox and
   places it there with the layer's `contentsRect`, whose edge pixels, repeated outward past the
@@ -2027,7 +2027,9 @@ rounds differently; in Retina mode the same mode gives a surface a pixel wider t
 the bar. Wine patch 0052 maps the present rect's edges as the window's.
 
 Measured on the built-in display, Retina mode on, capturing only the test's own window
-(`screencapture -l`) and counting rows and columns of its colour, 2026-11-16. `tests/win/d3d9fs.c`
+(`screencapture -l`) and counting rows and columns of its colour, 2026-11-16;
+`tests/mac/picture-bounds.swift` prints the picture's bounds and the black bars around it in such a
+capture, and on 2026-11-23 gave the same numbers for d3d9fs and letterbox-gdi at 1280×720. `tests/win/d3d9fs.c`
 (wined3d), `tests/win/d3d11fs.c` (DXMT) and `tests/win/letterbox-gdi.c`, which sets the present rect
 itself, draws only with GDI and marks the window's top-left quarter. "After" is with 0050 to 0052;
 in Retina mode 0052 changes none of these numbers.
@@ -2037,12 +2039,13 @@ in Retina mode 0052 changes none of these numbers.
 | d3d9fs, d3d11fs 1280×720 | picture rows 132–1699; GDI surface 0–131; black 1700–1963 | black 0–131, picture 132–1832 (1701), black 1833–1963 |
 | d3d11fs 1920×1080 | | as 1280×720 |
 | d3d9fs, d3d11fs 1024×768 | picture columns 406–2821; black 0–405, 2822–3023 | black 0–202, picture 203–2820 (2618), black 2821–3023 |
-| letterbox-gdi 1280×720 | surface from row 0, stretched; quarter rows 0–848 | quarter columns 0–1509, rows 132–980 (half of 3024×1701, then a blended line) |
+| letterbox-gdi 1280×720 | surface from row 0, top-anchored; quarter rows 0–848 | quarter columns 0–1509, rows 132–980 (half of 3024×1701, then a blended line) |
 | letterbox-gdi 1024×768 | surface columns 406–2687 | quarter columns 203–1510, rows 0–979 |
 | 1512×982, 3024×1964 (the screen's shape) | whole window | unchanged |
 | d3d11fs back in a window | whole window | whole window (top 132 rows black with 0050's bars and the old flag) |
 | d3d11fs 1280×720, Retina mode off | black 0–131, picture 132–1831, black 1832–1963 (the bars, upside down, are alike) | same |
 | letterbox-gdi 1280×720, Retina mode off | quarter rows 132–849, surface ends at row 1701 | quarter rows 132–981 |
+| letterbox-gdi 1280×720 norect (a borderless popup over the monitor, no present rect) | | black 0–131, picture 132–1832, black 1833–1963: letterboxed like the rest |
 | d3d11fs 1024×768, Retina mode off | picture columns 202–2819 | 0050 and 0051: a 2-pixel strip of surface at 2820–2821; with 0052: picture 202–2821 (1310 points), black 0–201, 2822–3023; d3d9fs the same |
 
 The issue also saw the Dock and asked for the displays to be captured. winemac captures no display
@@ -2057,7 +2060,15 @@ kept the 1280×720 mode while Finder was active, where DXGI on Windows leaves fu
 DXMT's. A program started from a shell, which macOS does not let activate itself, stays at level 0
 under the menu bar and the Dock at any mode, which may be what was seen.
 
-Not tested: mtld3d 0.15's patch 0004 and FNaF (#136), an external display, Vulkan and D3D12
-(vkd3d-proton) programs, which take their surfaces' place from the same client rect, a real Cmd-Tab,
-and a Steam launch. In the GDI-only test the window's last pixel row is off-colour at the screen's
+Subnautica (DXMT) from Steam, fullscreen at 1920×1080, showed equal black bars above and below and
+came back letterboxed after Cmd-Tab out and back (owner's run, 2026-11-23).
+
+Not tested: mtld3d 0.15's patch 0004 and FNaF (#136), an external display, and Vulkan and D3D12
+(vkd3d-proton) programs, which take their surfaces' place from the same client rect.
+
+Left open: 0050 places the letterbox at the window rect clipped to the screen. A window whose
+window rect starts past the monitor's edge, a decorated window whose client area fills the mode,
+would have its surface anchored at the clipped corner rather than at the surface's own origin (the
+virtual visible rect's, in `get_surface_rect`). Whether such a window reaches the driver as
+fullscreen at all is unchecked. In the GDI-only test the window's last pixel row is off-colour at the screen's
 shape, before and after: win32u's scaled surface, not the letterbox.
