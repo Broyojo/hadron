@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds and runs gl-tess-indirect.c: a tessellation draw made with glDrawArraysIndirect against the
 # same draw made with glDrawArrays, through Zink, with vertex and control shaders that hold N floats
-# live (default 64). Mesa 0068 is why they agree on M1 and M2 (docs/findings.md #73).
+# live (default 64). Mesa 0068 is why they agree on M1 and M2 (docs/findings.md #74).
 # Usage: tests/mac/gl-tess-indirect.sh [N] [ICD json] [Zink prefix]
 #   (defaults: 64, the installed KosmicKrisp, dist/mesa-zink)
 set -eu

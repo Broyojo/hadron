@@ -326,7 +326,7 @@ from the user's ~/Library/Application Support/Hadron/games.conf; launch options 
 
 Geometry shaders: Mesa patches 0004-0009 carried the then pending upstream KosmicKrisp geometry shader
 merge request (!44786, by its author, one conflict resolved against DGC; merged since, and out of the
-queue with #73), which implements them with
+queue with #74), which implements them with
 poly as compute passes before the draw. vkd3d-proton's geometry shader, layered rendering, topology
 mismatch and PS layer tests pass (527 checks; test_primitive_id_read_tess_geom has one failure).
 Patch 0004 lists the geometry stage for DGC: with geometryShader on, vkd3d-proton turns DGC off
@@ -2129,7 +2129,7 @@ Seen while testing: about one run in four of the test hung at process exit, afte
 with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
 `TerminateProcess`. Not looked into.
 
-## Mesa moved to main of 2026-11-23 (#73)
+## Mesa moved to main of 2026-11-23 (#74)
 
 The Mesa pin moves from `30da39187d` (2026-09-30) to `b7f76842460`, Mesa main on 2026-11-23:
 3,975 commits later, 45 of them in KosmicKrisp. The queue goes from 89 patches to 79.
