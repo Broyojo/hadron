@@ -1,49 +1,51 @@
-From 2483a5ade32b6a6f2e1790eeba05b3b9ec7f0b41 Mon Sep 17 00:00:00 2001
+From 456c639c2c4ee4b57d8734c6ad4c7e3d5eb95947 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 18:54:54 -0400
 Subject: [PATCH] kk: Split timestamp query pools across Metal counter heaps
 
 Generated-by: LLM
 ---
- src/kosmickrisp/vulkan/kk_query_pool.c | 48 ++++++++++++++++++--------
+ src/kosmickrisp/vulkan/kk_query_pool.c | 49 ++++++++++++++++++--------
  src/kosmickrisp/vulkan/kk_query_pool.h |  5 ++-
- 2 files changed, 37 insertions(+), 16 deletions(-)
+ 2 files changed, 38 insertions(+), 16 deletions(-)
 
 diff --git a/src/kosmickrisp/vulkan/kk_query_pool.c b/src/kosmickrisp/vulkan/kk_query_pool.c
-index 8c78cf5e1b6..76aeb00b2c6 100644
+index 104d73d7279..ac4d1a3899f 100644
 --- a/src/kosmickrisp/vulkan/kk_query_pool.c
 +++ b/src/kosmickrisp/vulkan/kk_query_pool.c
-@@ -198,11 +198,25 @@ kk_CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *pCreateInfo,
-    } else if (kk_pool_is_ts(pool)) {
-       /* Timestamps are sampled into a Metal counter heap (one entry per query)
-        * and resolved into `bo` after the GPU writes them. */
--      pool->ts.heap =
--         mtl_new_timestamp_counter_heap(dev->mtl_handle, pool->vk.query_count);
--      if (pool->ts.heap == NULL) {
-+      pool->ts.heap_count =
-+         DIV_ROUND_UP(pool->vk.query_count, KK_TS_HEAP_ENTRIES);
-+      pool->ts.heaps = vk_zalloc2(&dev->vk.alloc, pAllocator,
-+                                  pool->ts.heap_count * sizeof(*pool->ts.heaps),
-+                                  8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-+      if (pool->ts.heaps == NULL) {
-          kk_DestroyQueryPool(device, kk_query_pool_to_handle(pool), pAllocator);
--         return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
-+         return vk_error(dev, VK_ERROR_OUT_OF_HOST_MEMORY);
-+      }
-+      for (uint32_t h = 0; h < pool->ts.heap_count; h++) {
-+         uint32_t entries = MIN2(pool->vk.query_count - h * KK_TS_HEAP_ENTRIES,
-+                                 KK_TS_HEAP_ENTRIES);
-+         pool->ts.heaps[h] =
-+            mtl_new_timestamp_counter_heap(dev->mtl_handle, entries);
-+         if (pool->ts.heaps[h] == NULL) {
-+            kk_DestroyQueryPool(device, kk_query_pool_to_handle(pool),
-+                                pAllocator);
-+            return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
+@@ -200,12 +200,27 @@ kk_CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *pCreateInfo,
+       if (!pdev->settings.gpu_capture_enabled) {
+          /* Timestamps are sampled into a Metal counter heap (one entry per query)
+           * and resolved into `bo` after the GPU writes them. */
+-         pool->ts.heap = mtl_new_timestamp_counter_heap(dev->mtl_handle,
+-                                                        pool->vk.query_count);
+-         if (pool->ts.heap == NULL) {
++         pool->ts.heap_count =
++            DIV_ROUND_UP(pool->vk.query_count, KK_TS_HEAP_ENTRIES);
++         pool->ts.heaps = vk_zalloc2(&dev->vk.alloc, pAllocator,
++                                     pool->ts.heap_count * sizeof(*pool->ts.heaps),
++                                     8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
++         if (pool->ts.heaps == NULL) {
+             kk_DestroyQueryPool(device, kk_query_pool_to_handle(pool),
+                                 pAllocator);
+-            return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++            return vk_error(dev, VK_ERROR_OUT_OF_HOST_MEMORY);
 +         }
-       }
-    }
- 
-@@ -230,8 +244,11 @@ kk_DestroyQueryPool(VkDevice device, VkQueryPool queryPool,
++         for (uint32_t h = 0; h < pool->ts.heap_count; h++) {
++            uint32_t entries =
++               MIN2(pool->vk.query_count - h * KK_TS_HEAP_ENTRIES,
++                    KK_TS_HEAP_ENTRIES);
++            pool->ts.heaps[h] =
++               mtl_new_timestamp_counter_heap(dev->mtl_handle, entries);
++            if (pool->ts.heaps[h] == NULL) {
++               kk_DestroyQueryPool(device, kk_query_pool_to_handle(pool),
++                                   pAllocator);
++               return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++            }
+          }
+       } else {
+          mesa_logw(
+@@ -237,8 +252,11 @@ kk_DestroyQueryPool(VkDevice device, VkQueryPool queryPool,
           kk_query_table_remove(dev, &dev->occlusion_queries, remap_index[i]);
        }
     } else if (kk_pool_is_ts(pool)) {
@@ -57,13 +59,12 @@ index 8c78cf5e1b6..76aeb00b2c6 100644
     }
  
     kk_destroy_bo(dev, pool->bo);
-@@ -358,13 +375,14 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
-    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
-    VK_FROM_HANDLE(kk_query_pool, pool, queryPool);
-    struct kk_device *dev = kk_cmd_buffer_device(cmd);
--   assert(kk_pool_is_ts(pool) && pool->ts.heap);
-+   assert(kk_pool_is_ts(pool) && pool->ts.heaps);
+@@ -377,12 +395,13 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+       return;
+    }
  
+-   assert(pool->ts.heap);
++   assert(pool->ts.heaps);
     uint32_t count = kk_mv_query_count(cmd);
     enum mtl_render_stages mtl_stage =
        kk_pipeline_stages_to_mtl_render_stage(stage);
@@ -74,7 +75,7 @@ index 8c78cf5e1b6..76aeb00b2c6 100644
  
     if (cmd->metal.render) {
        /* If we've already issued a timestamp write for a render stage, reuse it
-@@ -373,7 +391,7 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+@@ -391,7 +410,7 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
        bool reused = false;
        util_dynarray_foreach(&cmd->ts_stage_map, struct kk_ts_stage_entry,
                              entry) {
@@ -83,7 +84,7 @@ index 8c78cf5e1b6..76aeb00b2c6 100644
              heap_index = entry->index;
              reused = true;
              break;
-@@ -381,13 +399,13 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+@@ -399,13 +418,13 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
        }
  
        if (!reused) {
@@ -101,7 +102,7 @@ index 8c78cf5e1b6..76aeb00b2c6 100644
        }
     } else {
        /* compute encoder active or nothing active. If the latter, the write will
-@@ -399,14 +417,14 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+@@ -417,14 +436,14 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
                        kk_query_report_addr(dev, pool, query),
                        (uint32_t)LIBKK_QUERY_UNAVAILABLE);
  

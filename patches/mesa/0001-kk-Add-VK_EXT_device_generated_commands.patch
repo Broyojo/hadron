@@ -1,4 +1,4 @@
-From 8ab2aa1b5f3ea61f2963fc2adf2636cbe33abb7e Mon Sep 17 00:00:00 2001
+From 404c91ddf62e2a0e955522a5b28e84d47cdc0a94 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 15:54:37 -0400
 Subject: [PATCH] kk: Add VK_EXT_device_generated_commands
@@ -11,12 +11,12 @@ Generated-by: LLM
  src/kosmickrisp/vulkan/kk_cmd_dgc.c         | 261 ++++++++++++++++++++
  src/kosmickrisp/vulkan/kk_cmd_dgc.h         |  50 ++++
  src/kosmickrisp/vulkan/kk_cmd_dispatch.c    |  39 +++
- src/kosmickrisp/vulkan/kk_cmd_draw.c        | 139 ++++++++++-
+ src/kosmickrisp/vulkan/kk_cmd_draw.c        | 140 +++++++++--
  src/kosmickrisp/vulkan/kk_debug.c           |   1 +
  src/kosmickrisp/vulkan/kk_debug.h           |   1 +
  src/kosmickrisp/vulkan/kk_physical_device.c |  26 ++
  src/kosmickrisp/vulkan/meson.build          |   1 +
- 11 files changed, 701 insertions(+), 13 deletions(-)
+ 11 files changed, 701 insertions(+), 14 deletions(-)
  create mode 100644 src/kosmickrisp/libkk/kk_dgc.cl
  create mode 100644 src/kosmickrisp/libkk/kk_dgc.h
  create mode 100644 src/kosmickrisp/vulkan/kk_cmd_dgc.c
@@ -619,7 +619,7 @@ index 4df22e7d188..7c3db9d13a3 100644
 +      kk_cmd_bind_root_to_argument_table(cmd, desc->root.addr);
 +}
 diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
-index 8f627aa0d0d..b05dc75eaed 100644
+index 126f94bc100..77ed7a714f4 100644
 --- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
 +++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
 @@ -11,6 +11,7 @@
@@ -630,7 +630,7 @@ index 8f627aa0d0d..b05dc75eaed 100644
  #include "kk_format.h"
  #include "kk_image_view.h"
  #include "kk_physical_device.h"
-@@ -1095,7 +1096,8 @@ struct kk_draw_command {
+@@ -1106,7 +1107,8 @@ struct kk_draw_command {
     bool indexed;
     bool restart;
     bool flatshade_first;
@@ -640,7 +640,7 @@ index 8f627aa0d0d..b05dc75eaed 100644
     uint32_t predicate_count;
     enum kk_predicate_op predicate_op[2];
     uint32_t draw_count;
-@@ -1832,6 +1834,9 @@ requires_unroll_flatshade(struct kk_cmd_buffer *cmd,
+@@ -1969,6 +1971,9 @@ requires_unroll_flatshade(struct kk_cmd_buffer *cmd,
  static bool
  requires_unroll(struct kk_cmd_buffer *cmd, struct kk_draw_command *data)
  {
@@ -649,8 +649,8 @@ index 8f627aa0d0d..b05dc75eaed 100644
 +
     /* No need to unroll for tessellation. Robustness is handled by tessellator,
      * restart is not supported for patch lists, and flat-shading does not have a
-     * well-defined vertex used when tessellating. */
-@@ -2054,18 +2059,15 @@ build_draw_data(struct kk_cmd_buffer *cmd, struct kk_draw_command *data,
+     * well-defined vertex used when tessellating. A GS reads any index size and
+@@ -2345,18 +2350,15 @@ build_draw_data(struct kk_cmd_buffer *cmd, struct kk_draw_command *data,
     return draw;
  }
  
@@ -676,7 +676,7 @@ index 8f627aa0d0d..b05dc75eaed 100644
     /* Convert to indirect and process predicates. Skip draw if we fail. */
     if (data->predicate_count > 0 && !kk_predicate_draws(cmd, data))
        return;
-@@ -2078,22 +2080,49 @@ kk_draw(struct kk_cmd_buffer *cmd, struct kk_draw_command *data)
+@@ -2380,10 +2382,14 @@ kk_draw(struct kk_cmd_buffer *cmd, struct kk_draw_command *data)
  
     for (uint32_t i = 0; i < data->draw_count; i++) {
        struct kk_draw_data draw_data = build_draw_data(cmd, data, i);
@@ -686,12 +686,14 @@ index 8f627aa0d0d..b05dc75eaed 100644
 +         kk_cmd_bind_root_to_argument_table(cmd, root);
  
        if (data->upload_mask)
--         kk_upload_per_draw_data(cmd, data->upload_mask, i, &draw_data);
+-         kk_upload_per_draw_data(cmd, data->upload_mask, i, &draw_data,
+-                                 gs_restart);
 +         kk_upload_per_draw_data(cmd, data->upload_mask, roots ? 0 : i,
-+                                 &draw_data);
++                                 &draw_data, gs_restart);
  
        if (tess)
           draw_data = kk_launch_tess(cmd, draw_data);
+@@ -2392,13 +2398,35 @@ kk_draw(struct kk_cmd_buffer *cmd, struct kk_draw_command *data)
  
        /* TODO_KOSMICKRISP Remove this once unroll, tess and any compute does not
         * split render pass */
@@ -728,7 +730,7 @@ index 8f627aa0d0d..b05dc75eaed 100644
  VKAPI_ATTR void VKAPI_CALL
  kk_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount,
             uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
-@@ -2405,3 +2434,87 @@ kk_CmdDrawIndexedIndirectCount2KHR(VkCommandBuffer commandBuffer,
+@@ -2710,3 +2738,87 @@ kk_CmdDrawIndexedIndirectCount2KHR(VkCommandBuffer commandBuffer,
  
     kk_draw(cmd, &data);
  }
@@ -817,31 +819,31 @@ index 8f627aa0d0d..b05dc75eaed 100644
 +      kk_cmd_bind_root_to_argument_table(cmd, desc->root.addr);
 +}
 diff --git a/src/kosmickrisp/vulkan/kk_debug.c b/src/kosmickrisp/vulkan/kk_debug.c
-index 1805d6644d2..5c4b3807536 100644
+index 41084410180..47fcc727a14 100644
 --- a/src/kosmickrisp/vulkan/kk_debug.c
 +++ b/src/kosmickrisp/vulkan/kk_debug.c
 @@ -23,6 +23,7 @@ const struct debug_named_value experimental_flags[] = {
     {"custom_border", KK_EXPERIMENTAL_CUSTOM_BORDER},
     {"image_view_min_lod", KK_EXPERIMENTAL_IMAGE_VIEW_MIN_LOD},
-    {"m5_optimize_e5b9g9r9", KK_EXPERIMENTAL_M5_OPTIMIZE_E5B9G9R9},
+    {"optimize_e5b9g9r9", KK_EXPERIMENTAL_OPTIMIZE_E5B9G9R9},
 +   {"dgc", KK_EXPERIMENTAL_DEVICE_GENERATED_COMMANDS},
     {NULL, 0},
  };
  
 diff --git a/src/kosmickrisp/vulkan/kk_debug.h b/src/kosmickrisp/vulkan/kk_debug.h
-index f4548044213..ca1d802743c 100644
+index d29718a26a0..15d6e69b0a6 100644
 --- a/src/kosmickrisp/vulkan/kk_debug.h
 +++ b/src/kosmickrisp/vulkan/kk_debug.h
 @@ -26,6 +26,7 @@ enum kk_experimental {
-    /* Using allowGPUOptimizedContents on M5 for this format causes
+    /* Using allowGPUOptimizedContents for this format causes
      * vkCmdCopyImage() tests in CTS to fail, but it is otherwise usable */
-    KK_EXPERIMENTAL_M5_OPTIMIZE_E5B9G9R9 = 1ull << 2,
+    KK_EXPERIMENTAL_OPTIMIZE_E5B9G9R9 = 1ull << 2,
 +   KK_EXPERIMENTAL_DEVICE_GENERATED_COMMANDS = 1ull << 3,
  };
  
  extern enum kk_experimental kk_mesa_experimental_flags;
 diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
-index 2d5be6bde57..fcb04ad1567 100644
+index 5f6cb32a5e2..e627579346b 100644
 --- a/src/kosmickrisp/vulkan/kk_physical_device.c
 +++ b/src/kosmickrisp/vulkan/kk_physical_device.c
 @@ -179,6 +179,8 @@ kk_get_device_extensions(const struct kk_instance *instance,
@@ -853,7 +855,7 @@ index 2d5be6bde57..fcb04ad1567 100644
        .EXT_extended_dynamic_state3 = true,
        .EXT_external_memory_metal = true,
        .EXT_external_memory_host = true,
-@@ -462,6 +464,11 @@ kk_get_device_features(
+@@ -461,6 +463,11 @@ kk_get_device_features(
        /* VK_EXT_depth_clip_enable */
        .depthClipEnable = true,
  
@@ -892,7 +894,7 @@ index 2d5be6bde57..fcb04ad1567 100644
        .dynamicPrimitiveTopologyUnrestricted = false,
  
 diff --git a/src/kosmickrisp/vulkan/meson.build b/src/kosmickrisp/vulkan/meson.build
-index f82e80fd87e..24643e3105b 100644
+index 6f848f902c8..20ff109a3db 100644
 --- a/src/kosmickrisp/vulkan/meson.build
 +++ b/src/kosmickrisp/vulkan/meson.build
 @@ -60,6 +60,7 @@ kk_files = files(

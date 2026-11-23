@@ -1,0 +1,25 @@
+From 0f462e315bd8f54cd75fda2475d5ba4bbfd68db7 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 2 Oct 2026 22:46:47 -0400
+Subject: [PATCH] kk: Keep block-compressed formats out of sparse images
+
+Generated-by: LLM
+---
+ src/kosmickrisp/vulkan/kk_image.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index 88f161ebec6..e5ee7dc1c05 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -273,6 +273,7 @@ kk_sparse_tile_px(struct kk_physical_device *pdev, VkFormat format,
+                   struct mtl_size *tile_px)
+ {
+    if (!KK_EXPERIMENTAL(SPARSE) || tiling != VK_IMAGE_TILING_OPTIMAL ||
++       vk_format_is_compressed(format) ||
+        vk_format_get_plane_count(format) > 1 ||
+        !(pdev->info.supported_sample_counts & samples))
+       return false;
+-- 
+2.54.0 (Apple Git-157)
+

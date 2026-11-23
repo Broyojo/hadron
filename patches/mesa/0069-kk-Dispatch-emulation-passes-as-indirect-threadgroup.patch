@@ -1,0 +1,321 @@
+From fef816e889204202e1b32071bc1ecb061a7c1d7b Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 3 Oct 2026 20:59:21 -0400
+Subject: [PATCH] kk: Dispatch emulation passes as indirect threadgroups with a
+ bounds check
+
+Generated-by: LLM
+---
+ src/kosmickrisp/bridge/mtl_compiler.m    |  3 +-
+ src/kosmickrisp/libkk/kk_geometry.cl     |  7 ++++
+ src/kosmickrisp/libkk/kk_tessellation.cl | 10 +----
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c   |  3 --
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h   | 11 ------
+ src/kosmickrisp/vulkan/kk_cmd_draw.c     | 14 +++----
+ src/kosmickrisp/vulkan/kk_shader.c       | 47 ++++++++++++++++++++++--
+ src/kosmickrisp/vulkan/kk_shader.h       |  2 +
+ src/poly/geometry.h                      | 13 +++++--
+ 9 files changed, 71 insertions(+), 39 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index 9e1f90d7391..a5a18e72a70 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -108,8 +108,7 @@
+ 
+       MTL4ComputePipelineDescriptor *desc = [[MTL4ComputePipelineDescriptor new] autorelease];
+       desc.computeFunctionDescriptor = (MTL4FunctionDescriptor *)function;
+-      if (max_total_threads_per_threadgroup)
+-         desc.maxTotalThreadsPerThreadgroup = max_total_threads_per_threadgroup;
++      desc.maxTotalThreadsPerThreadgroup = max_total_threads_per_threadgroup;
+ 
+       NSError *error;
+       id<MTLComputePipelineState> pipeline = [comp newComputePipelineStateWithDescriptor:desc compilerTaskOptions:nil
+diff --git a/src/kosmickrisp/libkk/kk_geometry.cl b/src/kosmickrisp/libkk/kk_geometry.cl
+index 3042e8c3e72..25965a29dc4 100644
+--- a/src/kosmickrisp/libkk/kk_geometry.cl
++++ b/src/kosmickrisp/libkk/kk_geometry.cl
+@@ -61,6 +61,13 @@ libkk_gs_setup_indirect(uint64_t index_buffer, constant uint *draw,
+       p->vertex_buffer = (global uchar *)poly_heap_alloc(
+          heap, p->input_primitives * vertex_buffer_stride, 16);
+    }
++
++   vp->groups[0] = (vp->grid[0] + vp->grid[3] - 1) / vp->grid[3];
++   vp->groups[1] = vp->grid[1];
++   vp->groups[2] = 1;
++   p->groups[0] = (p->grid[0] + p->grid[3] - 1) / p->grid[3];
++   p->groups[1] = p->grid[1];
++   p->groups[2] = 1;
+ }
+ 
+ KERNEL(1024)
+diff --git a/src/kosmickrisp/libkk/kk_tessellation.cl b/src/kosmickrisp/libkk/kk_tessellation.cl
+index 2e6ee31e15d..a91482cabd9 100644
+--- a/src/kosmickrisp/libkk/kk_tessellation.cl
++++ b/src/kosmickrisp/libkk/kk_tessellation.cl
+@@ -77,20 +77,14 @@ libkk_tess_setup_indirect(
+    }
+ 
+    /* VS grid size */
+-   grids[0] = count;
++   grids[0] = (count + vs_wg_size - 1) / vs_wg_size;
+    grids[1] = instance_count;
+    grids[2] = 1;
+-   grids[3] = vs_wg_size;
+-   grids[4] = 1;
+-   grids[5] = 1;
+ 
+    /* TCS grid size */
+-   grids[6] = in_patches * p->output_patch_size;
++   grids[6] = in_patches;
+    grids[7] = instance_count;
+    grids[8] = 1;
+-   grids[9] = p->output_patch_size;
+-   grids[10] = 1;
+-   grids[11] = 1;
+ 
+    /* Tess grid size */
+    grids[12] = unrolled_patches;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index a41f42c6e0b..5aac5709caa 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -890,9 +890,6 @@ kk_dispatch_precomp(struct kk_cmd_buffer *cmd, struct kk_grid grid,
+                     bool pre_gfx, enum libkk_program idx, void *data,
+                     size_t data_size)
+ {
+-   /* KK_WORKAROUND_19 */
+-   assert(grid.mode != KK_GRID_INDIRECT_LOCAL);
+-
+    struct kk_device *dev = kk_cmd_buffer_device(cmd);
+    struct kk_precompiled_shader *prog = &dev->precompiled_cache.shaders[idx];
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index e9f261fc45d..86e0b158175 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -425,8 +425,6 @@ bool kk_attachment_do_renderpass_resolve(const struct kk_attachment *attachment,
+ enum kk_grid_mode {
+    KK_GRID_DIRECT = 0u,
+    KK_GRID_INDIRECT,
+-   /* Thread counts, then threadgroup size, like poly's grids */
+-   KK_GRID_INDIRECT_LOCAL,
+ };
+ struct kk_grid {
+    enum kk_grid_mode mode;
+@@ -466,15 +464,6 @@ kk_grid_indirect(uint64_t addr)
+    };
+ }
+ 
+-static struct kk_grid
+-kk_grid_indirect_local(uint64_t addr)
+-{
+-   return (struct kk_grid){
+-      .mode = KK_GRID_INDIRECT_LOCAL,
+-      .addr = addr,
+-   };
+-}
+-
+ static bool
+ kk_grid_is_indirect(struct kk_grid grid)
+ {
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 6e5efd6cac0..669ffc2a8dc 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -2275,8 +2275,6 @@ kk_dispatch_compute(mtl_compute_encoder *enc, struct kk_grid grid,
+ {
+    if (grid.mode == KK_GRID_DIRECT)
+       mtl_dispatch_threads(enc, grid.size, local_size);
+-   else if (grid.mode == KK_GRID_INDIRECT_LOCAL)
+-      mtl_dispatch_threads_with_indirect_buffer(enc, grid.addr);
+    else
+       mtl_dispatch_threadgroups_with_indirect_buffer(enc, grid.addr,
+                                                      local_size);
+@@ -2318,8 +2316,8 @@ kk_launch_tess(struct kk_cmd_buffer *cmd, struct kk_draw_data draw)
+       libkk_tess_setup_indirect_struct(cmd, kk_grid_1d(1), true, args);
+ 
+       uint64_t grids = gfx->tess.indirect_ptr.gpu;
+-      grid_vs = kk_grid_indirect_local(grids);
+-      grid_tcs = kk_grid_indirect_local(grids + 6u * sizeof(uint32_t));
++      grid_vs = kk_grid_indirect(grids);
++      grid_tcs = kk_grid_indirect(grids + 6u * sizeof(uint32_t));
+       grid_tess = kk_grid_indirect(grids + 12u * sizeof(uint32_t));
+    } else {
+       uint32_t patches = draw.grid.size.x / input_patch_size;
+@@ -2462,10 +2460,10 @@ kk_launch_gs_prerast(struct kk_cmd_buffer *cmd,
+ 
+       libkk_gs_setup_indirect_struct(cmd, kk_grid_1d(1u), true, args);
+ 
+-      grid_vs = kk_grid_indirect_local(
+-         vertex_params + offsetof(struct poly_vertex_params, grid));
+-      grid_gs = kk_grid_indirect_local(
+-         geometry_params + offsetof(struct poly_geometry_params, grid));
++      grid_vs = kk_grid_indirect(
++         vertex_params + offsetof(struct poly_vertex_params, groups));
++      grid_gs = kk_grid_indirect(
++         geometry_params + offsetof(struct poly_geometry_params, groups));
+    } else {
+       grid_vs = grid_gs = kk_grid_2d(draw.grid.size.x, draw.grid.size.y);
+       grid_gs.size.x = u_decomposed_prims_for_vertices(mode, draw.grid.size.x);
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index e463134f606..569c85bd6b9 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1450,6 +1450,35 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+    ralloc_free(nir);
+ }
+ 
++static bool
++kk_nir_guard_threads(nir_shader *nir, bool geometry)
++{
++   nir_function_impl *impl = nir_shader_get_entrypoint(nir);
++
++   nir_cf_list body;
++   nir_cf_extract(&body, nir_before_impl(impl), nir_after_impl(impl));
++
++   nir_builder b = nir_builder_at(nir_before_impl(impl));
++   nir_def *addr;
++   if (geometry) {
++      addr = nir_iadd_imm(&b, nir_load_geometry_param_buffer_poly(&b),
++                          offsetof(struct poly_geometry_params, grid));
++   } else {
++      addr = nir_iadd_imm(&b, nir_load_vertex_param_buffer_poly(&b),
++                          offsetof(struct poly_vertex_params,
++                                   verts_per_instance));
++   }
++
++   nir_def *limit = nir_load_global_constant(&b, 1, 32, addr);
++   nir_def *id = nir_channel(&b, nir_load_global_invocation_id(&b, 32), 0);
++
++   nir_push_if(&b, nir_ult(&b, id, limit));
++   nir_cf_reinsert(&body, b.cursor);
++   nir_pop_if(&b, NULL);
++
++   return nir_progress(true, impl, nir_metadata_none);
++}
++
+ static VkResult
+ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+                   struct kk_shader *prev_stage,
+@@ -1503,6 +1532,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+          memset(&nir->info.cs, 0, sizeof(nir->info.cs));
+          nir->xfb_info = NULL;
+          NIR_PASS(_, nir, poly_nir_lower_sw_vs);
++         NIR_PASS(_, nir, kk_nir_guard_threads, false);
+       } else {
+          /* Metal's instance_id contains base_instance. When the emulation path
+           * is taken, since we launch compute, they correctly get translated.
+@@ -1556,6 +1586,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+          nir->info.stage = MESA_SHADER_COMPUTE;
+          memset(&nir->info.cs, 0, sizeof(nir->info.cs));
+          nir->xfb_info = NULL;
++         NIR_PASS(_, nir, kk_nir_guard_threads, false);
+       }
+    } else if (stage == MESA_SHADER_GEOMETRY) {
+       /* TODO_KOSMICKRISP: Poly lowering breaks with vectorized I/O less than
+@@ -1571,6 +1602,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+          count->info.stage = MESA_SHADER_COMPUTE;
+          memset(&count->info.cs, 0, sizeof(count->info.cs));
+          count->xfb_info = NULL;
++         NIR_PASS(_, count, kk_nir_guard_threads, true);
+          kk_compile_msl(pdev, count, state, &shader->gs_count,
+                         &shader->info.atomic64_locked, apply_wa19);
+       } else {
+@@ -1586,6 +1618,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+       nir->info.stage = MESA_SHADER_COMPUTE;
+       memset(&nir->info.cs, 0, sizeof(nir->info.cs));
+       nir->xfb_info = NULL;
++      NIR_PASS(_, nir, kk_nir_guard_threads, true);
+       kk_compile_msl(pdev, nir, state, &shader->gs_main,
+                      &shader->info.atomic64_locked, apply_wa19);
+ 
+@@ -1920,6 +1953,9 @@ gather_graphics_pipeline_create_info(
+ 
+       info->vs.additional_stages_bits |= BITFIELD_BIT(stage);
+ 
++      if (s->info.stage == MESA_SHADER_TESS_CTRL)
++         info->vs.tess_local_thread_size = s->info.tess.tcs_output_patch_size;
++
+       if (s->info.stage == MESA_SHADER_GEOMETRY) {
+          kk_msl_copy(&vs->gs_main, &s->gs_main);
+          if (s->info.gs.count_words && !s->info.gs.materialize)
+@@ -2055,7 +2091,11 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    uint32_t stages_bits = vs->info.vs.additional_stages_bits;
+    pipe->gfx.pre_render_count = util_bitcount(stages_bits) - 1u;
+    for (uint32_t i = 0u; i < pipe->gfx.pre_render_count; ++i) {
+-      result = kk_compile_compute_pipeline(device, &vs->msl_data[vs_stage], 0u,
++      uint32_t local_thread_size = vs_stage == MESA_SHADER_TESS_CTRL
++                                      ? vs->info.vs.tess_local_thread_size
++                                      : KK_POLY_WG_SIZE;
++      result = kk_compile_compute_pipeline(device, &vs->msl_data[vs_stage],
++                                           local_thread_size,
+                                            &pipe->gfx.pre_render[i]);
+ 
+       if (result != VK_SUCCESS)
+@@ -2068,13 +2108,14 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    if (vs->info.vs.additional_stages_bits &
+        BITFIELD_BIT(MESA_SHADER_GEOMETRY)) {
+       result = kk_compile_compute_pipeline(
+-         device, &vs->gs_main, 0u,
++         device, &vs->gs_main, KK_POLY_WG_SIZE,
+          &pipe->gfx.pre_render[pipe->gfx.pre_render_count++]);
+       if (result != VK_SUCCESS)
+          return VK_ERROR_INVALID_SHADER_NV;
+ 
+       if (vs->info.vs.gs.count_words && !vs->info.vs.gs.materialize) {
+-         result = kk_compile_compute_pipeline(device, &vs->gs_count, 0u,
++         result = kk_compile_compute_pipeline(device, &vs->gs_count,
++                                              KK_POLY_WG_SIZE,
+                                               &pipe->gfx.gs_count);
+          if (result != VK_SUCCESS)
+             return VK_ERROR_INVALID_SHADER_NV;
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index ce5897ef378..973223e1dad 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -66,6 +66,8 @@ struct kk_shader_info {
+           * serialization. */
+          uint32_t additional_stages_bits;
+ 
++         uint32_t tess_local_thread_size;
++
+          /* Data needed to start render pass and bind pipeline. */
+          uint32_t attribs_read;
+          uint32_t sample_count;
+diff --git a/src/poly/geometry.h b/src/poly/geometry.h
+index 6224929ae84..e4c25d2a23c 100644
+--- a/src/poly/geometry.h
++++ b/src/poly/geometry.h
+@@ -186,9 +186,12 @@ struct poly_vertex_params {
+ 
+    /* Mask of outputs present in the output buffer */
+    uint64_t outputs;
++
++   uint32_t groups[3];
++   uint32_t _pad2;
+ } PACKED;
+-static_assert(sizeof(struct poly_vertex_params) == 16 * 4,
+-              "struct poly_vertex_params must be 16 words");
++static_assert(sizeof(struct poly_vertex_params) == 20 * 4,
++              "struct poly_vertex_params must be 20 words");
+ 
+ static inline void
+ poly_vertex_params_init(struct poly_vertex_params *p,
+@@ -320,9 +323,11 @@ struct poly_geometry_params {
+     * layout() declared input class.
+     */
+    uint32_t input_topology;
++
++   uint32_t groups[3];
+ } PACKED;
+-static_assert(sizeof(struct poly_geometry_params) == 81 * 4,
+-              "struct poly_geometry_params must be 81 words");
++static_assert(sizeof(struct poly_geometry_params) == 84 * 4,
++              "struct poly_geometry_params must be 84 words");
+ 
+ static inline void
+ poly_geometry_params_init(struct poly_geometry_params *p,
+-- 
+2.54.0 (Apple Git-157)
+

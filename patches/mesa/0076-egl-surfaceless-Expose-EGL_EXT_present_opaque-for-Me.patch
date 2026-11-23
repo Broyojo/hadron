@@ -1,0 +1,31 @@
+From 2e7ef7ffcc3668ffbeaa433a009a659bb43f292f Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sun, 11 Oct 2026 21:39:28 -0400
+Subject: [PATCH] egl/surfaceless: Expose EGL_EXT_present_opaque for Metal
+ layer window surfaces
+
+Generated-by: LLM
+---
+ src/egl/drivers/dri2/platform_surfaceless.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/egl/drivers/dri2/platform_surfaceless.c b/src/egl/drivers/dri2/platform_surfaceless.c
+index acab37cd475..e1c3a4c16b4 100644
+--- a/src/egl/drivers/dri2/platform_surfaceless.c
++++ b/src/egl/drivers/dri2/platform_surfaceless.c
+@@ -555,9 +555,10 @@ dri2_initialize_surfaceless(struct _egl_display *disp)
+    dri2_set_WL_bind_wayland_display(disp);
+ 
+ #ifdef VK_USE_PLATFORM_METAL_EXT
+-   if (dri2_dpy->kopper)
++   if (dri2_dpy->kopper) {
+       dri2_add_configs_for_visuals(disp, EGL_WINDOW_BIT | EGL_PBUFFER_BIT);
+-   else
++      disp->Extensions.EXT_present_opaque = EGL_TRUE;
++   } else
+ #endif
+       dri2_add_pbuffer_configs_for_visuals(disp);
+ 
+-- 
+2.54.0 (Apple Git-157)
+

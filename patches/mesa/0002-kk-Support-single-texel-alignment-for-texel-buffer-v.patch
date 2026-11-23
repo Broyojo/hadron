@@ -1,4 +1,4 @@
-From f35f2767c192d063b58364db02551381588c6621 Mon Sep 17 00:00:00 2001
+From a91c2939aca3a557cbabe0e362e821c815d5b480 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 18:45:39 -0400
 Subject: [PATCH] kk: Support single-texel alignment for texel buffer views
@@ -14,7 +14,7 @@ Generated-by: LLM
  6 files changed, 67 insertions(+), 6 deletions(-)
 
 diff --git a/src/kosmickrisp/vulkan/kk_buffer_view.c b/src/kosmickrisp/vulkan/kk_buffer_view.c
-index 3a0aa03e8ac..659f4efd457 100644
+index a25e703f2c2..f9829008339 100644
 --- a/src/kosmickrisp/vulkan/kk_buffer_view.c
 +++ b/src/kosmickrisp/vulkan/kk_buffer_view.c
 @@ -76,8 +76,15 @@ kk_CreateBufferView(VkDevice _device, const VkBufferViewCreateInfo *pCreateInfo,
@@ -63,7 +63,7 @@ index 8a995ea5f86..d9d96d7a08b 100644
  
  VK_DEFINE_NONDISP_HANDLE_CASTS(kk_buffer_view, vk.base, VkBufferView,
 diff --git a/src/kosmickrisp/vulkan/kk_descriptor_set.c b/src/kosmickrisp/vulkan/kk_descriptor_set.c
-index 5f56abc877d..7cdf4809fba 100644
+index c817d18b6c9..bc5dcf87054 100644
 --- a/src/kosmickrisp/vulkan/kk_descriptor_set.c
 +++ b/src/kosmickrisp/vulkan/kk_descriptor_set.c
 @@ -237,6 +237,8 @@ write_buffer_view_desc(struct kk_descriptor_set *set,
@@ -93,7 +93,7 @@ index 3c0f8b8b79a..c289c5f1f22 100644
  
  /* This has to match nir_address_format_64bit_bounded_global */
 diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
-index 050206a2f01..c6ec558af3b 100644
+index 3b54ffddd8e..03fd4eee77a 100644
 --- a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
 +++ b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
 @@ -367,6 +367,30 @@ lower_image_intrin(nir_builder *b, nir_intrinsic_instr *intr,
@@ -160,7 +160,7 @@ index 050206a2f01..c6ec558af3b 100644
     const uint32_t plane =
        plane_ssa ? nir_src_as_uint(nir_src_for_ssa(plane_ssa)) : 0;
 diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
-index fcb04ad1567..87a7d8406d1 100644
+index e627579346b..bc2e6b0af38 100644
 --- a/src/kosmickrisp/vulkan/kk_physical_device.c
 +++ b/src/kosmickrisp/vulkan/kk_physical_device.c
 @@ -776,9 +776,9 @@ kk_get_device_properties(
