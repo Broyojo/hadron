@@ -168,7 +168,7 @@ each upload still cost a page-aligned staging allocation (16 KiB for ~100 bytes)
 those filled the 32-bit address space (`page boxes 2416 MiB`) until mtld3d panicked. Watch
 `vbib_gpu_copy_bytes_total` and the address-space warnings after any change to upload paths.
 
-**D3DX's `DebugSetMute` lookup (mtld3d 0002).** The statically linked D3DX library looks up
+**D3DX's `DebugSetMute` lookup (mtld3d 0002; upstream since 0.15, #69).** The statically linked D3DX library looks up
 `DebugSetMute` in `d3d9d.dll`/`d3d9.dll` before its calls and caches only a found pointer.
 mtld3d didn't export it, so every D3DX call did `GetModuleHandle` twice, `LoadLibrary` and
 `GetProcAddress`: ~40% of the game thread, found by mapping samples through FEX's block map
@@ -2127,3 +2127,64 @@ in the test; whether that is the game's hitch was not measured.
 Seen while testing: about one run in four of the test hung at process exit, after `MFShutdown`,
 with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
 `TerminateProcess`. Not looked into.
+
+## mtld3d 0.15.5: a windowed resize stopped the picture for good (fixed, #69, issue #177)
+
+Portal 2 changing its windowed resolution, and Call of Duty: World at War picking its native one,
+left the window black with the sound still playing. A `sample` of the game showed mtld3d's submit
+thread stopped in Wine's `segv_handler`, called from `encode_pass` (`command.rs:2748`) retaining a
+pass's colour texture. Upstream's #919 (fixed in `4aa8014`, #985, mtld3d 0.15): a windowed device
+that binds its back buffer or implicit depth surface by hand and then gets a `WM_SIZE` has them
+destroyed and recreated by mtld3d's auto-resize, while the saved bindings keep the old handles, and
+the next `Present` puts them back into the frame. The fault is on mtld3d's own Unix thread, so no
+frame is submitted again and nothing is logged at the default level.
+
+`tests/win/d3d9resize.c` does what those games do: a windowed device with an automatic depth
+surface, `GetBackBuffer` + `SetRenderTarget` and `GetDepthStencilSurface` +
+`SetDepthStencilSurface`, then `SetWindowPos` to three other sizes, presenting 60 frames at each
+and reading the back buffer's middle pixel back after each. On the old pin (2070771 with Hadron's
+patches, the 0.3.3 build) it hangs in the first `Present` after the first resize, 32- and 64-bit
+alike, and a sample shows the issue's stack (`execute_submit` `encoder.rs:9125` → `encode_pass`
+`command.rs:2748` → `segv_handler`). On 0.15.5 all four sizes pass and read back their colour.
+
+The pin moved to upstream's v0.15.5 (553d758), 2026-11-17:
+
+- Patch 0001 (system-memory vertex buffers, #18) is rebased onto upstream's `buffer.drawTimeUpload`
+  (55d7097): its pre-draw flush is now `flush_bound_buffers_before_draw` /
+  `flush_staged_before_draw`, and the deferred upload of a system-memory buffer runs after it.
+- 0002 (`DebugSetMute`, #18) is dropped: upstream exports it at Windows' ordinal 35 since
+  `665dcd7`; the new `d3d9.dll`s (i386 and ARM64X) export it.
+- 0003 (display sync, #20) rebased with one conflict, in its tests' imports. `a4c67eb` moved
+  mtld3d's pure layer helpers (pacing, drawable sizes) out of `macdrv` into `metal/layer.rs`, but
+  `configure_metal_layer`, the refresh pass and `clear_covered_window_layers` stay in
+  `metal/macdrv.rs`, where this patch and the next still apply.
+- #136's patch 0004 (present rect on entering and leaving fullscreen, cover test against the view's
+  bounds) applies unchanged; upstream sets no present rect. The queue is renumbered 0001 to 0003.
+- The unix crate is now a library (`crate-type = ["rlib"]`, for a native d3d9 upstream is
+  building), so `build-mtld3d.sh` links `mtld3d.so` with `cargo rustc --crate-type cdylib` and the
+  install name upstream's `make unix-arm64` gives it. Rust is pinned at 1.99.1, the minimum the
+  crates name (`rust-version = "1.99"`). mtld3d's host unit tests pass (2,741); its e2e legs need
+  upstream's own Wine build and were not run.
+
+Measured 2026-11-23 on the built-in 3024×1964 display, Retina mode on, through a copy of the
+letterbox build's runtime (Wine 0050–0052) with each mtld3d, new scratch prefixes, capturing only
+the test's window (`tests/mac/window-id.swift` for its CGWindowID, `screencapture -x -o -l`, then
+`tests/mac/picture-bounds.swift`):
+
+| Test | 2070771 (0.3.3) | 0.15.5 |
+|---|---|---|
+| d3d9fs 1280×720 | `CreateDevice` makes it 3024×1964 (the mode list has only the screen's shape); whole window | 1280×720 set; picture rows 132–1832 (1701), 132 black rows above, 131 below, as wined3d's in #66 |
+| d3d9fs 1024×768 | 1024×768 set, no present rect: a 512×384-point window at the top left, under the menu bar | picture columns 203–2820 (2618), 203 black columns each side, as wined3d's |
+| d3d9resize, 32- and 64-bit | hangs after the first resize (above) | 4 sizes, every read-back right |
+| d3d9ex (`Direct3DCreate9Ex`, `CreateDeviceEx`, `PresentEx`, `ResetEx`, `CheckDeviceState`, a refused `D3DPOOL_MANAGED`), 32- and 64-bit | `Direct3DCreate9Ex` fails, `D3DERR_NOTAVAILABLE` | passes, read-backs right |
+| d3d9tri windowed, `IMMEDIATE`, 4 s | 59 fps 32-bit, 108 fps 64-bit | 120 fps both (the panel's rate: a windowed device syncs to it, 0003) |
+
+In one of two 1024×768 runs on 0.15.5, mtld3d logged "app deactivated, fullscreen window left in
+place: registry display mode 3024x1964 restored" a second in, with nothing in the test asking for it;
+the window then covered the screen in dark grey (30, 30, 30) with no picture until the device was
+released. The other run, and the 1280×720 one, stayed active. Where a fullscreen game should go when
+it loses focus is #178's question (Windows minimizes it); this run did not settle it.
+
+Not tested here: games (FNaF fullscreen at 16:9 and its focus loss #178 and office edges #135,
+Portal 2's resolution change, Ultimate Custom Night, ROAM for #88), 0004's `Reset` that keeps
+fullscreen, an external display.
