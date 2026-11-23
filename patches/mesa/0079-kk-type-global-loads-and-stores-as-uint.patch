@@ -1,7 +1,7 @@
-From 1e8d02be8016d05df5d89242a9318836c35da901 Mon Sep 17 00:00:00 2001
+From 90c64f2d7af614007757b9b5b8311e2c3ff0d848 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Mon, 23 Nov 2026 14:07:51 -0500
-Subject: [PATCH] kk: Load and store global memory as unsigned integers
+Subject: [PATCH] kk: type global loads and stores as uint
 
 Generated-by: LLM
 ---
