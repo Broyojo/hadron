@@ -1,4 +1,4 @@
-From 18c8ed498e50f49eac8912f14da16960b8e42bcd Mon Sep 17 00:00:00 2001
+From 1657e435b191ad199ffe7e312a79f9dafaf2ffe7 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 12:54:00 -0400
 Subject: [PATCH] ntdll: Let WINELOADER name the loader that processes are
@@ -15,7 +15,7 @@ through that path and carry the program's name.
  1 file changed, 7 insertions(+)
 
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index d50f8370f9..e43b944d37 100644
+index 086c03b006a..30bc63a7f9e 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
 @@ -383,6 +383,7 @@ static void set_config_dir(void)

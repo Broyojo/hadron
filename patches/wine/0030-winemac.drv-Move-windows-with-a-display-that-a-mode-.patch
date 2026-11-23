@@ -1,8 +1,8 @@
-From ed7678612caeb281d9383fe5bc48040ee812ebb0 Mon Sep 17 00:00:00 2001
+From 95cfb960c9b6434758eb97ac22c40ae6211330dc Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 15 Oct 2026 13:53:11 -0400
-Subject: [PATCH 31/33] winemac.drv: Move windows with a display that a mode
- change moves.
+Subject: [PATCH] winemac.drv: Move windows with a display that a mode change
+ moves.
 
 macOS moves a display other than the main one when its new mode would
 overlap another display, and moves it back when the mode is restored. A
@@ -14,7 +14,7 @@ with it, as a window stays on its monitor on Windows.
  1 file changed, 55 insertions(+)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index 4fe5dd2bda..606cd20383 100644
+index 7377a0bf604..ccb00295317 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -823,9 +823,59 @@ - (BOOL) captureDisplay:(CGDirectDisplayID)displayID

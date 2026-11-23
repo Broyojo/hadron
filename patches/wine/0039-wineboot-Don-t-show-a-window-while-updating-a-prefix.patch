@@ -1,4 +1,4 @@
-From 2e2333faa4e64133b721405c64183b46162a959e Mon Sep 17 00:00:00 2001
+From f9075badfd9d116d5b47a3481288ae164c54d443 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 21 Oct 2026 09:27:43 -0400
 Subject: [PATCH] wineboot: Don't show a window while updating a prefix.
@@ -11,7 +11,7 @@ Nothing in it needs the user. Proton's wineboot shows none either.
  1 file changed, 60 deletions(-)
 
 diff --git a/programs/wineboot/wineboot.c b/programs/wineboot/wineboot.c
-index b49ad3c005..e3484342b2 100644
+index 7dda9ec3cfa..80f3b6a4bb9 100644
 --- a/programs/wineboot/wineboot.c
 +++ b/programs/wineboot/wineboot.c
 @@ -1495,64 +1495,6 @@ static BOOL start_services_process(void)

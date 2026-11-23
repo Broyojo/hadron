@@ -1,4 +1,4 @@
-From 624af27cad74877a573c4955dc2b40bbd67f5fe3 Mon Sep 17 00:00:00 2001
+From a2e85328086b8076b5d1e5f224c540d482a2b1ef Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 21:27:33 -0400
 Subject: [PATCH] ntdll: Back x86 emulator JIT code buffers with MAP_JIT memory
@@ -31,10 +31,10 @@ flipping.
  2 files changed, 205 insertions(+)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 168ca0f228..7ad666faa2 100644
+index 9b38f03e89e..9cb4064673c 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -144,6 +144,7 @@ struct file_view
+@@ -135,6 +135,7 @@ struct file_view
  #define VPROT_SYSTEM           0x0200  /* system view (underlying mmap not under our control) */
  #define VPROT_PLACEHOLDER      0x0400
  #define VPROT_FREE_PLACEHOLDER 0x0800
@@ -42,7 +42,7 @@ index 168ca0f228..7ad666faa2 100644
  
  /* Conversion from VPROT_* to Win32 flags */
  static const BYTE VIRTUAL_Win32Flags[16] =
-@@ -265,6 +266,15 @@ static inline BOOL is_vprot_exec_write( BYTE vprot )
+@@ -292,6 +293,15 @@ static inline BOOL is_vprot_exec_write( BYTE vprot )
   * both in Windows terms are mapped either writable or executable, and flipped on fault. */
  #if defined(__APPLE__) && defined(__aarch64__)
  #define WX_EXCLUSIVE_HOST
@@ -57,8 +57,8 @@ index 168ca0f228..7ad666faa2 100644
 +}
  #endif
  
- /* address-space layout randomization */
-@@ -1855,6 +1865,9 @@ static void unregister_view( struct file_view *view )
+ /* mmap() anonymous memory at a fixed address */
+@@ -1532,6 +1542,9 @@ static void unregister_view( struct file_view *view )
   */
  static void delete_view( struct file_view *view ) /* [in] View */
  {
@@ -68,7 +68,7 @@ index 168ca0f228..7ad666faa2 100644
      if (!(view->protect & VPROT_SYSTEM)) unmap_area( view->base, view->size );
      set_page_vprot( view->base, view->size, 0 );
      if (view->protect & VPROT_ARM64EC) clear_arm64ec_range( view->base, view->size );
-@@ -2004,6 +2017,132 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
+@@ -1680,6 +1693,132 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
  }
  
  
@@ -201,7 +201,7 @@ index 168ca0f228..7ad666faa2 100644
  /***********************************************************************
   *           mprotect_range
   *
-@@ -2018,6 +2157,14 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+@@ -1694,6 +1833,14 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
  
      size = ROUND_SIZE( base, size, host_page_mask );
  
@@ -216,7 +216,7 @@ index 168ca0f228..7ad666faa2 100644
      vprot = get_host_page_vprot( addr );
      prot = get_unix_prot( (vprot & ~clear) | set );
      for (count = i = 1; i < size / host_page_size; i++, count++)
-@@ -2050,6 +2197,12 @@ static BOOL set_vprot( struct file_view *view, void *base, size_t size, BYTE vpr
+@@ -1726,6 +1873,12 @@ static BOOL set_vprot( struct file_view *view, void *base, size_t size, BYTE vpr
      {
          if (enable_write_exceptions && is_vprot_exec_write( vprot )) vprot |= VPROT_WRITEWATCH;
          else if (use_kernel_writewatch && view->protect & VPROT_WRITEWATCH) vprot &= ~VPROT_WRITEWATCH;
@@ -229,7 +229,7 @@ index 168ca0f228..7ad666faa2 100644
          set_page_vprot( base, size, vprot );
      }
      return !mprotect_range( base, size, 0, 0 );
-@@ -2499,6 +2652,13 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+@@ -2244,6 +2397,13 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
      else host_end = ROUND_ADDR( base + size, host_page_mask );
  
      if (host_start < host_end) anon_mmap_fixed( host_start, host_end - host_start, PROT_NONE, 0 );
@@ -243,7 +243,7 @@ index 168ca0f228..7ad666faa2 100644
      set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );
      if (host_start < host_end) kernel_writewatch_register_range( view, host_start, host_end - host_start );
      return STATUS_SUCCESS;
-@@ -4735,6 +4895,24 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+@@ -4462,6 +4622,24 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
  #endif
  
  #ifdef WX_EXCLUSIVE_HOST
@@ -268,7 +268,7 @@ index 168ca0f228..7ad666faa2 100644
      if (is_vprot_exec_write( vprot ) && !(vprot & VPROT_GUARD))
      {
          /* another thread may already have flipped the page the way we need it */
-@@ -5275,6 +5453,16 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+@@ -4984,6 +5162,16 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
      }
      if (type & MEM_RESERVE_PLACEHOLDER && (protect != PAGE_NOACCESS)) return STATUS_INVALID_PARAMETER;
      if (!arm64ec_view && (attributes & MEM_EXTENDED_PARAMETER_EC_CODE)) return STATUS_INVALID_PARAMETER;
@@ -285,7 +285,7 @@ index 168ca0f228..7ad666faa2 100644
  
      /* Reserve the memory */
  
-@@ -5297,6 +5485,15 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+@@ -5006,6 +5194,15 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
              if (status == STATUS_SUCCESS)
              {
                  base = view->base;
@@ -302,7 +302,7 @@ index 168ca0f228..7ad666faa2 100644
              }
          }
 diff --git a/include/winternl.h b/include/winternl.h
-index 8b51f023c9..848dbe70ea 100644
+index e8f25f9b295..73a7f51689b 100644
 --- a/include/winternl.h
 +++ b/include/winternl.h
 @@ -2442,6 +2442,14 @@ typedef enum _MEMORY_INFORMATION_CLASS {

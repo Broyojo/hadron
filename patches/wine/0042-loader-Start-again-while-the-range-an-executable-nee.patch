@@ -1,28 +1,59 @@
-From 5daa5372a2df7833d397fdce58ddbdec56b7c49d Mon Sep 17 00:00:00 2001
+From ee67a0a7fd52ec002f99d7b91626fecf06e6a6d8 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 24 Oct 2026 14:42:17 -0400
 Subject: [PATCH] loader: Start again while the range an executable needs is in
  use.
 
-An executable without relocations must be mapped at its preferred base,
-which ntdll passes in WINEPRELOADRESERVE. On Linux the preloader reserves
-that range before libc runs. On arm64 macOS nothing runs that early, and
-libmalloc maps its metadata at a random 2MB-aligned address before main(),
-inside such a range above 4GB about a third of the time (Hogwarts Legacy,
-0x140000000-0x15bcc2000), and the image then fails to map with
-STATUS_CONFLICTING_ADDRESSES. The loader now checks the range first and
-starts again, up to 32 times, while something is in it.
+An executable without relocations must be mapped at its preferred base.
+On Linux the preloader reserves memory before libc runs. On arm64 macOS
+nothing runs that early, and libmalloc maps its metadata at a random
+2MB-aligned address before main(), inside such a range above 4GB about a
+third of the time (Hogwarts Legacy, 0x140000000-0x15bcc2000), and the
+image then fails to map with STATUS_CONFLICTING_ADDRESSES. The loader now
+checks the range, which ntdll passes in WINEPRELOADRESERVE, and starts
+again, up to 32 times, while something is in it.
+
+ntdll sets WINEPRELOADRESERVE for 32-bit executables only. On arm64
+macOS it now sets it for a 64-bit executable that is only mapped at its
+base as well: one without relocations or without a dynamic base, as
+map_image_view() decides.
 
 The range is not reserved: a reserved area there would be taken by the
-top-down allocations made before the image is mapped.
+allocations made before the image is mapped.
 
 Approach and analysis by matteofuligni (Hadron issue #95).
 ---
- loader/main.c | 51 +++++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 51 insertions(+)
+ dlls/ntdll/unix/loader.c | 14 +++++++++++
+ loader/main.c            | 51 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 65 insertions(+)
 
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 30bc63a7f9e..e5f62396255 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -501,6 +501,20 @@ NTSTATUS exec_wineloader( char **argv, int socketfd, const struct pe_image_info
+                   (UINT)pe_info->base, (UINT)(pe_info->base + pe_info->map_size) );
+         putenv( preloader_reserve );
+     }
++#if defined(__APPLE__) && defined(__aarch64__)
++    /* The arm64 macOS loader reserves nothing above 4GB, and macOS maps memory there before it
++     * runs; it starts again while the range of an executable that is only mapped at its base
++     * is in use (loader/main.c). */
++    else if (pe_info->base && !pe_info->wine_fakedll &&
++             ((pe_info->image_charact & IMAGE_FILE_RELOCS_STRIPPED) ||
++              !(pe_info->dll_charact & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)))
++    {
++        snprintf( preloader_reserve, sizeof(preloader_reserve), "WINEPRELOADRESERVE=%llx-%llx",
++                  (unsigned long long)pe_info->base,
++                  (unsigned long long)(pe_info->base + pe_info->map_size) );
++        putenv( preloader_reserve );
++    }
++#endif
+ 
+     return loader_exec( argv, machine );
+ }
 diff --git a/loader/main.c b/loader/main.c
-index 9e02a1a2aa..adbb635de4 100644
+index da0216e3f6e..9460aeac9dc 100644
 --- a/loader/main.c
 +++ b/loader/main.c
 @@ -36,6 +36,8 @@
@@ -34,7 +65,7 @@ index 9e02a1a2aa..adbb635de4 100644
  #endif
  
  #include "main.h"
-@@ -265,6 +267,54 @@ static void set_runtime_defaults( const char *exe, char *argv[] )
+@@ -261,6 +263,54 @@ static void set_runtime_defaults( const char *exe, char *argv[] )
      execv( exe, argv );  /* on failure, go on without the library path */
  }
  
@@ -89,7 +120,7 @@ index 9e02a1a2aa..adbb635de4 100644
  #endif
  
  /**********************************************************************
-@@ -276,6 +326,7 @@ int main( int argc, char *argv[] )
+@@ -272,6 +322,7 @@ int main( int argc, char *argv[] )
  
  #if defined(__APPLE__) && defined(__aarch64__)
      set_runtime_defaults( get_self_exe(), argv );

@@ -1,8 +1,8 @@
-From 4c3f262628f29645a6a689d046ba9e815cdbd891 Mon Sep 17 00:00:00 2001
+From 82c04f140856057914364b913412f1fa48f71371 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 15 Oct 2026 13:53:11 -0400
-Subject: [PATCH 30/33] winemac.drv: Change the display mode of any display,
- not only the main one.
+Subject: [PATCH] winemac.drv: Change the display mode of any display, not only
+ the main one.
 
 macdrv_ChangeDisplaySettings skipped every display but the main one with
 a FIXME and still returned DISP_CHANGE_SUCCESSFUL. A game that set a
@@ -18,7 +18,7 @@ the original and pending modes per display.
  1 file changed, 47 insertions(+), 17 deletions(-)
 
 diff --git a/dlls/winemac.drv/display.c b/dlls/winemac.drv/display.c
-index 68408ee848..c0016a13bb 100644
+index 68408ee848d..c0016a13bb8 100644
 --- a/dlls/winemac.drv/display.c
 +++ b/dlls/winemac.drv/display.c
 @@ -738,6 +738,33 @@ static CGDisplayModeRef find_best_display_mode(DEVMODEW *devmode, CFArrayRef dis

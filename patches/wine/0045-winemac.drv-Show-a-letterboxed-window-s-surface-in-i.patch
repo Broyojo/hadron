@@ -1,0 +1,97 @@
+From 9654eb025565ff826b4e4253bebc1f3a7bd02e81 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 16 Nov 2026 19:29:45 -0500
+Subject: [PATCH] winemac.drv: Show a letterboxed window's surface in its
+ letterbox.
+
+A fullscreen window at a display mode of another shape than the screen's
+covers the whole screen, but its window surface is the size of the mode
+scaled to fit, 3024x1701 pixels for 1280x720 on a 3024x1964 panel, with
+its origin at the letterbox's top-left corner. The content view's layer
+showed the surface from the top of the screen instead: what a program
+drew with GDI, or a frame before its first present, appeared above its
+place, and a strip of it showed above the picture of a client surface,
+which win32u places in the letterbox.
+
+Keep the letterbox rect in the content view and show the surface there
+with the layer's contentsRect. The surface is drawn unscaled from the
+contents rect's corner, so a contents rect the size of the layer that
+starts the letterbox's offset before the surface places it; what lies
+past the letterbox, the surface's rounding and its edge pixels, which a
+contents rect past the unit square repeats outward, is under the black
+bars.
+---
+ dlls/winemac.drv/cocoa_window.m | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 76dd41408ad..13ba1919420 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -236,6 +236,7 @@ @interface WineContentView : WineBaseView <NSTextInput, NSViewLayerContentScaleD
+     CGRect surfaceRect;
+     IOSurface* _ioSurface;
+     BOOL _hasShape;
++    CGRect letterboxRect;
+ 
+     NSMutableArray* glContexts;
+     NSMutableArray* pendingGlContexts;
+@@ -267,6 +268,7 @@ - (void) addExternalMetalView:(int)delta;
+     - (BOOL) hasExternalMetalView;
+     - (void) addCALayerHostViewWithContextId:(CAContextID)contextId;
+     - (void) removeCALayerHostView:(CAContextID)contextId;
++    - (void) setLetterboxRect:(CGRect)rect;
+ 
+ @end
+ 
+@@ -405,6 +407,23 @@ - (void) updateLayer
+ 
+         layer.position = surfaceRect.origin;
+         layer.contents = _ioSurface;
++        /* A letterboxed window's surface starts at its letterbox rect's corner,
++           not at the view's. The surface is shown unscaled from the corner of
++           the contents rect (NSViewLayerContentsPlacementTopLeft): one the
++           size of the layer's bounds that starts the letterbox's offset before
++           the surface shows it there. What lies past the letterbox, the
++           surface's rounding and the edges that a contents rect past the unit
++           square repeats outward, is under the black bars of -setMask:. */
++        if (!CGRectIsEmpty(letterboxRect) && _ioSurface)
++        {
++            CGFloat width = _ioSurface.width / layer.contentsScale;
++            CGFloat height = _ioSurface.height / layer.contentsScale;
++
++            layer.contentsRect = CGRectMake(-letterboxRect.origin.x / width, -letterboxRect.origin.y / height,
++                                            layer.bounds.size.width / width, layer.bounds.size.height / height);
++        }
++        else
++            layer.contentsRect = CGRectMake(0, 0, 1, 1);
+         [window windowDidDrawContent];
+ 
+         // If the window may be transparent, then we have to invalidate the
+@@ -422,6 +441,13 @@ - (void) setSurfaceRect:(CGRect)rect
+         surfaceRect = rect;
+     }
+ 
++    - (void) setLetterboxRect:(CGRect)rect
++    {
++        if (CGRectEqualToRect(letterboxRect, rect)) return;
++        letterboxRect = rect;
++        [self setNeedsDisplay:YES];
++    }
++
+     - (void) setIOSurface:(IOSurface*)surface
+     {
+         [surface retain];
+@@ -2521,6 +2547,9 @@ - (void) setMask:(CGRect)rect
+         int count = 0;
+ 
+         rect = CGRectIntersection(rect, bounds);
++        if (CGRectIsNull(rect))
++            rect = CGRectZero;
++        [view setLetterboxRect:rect];
+ 
+         /* Replace the bars at once, without Core Animation's implicit fades. */
+         [CATransaction begin];
+-- 
+2.54.0 (Apple Git-157)
+

@@ -710,7 +710,8 @@ libraries.
 
 Wine patch 0024 registers 14.51.36247, which is what the redistributable Steam installs today
 writes. The entries are written without overwriting, as upstream has them, so a prefix made
-earlier keeps 14.42; such a prefix has to be made again for a game that needs it.
+earlier keeps 14.42; such a prefix has to be made again for a game that needs it. Upstream made
+the same change in Wine 11.22 (08cb610c0d), and the patch left the queue (#73).
 
 That was not enough for Astroneer: its launcher still asked. It wants 14.24.28127.4 or newer
 and then loads `msvcp140_2.dll` and `vcruntime140_1.dll`, and the tester's logs show it never
@@ -785,7 +786,7 @@ attempt correctly failed, but the search advanced by only 64 KiB. The two
 allocations made 7,372,814 and 7,372,815 failed attempts. The stall was in Wine's
 address search, not FEX compilation or a graphics driver.
 
-Wine patch 0025 queries the overlapping native region after a mapping collision
+Wine patch 0024 queries the overlapping native region after a mapping collision
 and skips to its aligned boundary in the search direction. It descends through
 Mach submaps at the candidate address and requests short region information, which
 does not ask for resident-page statistics. The caller still enforces allocation
@@ -868,7 +869,7 @@ pauses and lets go of the cursor when Steam tells it the overlay is open; Subnau
 Dash carried on, with the cursor locked in the middle of the window, and the overlay could only
 be used after pausing the game. lsteamclient sets the event
 `__wine_steamclient_GameOverlayActivated` while the overlay is open, and nothing in Hadron's Wine
-read it. Wine patch 0026 makes winemac.drv act on it. A thread in a game started by Steam waits
+read it. Wine patch 0025 makes winemac.drv act on it. A thread in a game started by Steam waits
 for the event, so nothing is polled while the overlay is closed. While it is set, key presses,
 mouse buttons, movement and scrolling are not sent to the game; key releases are, and held mouse
 buttons are released, so nothing stays down. The game's clipping rectangle is lifted and
@@ -1069,7 +1070,7 @@ composited with the frame's alpha, and a frame with alpha 0 came out black. Mesa
 extension only on Wayland, and Wine's Mac driver did not ask for it.
 
 Mesa patch 0084 offers `EGL_EXT_present_opaque` for window surfaces on a Metal layer, and Wine
-patch 0028 creates every OpenGL window surface with it, as Wine's Wayland driver does. The
+patch 0027 creates every OpenGL window surface with it, as Wine's Wayland driver does. The
 swapchain is then opaque, and KosmicKrisp drops the alpha when it copies the frame to the
 drawable. What the application reads back is unchanged: the alpha stays in its framebuffer.
 
@@ -1220,7 +1221,7 @@ after two seconds. Shell argument handling and arm64 spawn selection are unchang
 
 Inactive fullscreen windows also had an ordering defect: `minimumLevelForActive:`
 returned normal level under Wine's inactive-floating policy, but
-`adjustWindowLevels:` then raised floating windows above the Dock. Wine patch 0029
+`adjustWindowLevels:` then raised floating windows above the Dock. Wine patch 0028
 applies that floor only when the computed minimum exceeds normal. An inactive game
 stays at level 0; active fullscreen and permitted windowed topmost windows retain
 their elevation.
@@ -1283,21 +1284,21 @@ saved settings asked for resolution 5 of that monitor's list, 3008x2005. Three t
 - Wine's Mac driver changed the mode of the main display only. For any other display it logged
   `Changing non-primary adapter settings is currently unsupported` and still returned success:
   the game sized its window to 3008x2005 on a monitor that stayed 1920x1280.
-- With that fixed (Wine 0030), macOS switched the BenQ to 3008x2005, a Retina mode with a
+- With that fixed (Wine 0029), macOS switched the BenQ to 3008x2005, a Retina mode with a
   6016x4010 backing at 100 Hz, and moved the larger display from above the built-in one to its
-  right (-204,-1280 to 1512,-1280). The window stayed behind. Wine 0031 moves windows placed at a
+  right (-204,-1280 to 1512,-1280). The window stayed behind. Wine 0030 moves windows placed at a
   display's top-left corner with it, and back when the mode is restored.
 - Even then the game showed only a sliver, and every switch to another app restored the mode and
   every return set it again. Real mode changes on macOS capture the display, rearrange displays,
   give Retina displays scaled modes and offer modes larger than the desktop (the BenQ's list ran
   to 3840x2560 while its desktop is 1920x1280).
 
-So Hadron no longer changes display modes at all (Wine 0033): win32u's emulated mode changes,
+So Hadron no longer changes display modes at all (Wine 0032): win32u's emulated mode changes,
 which upstream offers as the `EmulateModeset` option, are on by default on macOS. A game sees
 modes up to each monitor's desktop size, a mode change succeeds at once and leaves the display
 alone, and the game's window covers the monitor with its picture scaled and its aspect ratio kept.
 That is what native Mac games do: they render at a size of their choice and let the system scale
-it. `EmulateModeset=n` in `HKCU\Software\Wine\X11 Driver` turns it off; 0030 and 0031 then make
+it. `EmulateModeset=n` in `HKCU\Software\Wine\X11 Driver` turns it off; 0029 and 0030 then make
 real mode changes work on every display.
 
 Measured with test programs (`fsmode.exe`: a mode change and a popup window covering the
@@ -1310,7 +1311,7 @@ games that set brightness with gamma ramps get no effect, as under Proton. Rende
 display's full pixel size is #71; fullscreen in its own Space is #72.
 
 The built-in display of an Apple silicon Mac has no EDID Wine can read, and the one Wine
-generates for it was named "Wine Monitor"; games now list it as "Built-in" (Wine 0032).
+generates for it was named "Wine Monitor"; games now list it as "Built-in" (Wine 0031).
 ## .NET: mscoree was switched off for every game (fixed, #37)
 
 Fable Anniversary exited at once (issue #57): `Library mscoree.dll (which is needed by ... Fable
@@ -1340,14 +1341,14 @@ it; whether Fable's mixed native and .NET code runs on Wine Mono is the next que
 ## macOS partial decommit retained stale guest data (#42)
 
 On a 16K host, decommitting/recommitting a 4K boundary page retained old bytes.
-Wine patch 0034 clears partial host pages through temporary writable aliases,
+Wine patch 0033 clears partial host pages through temporary writable aliases,
 without relaxing committed neighbours' protections; MAP_JIT uses per-thread write
 mode. Both aliases are prepared before clearing, so preparation failure leaves
 contents intact. Alias writes invalidate the original instruction-cache range too.
 Whole-view decommit still remaps the rounded host range, including
 a view smaller than one host page, to release its backing. Other hosts keep their prior behaviour.
 
-Patch 0035 makes it cheap: a host page that is already writable, the usual case, is cleared in
+Patch 0034 makes it cheap: a host page that is already writable, the usual case, is cleared in
 place with no alias, and mprotect runs afterwards only when the host page's protection changes.
 Aliases remain for read-only, executable and no-access host pages. Whole and partial decommits
 take one path: a boundary host page is replaced whole only when nothing else in it is in use (no
@@ -1357,8 +1358,8 @@ a host page today; the check does not rely on that.
 
 Decommit plus recommit, x86_64 / ARM64 on an M2 Pro (`tests/win/decommit-bench.c`): a 4K page
 inside a host page 1.2 / 0.8 us before, 5.2 / 4.7 us with aliases always, 1.3 / 0.9 us with
-0035; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12 and 2.1 / 1.7 us; a 4K page alone
-in its host page 3.2 / 2.9 us with 0035, the cost of a whole host page.
+0034; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12 and 2.1 / 1.7 us; a 4K page alone
+in its host page 3.2 / 2.9 us with 0034, the cost of a whole host page.
 `tests/win/decommit-neighbours.c` covers the alias path (read-only, executable and no-access
 neighbours), which main fails, and a decommit at the end of a view shorter than its host page.
 
@@ -1366,7 +1367,7 @@ The zero/preservation regression covers 19 cases on x86_64 and i386, including a
 whole 4K views with RW, read-only and RX protections. The Windows ARM64 concurrent read-only/RX-neighbour tests reject
 protected writes and preserve adjacent data/code; a delayed old RW-protection build
 reproduced the race. A native MAP_JIT mechanism probe passes; full Wine JIT-view integration is not covered.
-Subnautica, Teardown and Portal 2 played normally on 0034 (2026-10-16).
+Subnautica, Teardown and Portal 2 played normally on 0033 (2026-10-16).
 
 ## Media Foundation could not play anything: no GStreamer (fixed, #38)
 
@@ -1445,7 +1446,7 @@ with the end of `.data`, so `map_file_into_view` refused ("unaligned shared mapp
 image did not load. Any image or DLL with a writable shared section whose address, or whose
 offset in the shared-section file, is not a multiple of 16 KB failed the same way.
 
-Wine patch 0036 maps such a section as a private copy, with a FIXME in the log, and keeps the
+Wine patch 0035 maps such a section as a private copy, with a FIXME in the log, and keeps the
 real shared mapping wherever the section lines up with host pages. One process sees exactly
 what Windows gives it. Two instances of the image do not share the section's data: a second
 one starts from the section's initial contents. A correct general answer is not possible at
@@ -1504,7 +1505,7 @@ A game used to see a Retina display at its size in points, 1512×982 for a MacBo
 3024×1964 panel, and macOS scaled its picture up 2× (issue #71). Windows shows a high-density
 display at its pixels and lets a game pick a lower mode, so Hadron does too: Wine's Mac driver has
 a Retina mode, read from the `RetinaMode` value of `HKCU\Software\Wine\Mac Driver`, and Wine patch
-0037 makes it the default. A game that draws at the desktop's size now draws four times the pixels;
+0036 makes it the default. A game that draws at the desktop's size now draws four times the pixels;
 its own resolution setting goes back to 1512×982 or lower, and MetalFX upscaling (Direct3D 10 and
 11) is another way back. `RetinaMode=n` in a prefix's registry still gives points.
 
@@ -1519,12 +1520,12 @@ With it, `tests/win/display-report.c` reports the built-in display as 3024×1964
 looks (monitor rectangle, current mode, mode list up to 3024×1964, `SM_CXSCREEN`), against 1512×982
 with `RetinaMode=n`. `HORZRES` reported 6048: winemac doubled the size win32u returns, a 2018 change
 from when that size was in points, which it no longer is in Retina mode (upstream too). Wine patch
-0038 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL (Zink) run
+0038 drops the doubling (upstream since Wine 11.22, d9590c210a; dropped from the queue, #73). The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL (Zink) run
 in both modes at 120 fps (2026-10-17). A windowed game is half as
 large on screen as before, since its pixels are now the display's.
 
 A game's own cursor was half as large too (issue #98): winemac made the Mac cursor from its image
-at half its pixel size in points, as for windows. Wine patch 0039 makes a cursor cover a point for
+at half its pixel size in points, as for windows. Wine patch 0037 makes a cursor cover a point for
 each of its pixels, as the Mac's own cursors and every cursor without Retina mode do; macOS scales
 it up on the display. `tests/win/cursor-size.c` sets a 32×32 cursor with its hot spot at (5,9) and
 `tests/mac/nscursor-log.m` logs the NSCursor made from it: 16×16 points with the hot spot at
@@ -1626,7 +1627,8 @@ top-down request that may go there, and only then the whole range: all eight lan
 0x7ffd9f000000 and 0x7ffe9f000000. A top-down request bounded below 4 GB (`VirtualAlloc2` with
 `HighestEndingAddress`) is still placed there, and 32-bit programs, whose bound is 2 or 4 GB, are
 unchanged. The reporter's own fix, a 4 GB floor for unbounded top-down requests, moved the same
-reservations and got BELOW to its menu.
+reservations and got BELOW to its menu. Wine 11.22's rework of the reserved areas gives top-down
+requests a range of their own that grows downward, and the patch left the queue (#73).
 
 Checked with the change, on an M2 Pro: the decommit tests of #42 as 32- and 64-bit programs,
 `shared-section` (#43), `hello` in all three architectures, `bench`, `d3d11tri` and `d3d9tri`.
@@ -1646,7 +1648,7 @@ that fault was dispatched the same way, and so on.
 The bitmap has one bit per 4 KB page up to Wine's address space limit, rounded up to a host page.
 `tests/win/is-ec-code.c` calls `RtlIsEcCode` from an x64 program: on main's Wine it answers for
 0x7ffffffff000 and faults at 1 << 47, at 0x7ffff0000000, the first byte after the bitmap. Wine
-patch 0041 sizes the bitmap for the whole 47-bit user space whatever the host's limit (4 GB of
+patch 0038 sizes the bitmap for the whole 47-bit user space whatever the host's limit (4 GB of
 address space, as before on this Mac) and has `RtlIsEcCode` return FALSE above it; the test then
 passes for 1 << 47, the value from the report and all bits set. Whether Hogwarts Legacy gets
 further with this is not known yet: the reporter has to try it. The first problem in #95, the
@@ -1692,7 +1694,7 @@ Vulkan loader and fell back to Apple's OpenGL 4.1, which Hadron does not otherwi
 M2 Pro the windowed game drew a black frame there; through `scripts/program-run` it reached its
 menu, windowed and fullscreen.
 
-Wine patch 0043 makes the loader set the same defaults when `WINE_MAC_OPENGL` is unset and the
+Wine patch 0040 makes the loader set the same defaults when `WINE_MAC_OPENGL` is unset and the
 runtime's Zink is next to it, then start again, since dyld reads `DYLD_FALLBACK_LIBRARY_PATH` only
 when a process starts. Settings already in the environment are kept, so launches through `play`,
 which sets them all, do not start again. Those that do: `wine` run by hand, `scripts/wine-run`,
@@ -1714,7 +1716,7 @@ active, Wine sends each key except the modifiers through it: the window gets `WM
 arrow) comes back as a normal `WM_KEYDOWN`. SDL3 drops `VK_PROCESSKEY` keys, and Daemon keeps
 SDL's text input on, so the letters arrived only as text. Upstream Wine fixed the test in
 a07e981c ("imm32: Do not classify aliased HKLs as IME", 2026-10-01): an IME layout id is
-`0xe0xx`. Wine patch 0044 is that commit.
+`0xe0xx`. Wine patch 0044 was that commit, until the move to Wine 11.22 (#73).
 
 With one U.S. layout, as on this Mac, nothing changes: Wine answers SDL's keymap questions
 correctly (scancode 0x11 is VK 'W' and types `w`, and so on for A, S and D). Not reproduced yet:
@@ -1761,7 +1763,7 @@ emulated mode changes the two sizes are arbitrary: 96 × 2628 / 1025 and, on a M
 not fit, and `make_ratio` asserted. Retina mode, in which the physical size is in pixels, doubles
 the numerator and makes it likelier. Upstream Wine has the same code.
 
-Wine patch 0045 makes `make_ratio` return the closest fraction whose terms fit, from the
+Wine patch 0041 makes `make_ratio` return the closest fraction whose terms fit, from the
 continued fraction (the last convergent or the largest semiconvergent that fits, whichever is
 closer), and keeps the exact fraction whenever it fits. Over 2,424 combinations of DPI, screen
 and mode width it matched a brute-force search for the best such fraction every time; the worst
@@ -1798,7 +1800,7 @@ range to the new process in `WINEPRELOADRESERVE`; on Linux the preloader reserve
 runs, but on arm64 macOS nothing runs that early. `tests/win/fixed-base.c` builds an executable
 with the same base and size and no relocations: on main it failed 11 of 30 direct starts.
 
-Wine patch 0046, the reporter's approach moved into the loader: before anything else, `main()`
+Wine patch 0042, the reporter's approach moved into the loader: before anything else, `main()`
 looks up the range with `mach_vm_region` and, while something is in it, starts the loader again
 (at most 32 times), which draws new placements. The range is not reserved, as the reporter
 pointed out: a reserved area there would be taken by the top-down allocations made before the
@@ -1957,7 +1959,7 @@ point the Mac's pointer moved became two counts of raw input. On Windows raw inp
 device's movement and does not depend on the display's pixel density. Wine's X11 and Wayland
 drivers already send it separately (`SEND_HWMSG_RAWINPUT`); winemac did not.
 
-Wine patch 0047 sends it in points, separately from the cursor, which stays in pixels and under
+Wine patch 0043 sends it in points, separately from the cursor, which stays in pixels and under
 the Mac's pointer. A first version took it from the events' deltas, and Portal 2's view snapped
 back with every move: the game puts the cursor back in the middle after each movement, and the
 deltas of the first event after `CGWarpMouseCursorPosition` include the warp (the comment in
@@ -2005,34 +2007,35 @@ belonged. Four things in winemac were wrong:
 - They were upside down. They were a `CAShapeLayer` path, and copying the content view layer's
   `geometryFlipped` does not make a path follow it. A native test (a flipped, layer-backed view as
   winemac's) put a path at y 0 to 50 at the bottom of the view; a plain layer framed with
-  `-[NSView convertRectToLayer:]` lands where the view's coordinates say. Wine patch 0050 draws the
+  `-[NSView convertRectToLayer:]` lands where the view's coordinates say. Wine patch 0044 draws the
   bars that way, from the window rect relative to the window, in points.
 - They were never taken down: `BOOL fullscreen = swp_flags & WINE_SWP_FULLSCREEN` went into a
   one-bit field, and the flag is bit 31, so the field always held 0 and leaving fullscreen did not
   look like a change. Upside down, the bar left behind was at the bottom of the screen-sized layer,
   outside the smaller window that came back; the right way up it blacked out the top 132 rows of
-  d3d11fs's 640×480 window. 0050 stores a boolean, as
+  d3d11fs's 640×480 window. 0044 stores a boolean, as
   winex11 does.
 - The window surface was anchored at the top of the screen. Its scaled surface starts at the
   letterbox's corner and is the letterbox's size (3072×1920 for 3024×1701); the content view's layer
-  showed it from the top of the screen, 1964 rows tall. Wine patch 0051 crops it to the letterbox and
+  showed it from the top of the screen, 1964 rows tall. Wine patch 0045 crops it to the letterbox and
   places it there with the layer's `contentsRect`, whose edge pixels, repeated outward past the
-  unit square, are under the bars.
+  unit square, are under the bars. Since Wine 11.22 the surface is an IOSurface and is not cropped
+  (#73).
 
 That left a strip of the window surface beside the picture with Retina mode off: at 1024×768 the
 window is 1310 points wide, from 101 to 1411, and the Direct3D view 1309, to 1410. win32u maps the
 window's edges one by one (`map_monitor_rect`, rounding each) but placed a client surface by
 scaling the present rect's size and adding the mapped origin (`get_client_surface_rects`), which
 rounds differently; in Retina mode the same mode gives a surface a pixel wider than the window, under
-the bar. Wine patch 0052 maps the present rect's edges as the window's.
+the bar. Wine patch 0046 maps the present rect's edges as the window's.
 
 Measured on the built-in display, Retina mode on, capturing only the test's own window
 (`screencapture -l`) and counting rows and columns of its colour, 2026-11-16;
 `tests/mac/picture-bounds.swift` prints the picture's bounds and the black bars around it in such a
 capture, and on 2026-11-23 gave the same numbers for d3d9fs and letterbox-gdi at 1280×720. `tests/win/d3d9fs.c`
 (wined3d), `tests/win/d3d11fs.c` (DXMT) and `tests/win/letterbox-gdi.c`, which sets the present rect
-itself, draws only with GDI and marks the window's top-left quarter. "After" is with 0050 to 0052;
-in Retina mode 0052 changes none of these numbers.
+itself, draws only with GDI and marks the window's top-left quarter. "After" is with 0044 to 0046;
+in Retina mode 0046 changes none of these numbers.
 
 | Test | Before | After |
 |---|---|---|
@@ -2042,11 +2045,11 @@ in Retina mode 0052 changes none of these numbers.
 | letterbox-gdi 1280×720 | surface from row 0, top-anchored; quarter rows 0–848 | quarter columns 0–1509, rows 132–980 (half of 3024×1701, then a blended line) |
 | letterbox-gdi 1024×768 | surface columns 406–2687 | quarter columns 203–1510, rows 0–979 |
 | 1512×982, 3024×1964 (the screen's shape) | whole window | unchanged |
-| d3d11fs back in a window | whole window | whole window (top 132 rows black with 0050's bars and the old flag) |
+| d3d11fs back in a window | whole window | whole window (top 132 rows black with 0044's bars and the old flag) |
 | d3d11fs 1280×720, Retina mode off | black 0–131, picture 132–1831, black 1832–1963 (the bars, upside down, are alike) | same |
 | letterbox-gdi 1280×720, Retina mode off | quarter rows 132–849, surface ends at row 1701 | quarter rows 132–981 |
 | letterbox-gdi 1280×720 norect (a borderless popup over the monitor, no present rect) | | black 0–131, picture 132–1832, black 1833–1963: letterboxed like the rest |
-| d3d11fs 1024×768, Retina mode off | picture columns 202–2819 | 0050 and 0051: a 2-pixel strip of surface at 2820–2821; with 0052: picture 202–2821 (1310 points), black 0–201, 2822–3023; d3d9fs the same |
+| d3d11fs 1024×768, Retina mode off | picture columns 202–2819 | 0044 and 0045: a 2-pixel strip of surface at 2820–2821; with 0046: picture 202–2821 (1310 points), black 0–201, 2822–3023; d3d9fs the same |
 
 The issue also saw the Dock and asked for the displays to be captured. winemac captures no display
 for fullscreen at any mode (that is the `CaptureDisplaysForFullscreen` option, off by default); it
@@ -2066,7 +2069,7 @@ came back letterboxed after Cmd-Tab out and back (owner's run, 2026-11-23).
 Not tested: mtld3d 0.15's patch 0004 and FNaF (#136), an external display, and Vulkan and D3D12
 (vkd3d-proton) programs, which take their surfaces' place from the same client rect.
 
-Left open: 0050 places the letterbox at the window rect clipped to the screen. A window whose
+Left open: 0044 places the letterbox at the window rect clipped to the screen. A window whose
 window rect starts past the monitor's edge, a decorated window whose client area fills the mode,
 would have its surface anchored at the clipped corner rather than at the surface's own origin (the
 virtual visible rect's, in `get_surface_rect`). Whether such a window reaches the driver as
@@ -2094,7 +2097,7 @@ What the stub did lose is the reset between streams. With the bit reservoir (the
 encoder's streams, and what FAudio declares for xWMA), the bytes of a frame that continues in
 the next packet stay in libavcodec, so a second stream on the same decoder came out one frame
 longer (24576 samples instead of 23552 for `wmaencdata.bin`), the first frame made from the end
-of the old stream, and a flush did not drop it. Wine patch 0053 drains and flushes the
+of the old stream, and a flush did not drop it. Wine patch 0047 drains and flushes the
 `wg_transform`, as the video decoder does; the second stream then gives 23552, after a drain and
 after a flush. FAudio does not drain between the buffers of a voice (only when the voice is
 destroyed), so a second buffer queued on one xWMA voice still starts with that extra frame; that
@@ -2142,11 +2145,11 @@ succeeds. In Wine the server's `set_named_pipe_info` took only named pipe ends a
 `STATUS_NOT_IMPLEMENTED`. Neither upstream Wine (to 11.22, which moved setting the mode into the
 server's `set_file_info`) nor Proton's Wine (`bleeding-edge`) handles it.
 
-Wine patch 0054 answers on such a handle what a pipe from `CreatePipe` answers: its mode is byte mode,
+Wine patch 0048 answers on such a handle what a pipe from `CreatePipe` answers: its mode is byte mode,
 blocking; setting that mode succeeds, message mode fails with `STATUS_INVALID_PARAMETER` as on any
 byte pipe, and the access checks are the named pipe's (`FILE_READ_ATTRIBUTES` to query,
 `FILE_WRITE_ATTRIBUTES` to set). The server answers it, from the file's `st_mode`, so ntdll now sends
-`FilePipeInformation` queries there for every handle. Patch 0055 gives the standard handles that are
+`FilePipeInformation` queries there for every handle. Patch 0049 gives the standard handles that are
 pipes the access `CreatePipe` gives the same end: the read end also `FILE_WRITE_ATTRIBUTES`, the
 write end also `FILE_READ_ATTRIBUTES`. Without it `GetNamedPipeHandleState` on stdout failed with
 `ERROR_ACCESS_DENIED`. Each end of a CreatePipe pipe then has the same access as the standard handle
@@ -2174,7 +2177,7 @@ Client itself was not started with the fix.
 
 Black Myth: Wukong never started: `wine: 140000000-16c3d0000 still in use after 32 restarts`, then
 `failed to create main module ... b1-Win64-Shipping.exe, status c0000018`. Its 708 MB executable has
-no relocations, so it needs 0x140000000-0x16c3d0000, and patch 0046 (#56) starts the loader again
+no relocations, so it needs 0x140000000-0x16c3d0000, and patch 0042 (#56) starts the loader again
 while anything is mapped there. What was there every time is the main thread's stack. Listing the
 regions of a plain program at `main()` (`mach_vm_region_recurse`, 400 starts) shows macOS placing
 the stack's top at random between 0x16ae10000 and 0x16fddc000, with 8 MB of stack below it and,
@@ -2188,7 +2191,7 @@ An executable that sets its main thread's stack size (`ld -stack_size`, `LC_MAIN
 that much stack and one guard page below it, nothing more, and `setrlimit(RLIMIT_STACK)` then fails
 with `EINVAL`. Wine never sets `RLIMIT_STACK`, and no Windows code runs on that stack: on macOS the
 process's first thread runs the Core Foundation run loop (`apple_main_thread`), and Wine's own main
-thread is a new one with a Windows stack. Wine patch 0056 links the arm64 loader with `-stack_size
+thread is a new one with a Windows stack. Wine patch 0050 links the arm64 loader with `-stack_size
 0x800000`, the 8 MB it had. The stack region is then 8 MB and 16 KB; 104 of 300 starts of a probe
 linked that way had it in Wukong's range, and the loader starts again for those as it does for
 libmalloc's region. The patch also touches `loader/main.c`'s comment, so that an existing build
@@ -2212,3 +2215,93 @@ With the release runtime and the loader signed as its bundle is, 2026-11-23:
 
 In a running Wine process `vmmap` shows thread 0's stack as 8192K with a 16K guard. The game itself
 was not started.
+
+## Wine 11.22 (#73)
+
+Wine moved from 6880117619 (wine-11.18-246) to the wine-11.22 release (9f8c4ae4d3, 2026-11-13),
+1034 upstream commits, and the queue from 56 patches to 51. Upstream reworked the address space in
+those releases (Alexandre Julliard, from 35a1ff5be8 to 5ab6d627ee): the reserved areas are one
+array of states, the whole low 8 GB is reserved on 64-bit, top-down allocations take a range of
+their own below 0x7ff600000000 that grows down 4 GB at a time, allocations and executable bases are
+randomized, and `WINEPRELOADRESERVE` is set for 32-bit executables only. winemac's window surfaces
+became IOSurfaces (b77a5f9b60), and setting `FilePipeInformation` moved into the server's
+`set_file_info` (b7547f964c).
+
+Dropped, as upstream has them:
+
+| Old | Patch | Upstream |
+|---|---|---|
+| 0024 | wine.inf: VC runtime 14.51.36247 (#26) | 08cb610c0d, the same values with Version "14.51.36247.00" |
+| 0038 | winemac.drv: HORZRES and VERTRES not doubled in Retina mode (#45) | d9590c210a |
+| 0040 | ntdll: top-down allocations above 4 GB (#48) | superseded by the rework (1cae1f531b, 3480ed6ff1, 169fba59a7): a top-down request no longer falls into the loader's low reserve |
+| 0044 | imm32: aliased HKLs not an IME (#52) | a07e981c59, of which it was a copy |
+| 0048 | winemac: autorelease pools in the WineMetalSwapChain wrappers | 1300ec99c7 |
+| 0049 | ntdll: threadpool worker timeout 60 s | c37cb58e4c |
+
+Adapted to upstream's new code:
+
+- 0003 (`WINE_HIGH_USER_SHARED_DATA`, the `--dev` build): `mmap_init()` is gone; the low allocation
+  range now starts empty at 0x7000000000 and grows up from there. Compiled, not run.
+- 0005 (16 MB below the top): only the lower host limit is left, as there is no top-down area at the
+  top any more. A top-down request that does not fit the new range still goes to the highest free
+  address.
+- 0042, before 0046 (the loader starts again while a fixed-base range is in use, #56, #71): ntdll set
+  no `WINEPRELOADRESERVE` for a 64-bit executable any more, so the loader had no range to check. On
+  arm64 macOS ntdll now sets it for a 64-bit executable that is only mapped at its base (relocations
+  stripped or no dynamic base, the test `map_image_view` makes since 8eb8dd9977).
+- 0045, before 0051 (the letterboxed surface, #66): the surface is an IOSurface given to the layer
+  whole, drawn unscaled from the corner (`NSViewLayerContentsPlacementTopLeft`), with no image to
+  crop. The surface is rounded up to 128 pixels, 3072×1920 for a 3024×1701 letterbox, so the
+  `contentsRect` is now worked out from the surface's size. Worked out from the letterbox's, as
+  before, the picture came out 17 rows too low: letterbox-gdi's marked quarter on rows 132–997
+  at 1280×720, against 132–980 with the old Wine.
+- 0048, before 0054 (pipe mode on Unix pipes, #70): `set_named_pipe_info` is gone; a Unix pipe or
+  socket now answers in the file object's `set_file_info`, whose request checks
+  `FILE_WRITE_ATTRIBUTES` itself.
+- Context only: 0002, 0014, 0015.
+
+New, 0051: `alloc_free_area`, upstream's new search of the free areas, searched each area top-down
+from the request's upper bound down to the area's own start, which can be below the request's lower
+bound. `tests/win/thread-allocation.c` asks `VirtualAlloc2` for 64 KB top-down within
+0x1000200000–0x10005fffff, inside the host's guard mapping at 0x1000000000–0x7000000000 (#28), and
+got 0x17fe00000. The patch starts the search at the lower bound, as the bottom-up search does; the
+request then fails, as it does with the old Wine. Upstream's master (2026-11-20) has the same code.
+
+The others moved down one to six numbers: 0025–0037 are 0024–0036, 0039 is 0037, 0041–0043 are
+0038–0040, 0045–0047 are 0041–0043, 0050–0056 are 0044–0050. The entries above name the new
+numbers, except where they describe a dropped patch.
+
+Tests, 2026-11-23, M2 Pro, macOS 27, one prefix per runtime (`scripts/wine-run`'s environment), the
+loader signed as its bundle is. "Old" is the runtime in `dist/` at the time (the 11.18 queue with
+0001–0056), "new" the same runtime with this Wine:
+
+| Test | Old | New |
+|---|---|---|
+| `wineboot -u`, `cmd /c ver`, syswow64 `cmd` through FEX | pass | pass |
+| hello, x64, i386, arm64 | pass | pass |
+| is-ec-code (#49) | pass | pass |
+| top-down-low-memory (#48) | pass, blocks from 0x7ffe7f000000 down | pass, blocks from 0x7ff56fe30000 down (no 0040) |
+| decommit-zero x64 and i386, decommit-neighbours (#42) | pass | pass |
+| shared-section, 4 KB alignment (#43) | private copy, as expected | the same |
+| wma-decoder-drain, arm64 and i686 (#63) | 23552 / 23552, second buffer 24576 | the same |
+| stdio-pipe: pipes x64 and arm64, FIFOs (#70) | 0 failures | 0 failures |
+| console-title through hadron-steam.exe (issue #184) | pass | pass |
+| fixed-base, Hogwarts' size, 30 direct / 30 as a child (#56) | 0 / 0 failed | 0 / 0 failed |
+| fixed-base, Wukong's size, the same (#71) | 0 / 0 failed | 0 / 0 failed |
+| odd-mode-dpi (#54), display-report (#45, `HORZRES` 3024) | pass | pass |
+| thread-allocation (#28) | pass | pass (without 0051: a bounded top-down request got 0x17fe00000) |
+| test-wine-address-search, host gaps injected, arm64 / x64 (#28) | pass, threads 0.46–0.54 / 0.96–1.06 ms | pass, 0.05–0.07 / 0.05–0.09 ms |
+| gltri (Zink), d3d11tri (DXMT), d3d9tri | 102, 121, 114 fps | 119, 121, 120 fps |
+| letterbox-gdi 1280×720 | picture rows 132–1832, quarter rows 132–980 | before the `contentsRect` fix: picture rows 132–1832, quarter 132–997; with it: not captured (the screen was locked) |
+
+Not tested: the final 0045 on screen, games, the `--dev` build, d3d11fs and d3d9fs, Vulkan and D3D12, Steam's overlay
+(0025), and the minimization and window-level patches (0026, 0028) against upstream's rework of
+inactive window commands (c63ff8b706 to 1fd19f83c8).
+
+What games may notice from upstream: allocations are placed at random, above 4 GB for a 64-bit
+program with high-entropy ASLR, and an executable with relocations and a dynamic base no longer
+loads at its preferred base.
+winemac draws window surfaces through IOSurfaces, sends IME updates from the main thread
+(8b2f29dfc2) and updates the clipboard asynchronously; win32u creates OpenGL compatibility contexts
+by default (72a296b688) and gives macOS extra root contexts (cc91be7b65); ARM64EC gained XSTATE in
+its contexts (fc0d79cf5b and the commits around it), which FEX's x64 code sees.

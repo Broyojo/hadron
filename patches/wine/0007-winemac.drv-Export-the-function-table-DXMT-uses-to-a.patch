@@ -1,4 +1,4 @@
-From 665043d5b2e9ec166cfb3a11bb1030b015e756a4 Mon Sep 17 00:00:00 2001
+From da38a455d8c80bcc2c82067b7386da6fe27a1da9 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 17:10:21 -0400
 Subject: [PATCH] winemac.drv: Export the function table DXMT uses to attach
@@ -12,10 +12,10 @@ upstream only creates the client view for GL/Vulkan surfaces.
  1 file changed, 82 insertions(+)
 
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 7d8bf1319e..cec76ccdb4 100644
+index e0258234620..18cf54a1f9f 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -2208,3 +2208,85 @@ void init_win_context(void)
+@@ -2203,3 +2203,85 @@ void init_win_context(void)
      pthread_mutex_init(&win_data_mutex, &attr);
      pthread_mutexattr_destroy(&attr);
  }

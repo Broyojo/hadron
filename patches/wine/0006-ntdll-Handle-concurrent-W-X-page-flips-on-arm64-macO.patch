@@ -1,4 +1,4 @@
-From 95e507f8b041f313ebe7e34015ad3a219f47c38d Mon Sep 17 00:00:00 2001
+From 2f7d6a254c87bace55aa07a812a2a30df4463694 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 15:12:20 -0400
 Subject: [PATCH] ntdll: Handle concurrent W^X page flips on arm64 macOS.
@@ -11,10 +11,10 @@ way it needs. Treat that as handled instead of an access violation.
  1 file changed, 21 insertions(+), 11 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index f6d1bb2a9d..168ca0f228 100644
+index 1d4e01c3d2a..9b38f03e89e 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -4737,20 +4737,30 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+@@ -4464,20 +4464,30 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
  #ifdef WX_EXCLUSIVE_HOST
      if (is_vprot_exec_write( vprot ) && !(vprot & VPROT_GUARD))
      {

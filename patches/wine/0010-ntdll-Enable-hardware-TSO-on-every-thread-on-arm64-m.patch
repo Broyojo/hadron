@@ -1,4 +1,4 @@
-From b60ba9005546b75fe8b8ea406f6b2cbaa868543a Mon Sep 17 00:00:00 2001
+From 600ed7581a00057037d07187958b729b3c54d11b Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 19:03:50 -0400
 Subject: [PATCH] ntdll: Enable hardware TSO on every thread on arm64 macOS.
@@ -16,7 +16,7 @@ without the entitlement.
  3 files changed, 30 insertions(+)
 
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 0ea41af7b6..c58238c265 100644
+index ca757a977e5..bdfaff93d57 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -1769,6 +1769,7 @@ void server_init_process_done(void)
@@ -27,7 +27,7 @@ index 0ea41af7b6..c58238c265 100644
      signal_start_thread( main_image_info.TransferAddress, peb, data->teb );
  }
  
-@@ -1804,6 +1805,7 @@ void server_init_thread( struct thread_data *data )
+@@ -1805,6 +1806,7 @@ void server_init_thread( struct thread_data *data )
      {
          init_teb_data( data );
          enable_custom_x18_abi();
@@ -36,7 +36,7 @@ index 0ea41af7b6..c58238c265 100644
      }
      else if (data->start)
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index e8f18db6f7..f06f2fa8c4 100644
+index 9914a45b935..2ebba141109 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -29,6 +29,9 @@
@@ -49,7 +49,7 @@ index e8f18db6f7..f06f2fa8c4 100644
  #include <pthread.h>
  #include <signal.h>
  #include <stdlib.h>
-@@ -1702,6 +1705,29 @@ void enable_custom_x18_abi(void)
+@@ -1716,6 +1719,29 @@ void enable_custom_x18_abi(void)
      }
      if (pset && pget && !pget()) pset( true );
  }
@@ -80,10 +80,10 @@ index e8f18db6f7..f06f2fa8c4 100644
  
  
 diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
-index 30130f93ba..2d7929ae2d 100644
+index 14a7b795000..bc7482f47ff 100644
 --- a/dlls/ntdll/unix/unix_private.h
 +++ b/dlls/ntdll/unix/unix_private.h
-@@ -357,8 +357,10 @@ extern void signal_init_process( TEB *teb );
+@@ -358,8 +358,10 @@ extern void signal_init_process( TEB *teb );
  extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg, TEB *teb );
  #if defined(__APPLE__) && defined(__aarch64__)
  extern void enable_custom_x18_abi(void);

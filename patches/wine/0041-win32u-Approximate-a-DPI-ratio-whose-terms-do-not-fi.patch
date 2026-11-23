@@ -1,4 +1,4 @@
-From 86439fdfa91ef511763f0f03aa23dd22d465bb16 Mon Sep 17 00:00:00 2001
+From 7d30baea92e675dba6d5a5885b46770cfd1f5941 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 24 Oct 2026 12:37:37 -0400
 Subject: [PATCH] win32u: Approximate a DPI ratio whose terms do not fit
@@ -15,10 +15,10 @@ whose terms fit instead, found from the continued fraction.
  1 file changed, 43 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/win32u/sysparams.c b/dlls/win32u/sysparams.c
-index 434494aa59..65ea8612cf 100644
+index 5282e029455..977100ec9f6 100644
 --- a/dlls/win32u/sysparams.c
 +++ b/dlls/win32u/sysparams.c
-@@ -323,12 +323,52 @@ static UINT gcd( UINT a, UINT b )
+@@ -324,12 +324,52 @@ static UINT gcd( UINT a, UINT b )
      }
  }
  

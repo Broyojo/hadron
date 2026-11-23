@@ -1,4 +1,4 @@
-From a6bff0590c5f5c08050a9ed3d05bfc23731b30dd Mon Sep 17 00:00:00 2001
+From 63b3b3d6087a22783df00f128a981020c2328d7b Mon Sep 17 00:00:00 2001
 From: Ivan Karpan <github@ivankarpan.com>
 Date: Mon, 12 Oct 2026 14:27:12 +0100
 Subject: [PATCH] winemac.drv: Honor the inactive floating policy before
@@ -12,7 +12,7 @@ Co-Authored-By: Codex <noreply@openai.com>
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index c64d67702f..4fe5dd2bda 100644
+index 822d770b949..7377a0bf604 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -618,7 +618,9 @@ - (void) adjustWindowLevels:(BOOL)active
@@ -27,5 +27,5 @@ index c64d67702f..4fe5dd2bda 100644
                  if (minFloatingLevel <= maxNonfloatingLevel)
                      minFloatingLevel = maxNonfloatingLevel + 1;
 -- 
-2.56.0
+2.54.0 (Apple Git-157)
 

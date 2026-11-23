@@ -1,4 +1,4 @@
-From c96d94ec75bdb0c94adb65d52868917108b57893 Mon Sep 17 00:00:00 2001
+From 3116c2e6fe2386e74eb723477440151bd7bb1ca8 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sat, 24 Oct 2026 02:07:05 -0400
 Subject: [PATCH] loader: Default to Hadron's Zink and KosmicKrisp when started
@@ -13,10 +13,10 @@ are missing and start again so that dyld reads the library path.
  1 file changed, 71 insertions(+)
 
 diff --git a/loader/main.c b/loader/main.c
-index a3fd3526e4..9e02a1a2aa 100644
+index cab06592772..da0216e3f6e 100644
 --- a/loader/main.c
 +++ b/loader/main.c
-@@ -199,6 +199,74 @@ static void *try_dlopen( const char *argv0 )
+@@ -195,6 +195,74 @@ static void *try_dlopen( const char *argv0 )
  }
  
  
@@ -91,7 +91,7 @@ index a3fd3526e4..9e02a1a2aa 100644
  /**********************************************************************
   *           main
   */
-@@ -206,6 +274,9 @@ int main( int argc, char *argv[] )
+@@ -202,6 +270,9 @@ int main( int argc, char *argv[] )
  {
      void *handle;
  

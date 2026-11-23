@@ -1,4 +1,4 @@
-From 64080ad008ec878a68dc7b178d40bacb6180d255 Mon Sep 17 00:00:00 2001
+From 9e05ac29f25c60a177e1791e69f273eef610a016 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 15 Nov 2026 18:32:30 -0500
 Subject: [PATCH] winegstreamer: Drain and flush the WMA decoder.
@@ -16,10 +16,10 @@ Drain and flush the wg_transform as the video decoder does.
  1 file changed, 16 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/winegstreamer/wma_decoder.c b/dlls/winegstreamer/wma_decoder.c
-index a9830c64cc..2677e6f568 100644
+index 3201223079f..0d8a6fe12f7 100644
 --- a/dlls/winegstreamer/wma_decoder.c
 +++ b/dlls/winegstreamer/wma_decoder.c
-@@ -524,8 +524,22 @@ static HRESULT WINAPI transform_ProcessEvent(IMFTransform *iface, DWORD id, IMFM
+@@ -525,8 +525,22 @@ static HRESULT WINAPI transform_ProcessEvent(IMFTransform *iface, DWORD id, IMFM
  
  static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
  {

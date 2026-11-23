@@ -1,4 +1,4 @@
-From 8a3021a566762e3abf61c5a125c679b61de19b5c Mon Sep 17 00:00:00 2001
+From c064a75bdfc9b1058463872b7ab4c21baba31079 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 11 Oct 2026 21:39:28 -0400
 Subject: [PATCH] winemac.drv: Present EGL window surfaces as opaque.
@@ -15,7 +15,7 @@ Ask for an opaque surface, as winewayland.drv does.
  1 file changed, 12 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/winemac.drv/egl.c b/dlls/winemac.drv/egl.c
-index d9d63121a2..11e42e5001 100644
+index d9d63121a22..11e42e50018 100644
 --- a/dlls/winemac.drv/egl.c
 +++ b/dlls/winemac.drv/egl.c
 @@ -53,10 +53,21 @@ static BOOL macdrv_egl_surface_create(struct client_surface *client, int format,

@@ -1,4 +1,4 @@
-From 990428cec124261a2b5082c5aefc0b542155e4ef Mon Sep 17 00:00:00 2001
+From 391f457c28fdb9cd2b705a019670c15d7fc600d8 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Mon, 16 Nov 2026 19:29:20 -0500
 Subject: [PATCH] winemac.drv: Draw a letterboxed window's black bars in its
@@ -33,7 +33,7 @@ window's top. Store the flag as a boolean.
  3 files changed, 66 insertions(+), 43 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_window.h b/dlls/winemac.drv/cocoa_window.h
-index af7e16a0e3..ac1e2085bf 100644
+index 7ee5e580e89..2418aaf9c62 100644
 --- a/dlls/winemac.drv/cocoa_window.h
 +++ b/dlls/winemac.drv/cocoa_window.h
 @@ -81,7 +81,7 @@ @interface WineWindow : NSPanel <NSWindowDelegate>
@@ -46,10 +46,10 @@ index af7e16a0e3..ac1e2085bf 100644
  
  @property (retain, readonly, nonatomic) WineEventQueue* queue;
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
-index 62425f1a49..ed104ca68c 100644
+index 2ea3550035b..76dd41408ad 100644
 --- a/dlls/winemac.drv/cocoa_window.m
 +++ b/dlls/winemac.drv/cocoa_window.m
-@@ -304,7 +304,7 @@ @interface WineWindow ()
+@@ -295,7 +295,7 @@ @interface WineWindow ()
  
  @property (readonly, copy, nonatomic) NSArray* childWineWindows;
  
@@ -58,16 +58,16 @@ index 62425f1a49..ed104ca68c 100644
  
      - (void) setShape:(CGPathRef)newShape;
  
-@@ -937,7 +937,7 @@ @implementation WineWindow
+@@ -872,7 +872,7 @@ @implementation WineWindow
      @synthesize shapeChangedSinceLastDraw;
      @synthesize usePerPixelAlpha;
-     @synthesize himc, commandDone;
+     @synthesize ime_update, commandDone;
 -    @synthesize contentViewMaskLayer;
 +    @synthesize contentViewMaskLayers;
  
      + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                   windowFrame:(NSRect)window_frame
-@@ -1024,7 +1024,7 @@ - (void) dealloc
+@@ -959,7 +959,7 @@ - (void) dealloc
          [queue release];
          [latentChildWindows release];
          [latentParentWindow release];
@@ -76,7 +76,7 @@ index 62425f1a49..ed104ca68c 100644
          [super dealloc];
      }
  
-@@ -2581,49 +2581,58 @@ - (void) setRetinaMode:(BOOL)mode
+@@ -2510,49 +2510,58 @@ - (void) setRetinaMode:(BOOL)mode
  
      - (void) setMask:(CGRect)rect
      {
@@ -171,7 +171,7 @@ index 62425f1a49..ed104ca68c 100644
      }
  
  
-@@ -3444,13 +3453,17 @@ void macdrv_window_use_per_pixel_alpha(WineWindow *window, bool use_per_pixel_al
+@@ -3369,13 +3378,17 @@ void macdrv_window_use_per_pixel_alpha(WineWindow *window, bool use_per_pixel_al
  
  /***********************************************************************
   *              macdrv_set_window_mask
@@ -191,10 +191,10 @@ index 62425f1a49..ed104ca68c 100644
  }
  }
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 872e317ad7..348fe40d77 100644
+index 8fb033079e8..ca0acffa3fe 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -1637,7 +1637,7 @@ BOOL macdrv_GetWindowStyleMasks(HWND hwnd, UINT style, UINT ex_style, UINT *styl
+@@ -1657,7 +1657,7 @@ BOOL macdrv_GetWindowStyleMasks(HWND hwnd, UINT style, UINT ex_style, UINT *styl
  void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT swp_flags,
                               const struct window_rects *new_rects, struct window_surface *surface)
  {
@@ -203,7 +203,7 @@ index 872e317ad7..348fe40d77 100644
      struct macdrv_thread_data *thread_data;
      struct macdrv_win_data *data;
      unsigned int new_style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
-@@ -1686,9 +1686,19 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
+@@ -1706,9 +1706,19 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
          }
      }
  

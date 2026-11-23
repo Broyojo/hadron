@@ -1,4 +1,4 @@
-From 9187e812cd03114bb3d304c51d2ef34cf5d9d766 Mon Sep 17 00:00:00 2001
+From b5b231047e745f9c879b4bfa889dda669d197e17 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 16 Oct 2026 18:05:36 -0400
 Subject: [PATCH] ntdll: Map unaligned shared image sections as private copies.
@@ -16,10 +16,10 @@ section, which only a shared mapping needs.
  1 file changed, 18 insertions(+), 4 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 73e4dc56ce..b1d805dd25 100644
+index b43c4753eaa..d530b864d3d 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3509,19 +3509,33 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3246,19 +3246,33 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
          if ((sec[i].Characteristics & IMAGE_SCN_MEM_SHARED) &&
              (sec[i].Characteristics & IMAGE_SCN_MEM_WRITE))
          {
