@@ -1,4 +1,4 @@
-From e60a529f1c9792aae102f3c5d6b447e358af85ac Mon Sep 17 00:00:00 2001
+From 7412414932043092e2050b338c5f292ea410f474 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:34:36 +0100
 Subject: [PATCH] winemac.drv: Keep up with win32u's clipping of a maximized
@@ -16,14 +16,15 @@ draws. And as a window that draws its own frame hangs its border past
 the work area, a frame the Mac side gives it (a window tool, a restore)
 is the whole window, or the hidden border would show past the frame's
 edges; a frame that is the visible rect, as macOS reports it back, is
-still mapped to the window rect.
+still mapped to the window rect, and so is a frame Cocoa adjusted from
+one Wine set (skip_size_move_loop).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  dlls/winemac.drv/macdrv.h      |  2 ++
- dlls/winemac.drv/macdrv_main.c | 25 ++++++++++++++++++++
- dlls/winemac.drv/window.c      | 43 ++++++++++++++++++++++++++++++----
- 3 files changed, 66 insertions(+), 4 deletions(-)
+ dlls/winemac.drv/macdrv_main.c | 25 ++++++++++++++++
+ dlls/winemac.drv/window.c      | 53 +++++++++++++++++++++++++++++-----
+ 3 files changed, 73 insertions(+), 7 deletions(-)
 
 diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
 index 67aa1af66c..6ca0e7a69e 100644
@@ -89,7 +90,7 @@ index fb20525788..9d7b1fba91 100644
  
  
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index ba8b33a3a7..95d89ac10f 100644
+index ba8b33a3a7..a30d63c39c 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
 @@ -103,6 +103,28 @@ static BOOL region_covers_window(HWND hwnd)
@@ -159,21 +160,33 @@ index ba8b33a3a7..95d89ac10f 100644
  
      TRACE("win %p/%p new_rects %s style %08x flags %08x surface %p\n", hwnd, data->cocoa_window,
            debugstr_window_rects(new_rects), new_style, swp_flags, surface);
-@@ -1790,7 +1818,12 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
-           event->window_frame_changed.fullscreen, event->window_frame_changed.in_resize);
+@@ -1785,12 +1813,21 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+ 
+     /* Get geometry */
+ 
+-    TRACE("win %p/%p new Cocoa frame %s fullscreen %d in_resize %d\n", hwnd, data->cocoa_window,
+-          wine_dbgstr_cgrect(event->window_frame_changed.frame),
+-          event->window_frame_changed.fullscreen, event->window_frame_changed.in_resize);
++    TRACE("win %p/%p new Cocoa frame %s fullscreen %d in_resize %d skip_size_move_loop %d\n",
++          hwnd, data->cocoa_window, wine_dbgstr_cgrect(event->window_frame_changed.frame),
++          event->window_frame_changed.fullscreen, event->window_frame_changed.in_resize,
++          event->window_frame_changed.skip_size_move_loop);
  
      rect = rect_from_cgrect(event->window_frame_changed.frame);
 -    rect = window_rect_from_visible(&data->rects, rect);
 +    /* A maximized window that draws its own frame hangs its border past the work area, where win32u
 +     * hides it. Moved or sized from the Mac side, it isn't where the default maximize put it any
 +     * more, so win32u shows all of it: the new frame is the whole window, or the border would show
-+     * past the frame's edges, and the Mac window and win32u's visible rect wouldn't agree. */
-+    if (!data->own_frame || EqualRect(&rect, &data->rects.visible))
++     * past the frame's edges, and the Mac window and win32u's visible rect wouldn't agree. A frame
++     * Cocoa adjusted from one Wine set (skip_size_move_loop), such as a window moved below the
++     * menu bar while it still has a Mac title bar, keeps the window's offsets. */
++    if (!data->own_frame || event->window_frame_changed.skip_size_move_loop ||
++        EqualRect(&rect, &data->rects.visible))
 +        rect = window_rect_from_visible(&data->rects, rect);
      width = rect.right - rect.left;
      height = rect.bottom - rect.top;
  
-@@ -2012,7 +2045,9 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
+@@ -2012,7 +2049,9 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
          if ((style & WS_MAXIMIZE) && (style & WS_VISIBLE) && (data = get_win_data(hwnd)))
          {
              RECT rect = rect_from_cgrect(event->window_restore_requested.frame);

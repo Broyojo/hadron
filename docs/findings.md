@@ -2116,8 +2116,11 @@ window rect 0,66 1728×2048 pixels, the whole frame. It stays maximized, as Hadr
 32 points short at the top at 96 and 192 DPI, with and without these patches. The `nccalc` window
 still has a Mac title bar when it is maximized, so Cocoa keeps the frame Wine sets below the menu
 bar and moves the window down by the bar's height when it loses it. Its window rect's top then is
-130 pixels, not 61. With these patches, that move is a frame from the Mac side, and the window
-rect loses its hidden border: 0,130 3456×1984 pixels (0.3.3: -6,130 3466×1984).
+130 pixels, not 61. That move is Cocoa's adjustment of the frame Wine set, so the window rect keeps
+its hidden border once Cocoa reports it as such (`skip_size_move_loop`), which #182 makes it do as
+a window's title bar goes: -5,125 3466×1994 pixels at 192 DPI, -4,126 3464×1992 at 96 (0.3.3:
+-6,130 3466×1984). With these patches alone it comes as a move from the Mac side, and the window
+rect loses its hidden border: 0,130 3456×1984.
 
 With Wine's `Decorated=N` option, win32u draws no window's frame, so every window draws its own.
 winemac reads the option as win32u does (the `X11 Driver` key, and the app's own under
