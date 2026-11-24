@@ -2035,10 +2035,17 @@ Also run once, at 192 DPI, against 0.3.3 and this patch:
   `windowWillStartLiveResize` asked for the existing restore (`SC_RESTORE`, keeping the frame)
   before any frame reached this patch, which then found the window not maximized. This patch
   changes neither; the stop is a separate bug.
+- A program that maximizes its window when a move or size starts (`own-frame nccalc
+  default-minmax hold enter-maximize`, then the left half): it stays maximized, as on 0.3.3. The
+  patch acts on a window that was maximized when its frame changed, not on one the app maximized
+  on `WM_ENTERSIZEMOVE`; the first version of this patch restored it.
 - Not run: changing the Mac's display resolution while a maximized window is in front, which
   would have reconfigured the displays of the Mac the tests ran on. `_displayChanged` posts
-  `REASSERT_WINDOW_POSITION`, which sets Wine's own frame again; a frame macOS moves a window to
-  meanwhile would come here as the Mac side's.
+  `REASSERT_WINDOW_POSITION` before Cocoa moves the window, and the reassert sets Wine's own frame
+  again and drops the frame events queued meanwhile. But the back end takes frame events with
+  posted input and the reassert only with sent messages, so a frame event could be handled
+  first; the frames Cocoa sets during `_displayChanged` now come as Cocoa's adjustment
+  (`skip_size_move_loop`), which this patch leaves alone.
 
 Measured with `tests/win/own-frame.c standard hold-maximized` (a window started maximized), with
 `tests/mac/ax-window.swift --frame` setting a frame as Rectangle does, and then `tests/win/win-info.c

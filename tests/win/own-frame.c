@@ -6,7 +6,7 @@
  *
  * Usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] [default-minmax]
  *                      [region|shape] [hit-client] [no-sizing] [layered] [unaware]
- *                      [monitor-minmax] [strip]
+ *                      [monitor-minmax] [strip] [second] [elsewhere] [mode] [enter-maximize]
  *   standard        WS_OVERLAPPEDWINDOW: Wine gives it a Mac title bar (the control)
  *   popup           no caption, a sizing border, its own title strip (WS_POPUP | WS_THICKFRAME)
  *   nccalc          caption styles, but the app takes the whole window as client area
@@ -52,6 +52,9 @@
  *   mode            hold only: 3 s after it is shown, change the display mode to a smaller one, as
  *                   a game does, and 3 s later back; logs each display change and whether the
  *                   window is still maximized, which it is expected to stay
+ *   enter-maximize  hold only: maximize the window when a move or size starts (WM_ENTERSIZEMOVE),
+ *                   as an app that keeps its own placement may; a window tool's frame then
+ *                   mustn't restore it, as it wasn't maximized when the frame changed
  *
  * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o own-frame.exe tests/win/own-frame.c -luser32 -lgdi32 */
 #define _WIN32_WINNT 0x0A00
@@ -66,7 +69,7 @@ enum frame { STANDARD, POPUP, NCCALC, BORDER };
 
 static enum frame frame = POPUP;
 static BOOL hold, second, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware, monitor_minmax, strip,
-            elsewhere, mode;
+            elsewhere, mode, enter_maximize;
 static int step, result = 2;
 static char last[512];
 
@@ -332,6 +335,8 @@ static LRESULT CALLBACK window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
             printf( "%s\n", msg == WM_ENTERSIZEMOVE ? "enter size/move" : "exit size/move" );
             fflush( stdout );
         }
+        if (hold && enter_maximize && msg == WM_ENTERSIZEMOVE && !IsZoomed( hwnd ))
+            ShowWindow( hwnd, SW_MAXIMIZE );
         break;
     case WM_ACTIVATE:
         /* a window tool arranging a window in the background mustn't activate it */
@@ -427,12 +432,14 @@ int main( int argc, char **argv )
         else if (!strcmp( argv[i], "strip" )) strip = TRUE;
         else if (!strcmp( argv[i], "second" )) second = TRUE;
         else if (!strcmp( argv[i], "elsewhere" )) elsewhere = TRUE;
+        else if (!strcmp( argv[i], "enter-maximize" )) enter_maximize = TRUE;
         else if (!strcmp( argv[i], "mode" )) mode = TRUE;
         else
         {
             fprintf( stderr, "usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] "
                              "[default-minmax] [region|shape] [hit-client] [no-sizing] [layered] [unaware] "
-                             "[monitor-minmax] [strip] [second] [elsewhere] [mode]\n" );
+                             "[monitor-minmax] [strip] [second] [elsewhere] [mode] "
+                             "[enter-maximize]\n" );
             return 2;
         }
     }

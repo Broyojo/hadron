@@ -1,4 +1,4 @@
-From 4aa0fb5b8d49b77b72d8e0a4b9d4d7a8cdbfdfa6 Mon Sep 17 00:00:00 2001
+From 985882b0d3702f7b01c6b18d7e4b0bf617580e1c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:26:57 +0100
 Subject: [PATCH] winemac.drv: Restore a maximized window a window tool moves
@@ -17,7 +17,9 @@ handled, so win32u doesn't set the Cocoa frame back over the steps a
 window tool takes after the first (Rectangle: the size, the position,
 the size again). It comes between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE,
 as on Windows when a maximized window is dragged or snapped. An app
-that keeps the window maximized takes the frame, as before.
+that keeps the window maximized takes the frame, as before; one that
+wasn't maximized when its frame changed is left as before, even if the
+app maximizes it on WM_ENTERSIZEMOVE.
 
 Wine's own frame changes leave nothing changed for the handler, and
 the frames macOS adjusts from what Wine set come with
@@ -26,14 +28,31 @@ style changes: a window that gains or loses its title bar as it is
 maximized was moved down by its height, reported as the user's move,
 and would have been restored.
 
+The frames Cocoa sets as it reacts to a display change come flagged
+too: the back end may handle one before the reassert that undoes them,
+which comes with sent messages.
+
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- dlls/winemac.drv/cocoa_window.m |  9 +++++++++
- dlls/winemac.drv/window.c       | 27 ++++++++++++++++++++++++++-
- 2 files changed, 35 insertions(+), 1 deletion(-)
+ dlls/winemac.drv/cocoa_window.h |  1 +
+ dlls/winemac.drv/cocoa_window.m | 20 ++++++++++++++++++--
+ dlls/winemac.drv/window.c       | 29 ++++++++++++++++++++++++++++-
+ 3 files changed, 47 insertions(+), 3 deletions(-)
 
+diff --git a/dlls/winemac.drv/cocoa_window.h b/dlls/winemac.drv/cocoa_window.h
+index af7e16a0e3..5c2ca97707 100644
+--- a/dlls/winemac.drv/cocoa_window.h
++++ b/dlls/winemac.drv/cocoa_window.h
+@@ -79,6 +79,7 @@ @interface WineWindow : NSPanel <NSWindowDelegate>
+ 
+     BOOL ignore_windowDeminiaturize;
+     BOOL ignore_windowResize;
++    BOOL displayChanging;
+     BOOL fakingClose;
+ 
+     CAShapeLayer* contentViewMaskLayer;
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
-index 62425f1a49..17c4760e89 100644
+index 62425f1a49..58b1b04a1e 100644
 --- a/dlls/winemac.drv/cocoa_window.m
 +++ b/dlls/winemac.drv/cocoa_window.m
 @@ -1117,6 +1117,7 @@ - (void) setWindowFeatures:(const struct macdrv_window_features*)wf
@@ -62,11 +81,39 @@ index 62425f1a49..17c4760e89 100644
  
              BOOL isNonActivating = (currentStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
              BOOL shouldBeNonActivating = (newStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
+@@ -2351,10 +2360,17 @@ - (NSRect) constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen
+     - (id) _displayChanged
+     {
+         macdrv_event* event = macdrv_create_event(REASSERT_WINDOW_POSITION, self);
++        id ret;
++
+         [queue postEvent:event];
+         macdrv_release_event(event);
+ 
+-        return [super _displayChanged];
++        /* The frames Cocoa sets meanwhile are its adjustment, not a move from the Mac side: the
++           back end may handle one before the reassert, which comes with sent messages. */
++        displayChanging = TRUE;
++        ret = [super _displayChanged];
++        displayChanging = FALSE;
++        return ret;
+     }
+ 
+     - (BOOL) isExcludedFromWindowsMenu
+@@ -2879,7 +2895,7 @@ - (void)windowDidResize:(NSNotification *)notification skipSizeMove:(BOOL)skipSi
+         [self postWindowFrameChanged:frame
+                           fullscreen:([self styleMask] & NSWindowStyleMaskFullScreen) != 0
+                             resizing:[self inLiveResize]
+-                        skipSizeMove:skipSizeMove];
++                        skipSizeMove:skipSizeMove || displayChanging];
+ 
+         [[[self contentView] inputContext] invalidateCharacterCoordinates];
+         [self updateFullscreen];
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 872e317ad7..977f7d1654 100644
+index 872e317ad7..01da210806 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -1783,9 +1783,34 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1783,9 +1783,36 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
      if (!(flags & SWP_NOSIZE) || !(flags & SWP_NOMOVE))
      {
          bool send_sizemove = !event->window_frame_changed.in_resize && !being_dragged && !event->window_frame_changed.skip_size_move_loop;
@@ -80,15 +127,17 @@ index 872e317ad7..977f7d1654 100644
 +         * window tool sets a frame in steps, and win32u's restore then doesn't set the Cocoa
 +         * frame back over a step still to come. */
 +        BOOL restored = FALSE;
++        /* as the window was when the frame changed: an app may maximize it on WM_ENTERSIZEMOVE */
++        BOOL maximized = (NtUserGetWindowLongW(hwnd, GWL_STYLE) & (WS_MAXIMIZE | WS_VISIBLE)) ==
++                         (WS_MAXIMIZE | WS_VISIBLE);
 +
 +        /* The restore is part of the move or size, as on Windows when a maximized window is
 +         * dragged or snapped: both come between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE. */
          if (send_sizemove)
              send_message(hwnd, WM_ENTERSIZEMOVE, 0, 0);
 -        NtUserSetRawWindowPos(hwnd, rect, flags, FALSE);
-+        if (send_sizemove && !event->window_frame_changed.fullscreen &&
-+            (NtUserGetWindowLongW(hwnd, GWL_STYLE) & (WS_MAXIMIZE | WS_VISIBLE)) ==
-+                (WS_MAXIMIZE | WS_VISIBLE))
++        if (send_sizemove && !event->window_frame_changed.fullscreen && maximized &&
++            (NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZE))
 +        {
 +            TRACE("%p maximized, its frame changed on the Mac side: restoring it to %s\n",
 +                  hwnd, wine_dbgstr_rect(&rect));
