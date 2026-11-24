@@ -1,7 +1,7 @@
-From 57d17c3be54572860f2afca3bdbe29ca38aa3030 Mon Sep 17 00:00:00 2001
+From 13fc75e38e772225ee66f1cb63c90c246192893d Mon Sep 17 00:00:00 2001
 From: Ondrej Simon <ondrej@dorhawk.software>
 Date: Sun, 15 Nov 2026 09:58:27 +0100
-Subject: [PATCH 52/53] win32u: Show a maximized window only within the area it
+Subject: [PATCH] win32u: Show a maximized window only within the area it
  maximizes over.
 
 Windows maximizes a window with a sizing border so that the border
@@ -23,23 +23,30 @@ GetClientRect, WM_NCCALCSIZE, GetWindowPlacement) doesn't change.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- dlls/win32u/window.c | 51 +++++++++++++++++++++++++++++++++++++++-----
- 1 file changed, 46 insertions(+), 5 deletions(-)
+ dlls/win32u/window.c | 57 +++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 51 insertions(+), 6 deletions(-)
 
 diff --git a/dlls/win32u/window.c b/dlls/win32u/window.c
-index 8ddc40fb17..a19259bc33 100644
+index 8ddc40fb17..05d2756a76 100644
 --- a/dlls/win32u/window.c
 +++ b/dlls/win32u/window.c
-@@ -2124,7 +2124,7 @@ done:
+@@ -2124,13 +2124,13 @@ done:
  }
  
  
 -static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style, const struct window_rects *rects )
-+static RECT get_visible_rect_unclipped( HWND hwnd, BOOL shaped, UINT style, UINT ex_style, const struct window_rects *rects )
++static RECT get_visible_rect_unclipped( HWND hwnd, BOOL shaped, UINT style, UINT ex_style,
++                                        const struct window_rects *rects )
  {
      struct ratio dpi = get_dpi_for_window( hwnd );
      UINT style_mask, ex_style_mask;
-@@ -2148,6 +2148,50 @@ static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style,
+     RECT visible_rect, rect = {0};
+ 
+-    if (get_present_rect( hwnd, &rect, get_thread_dpi() )) return rect;
+     if (IsRectEmpty( &rects->window ) || EqualRect( &rects->window, &rects->client ) || shaped || !decorated_mode) return rects->window;
+     if (!user_driver->pGetWindowStyleMasks( hwnd, style, ex_style, &style_mask, &ex_style_mask )) return rects->window;
+     if (!adjust_window_rect( &rect, style & style_mask, FALSE, ex_style & ex_style_mask, round_dpi( dpi ) )) return rects->window;
+@@ -2148,6 +2148,54 @@ static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style,
      return visible_rect;
  }
  
@@ -58,22 +65,26 @@ index 8ddc40fb17..a19259bc33 100644
 + * screen (macOS keeps windows below the menu bar), pushing the rest past the other edge. So show
 + * a window that sits where the default maximize puts it only where Windows does: within that
 + * area. A window the app placed itself, over the whole monitor for one, is left as it is. */
-+static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style, const struct window_rects *rects )
++static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style,
++                              const struct window_rects *rects )
 +{
-+    RECT visible_rect = get_visible_rect_unclipped( hwnd, shaped, style, ex_style, rects ), area, clipped, border = {0}, dummy;
 +    UINT adjusted_style = (style & WS_CAPTION) == WS_CAPTION ? style & ~WS_BORDER : style;
 +    const RECT *window = &rects->window;
++    RECT visible_rect, area, clipped, border = {0};
 +    MONITORINFO info;
 +
-+    if (!(style & WS_MAXIMIZE) || (style & WS_CHILD) || get_present_rect( hwnd, &dummy, get_thread_dpi() ))
-+        return visible_rect;
++    /* a window presented at a rect of its own shows there, unclipped */
++    if (get_present_rect( hwnd, &visible_rect, get_thread_dpi() )) return visible_rect;
++    visible_rect = get_visible_rect_unclipped( hwnd, shaped, style, ex_style, rects );
++    if (!(style & WS_MAXIMIZE) || (style & WS_CHILD)) return visible_rect;
 +
 +    info = monitor_info_from_rect( rects->window, get_thread_dpi() );
 +    if (IsRectEmpty( &info.rcMonitor )) return visible_rect;
 +    area = get_maximized_area( style, &info );
 +
 +    /* the frame the default maximize hangs past the area, as get_min_max_info computes it */
-+    adjust_window_rect( &border, adjusted_style, (style & WS_POPUP) && get_menu( hwnd ), ex_style, get_system_dpi() );
++    adjust_window_rect( &border, adjusted_style, (style & WS_POPUP) && get_menu( hwnd ), ex_style,
++                        get_system_dpi() );
 +    if (window->left > area.left || window->left < area.left + border.left ||
 +        window->top > area.top || window->top < area.top + border.top ||
 +        window->right < area.right || window->right > area.right + border.right ||
@@ -82,15 +93,15 @@ index 8ddc40fb17..a19259bc33 100644
 +    if (!intersect_rect( &clipped, &visible_rect, &area )) return visible_rect;
 +
 +    if (!EqualRect( &clipped, &visible_rect ))
-+        TRACE( "hwnd %p maximized: visible_rect %s clipped to %s\n", hwnd, wine_dbgstr_rect( &visible_rect ),
-+               wine_dbgstr_rect( &clipped ) );
++        TRACE( "hwnd %p maximized: visible_rect %s clipped to %s\n", hwnd,
++               wine_dbgstr_rect( &visible_rect ), wine_dbgstr_rect( &clipped ) );
 +    return clipped;
 +}
 +
  
  static BOOL get_surface_rect( const RECT *visible_rect, RECT *surface_rect )
  {
-@@ -2946,11 +2990,8 @@ static BOOL get_maximized_rect( HWND hwnd, RECT *rect )
+@@ -2946,11 +2994,8 @@ static BOOL get_maximized_rect( HWND hwnd, RECT *rect )
      DWORD style;
  
      mon_info = monitor_info_from_window( hwnd, MONITOR_DEFAULTTOPRIMARY );

@@ -1,8 +1,8 @@
-From 2300d2fc83e0fe8b4958b1604c865f9703885a6f Mon Sep 17 00:00:00 2001
+From e60a529f1c9792aae102f3c5d6b447e358af85ac Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:34:36 +0100
-Subject: [PATCH 53/53] winemac.drv: Keep up with win32u's clipping of a
- maximized window.
+Subject: [PATCH] winemac.drv: Keep up with win32u's clipping of a maximized
+ window.
 
 The driver took a window whose visible rect is its whole window rect
 for one that draws its own frame. A maximized window at the default
@@ -21,43 +21,44 @@ still mapped to the window rect.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  dlls/winemac.drv/macdrv.h      |  2 ++
- dlls/winemac.drv/macdrv_main.c | 24 +++++++++++++++++++++++
- dlls/winemac.drv/window.c      | 36 +++++++++++++++++++++++++++++++---
- 3 files changed, 59 insertions(+), 3 deletions(-)
+ dlls/winemac.drv/macdrv_main.c | 25 ++++++++++++++++++++
+ dlls/winemac.drv/window.c      | 43 ++++++++++++++++++++++++++++++----
+ 3 files changed, 66 insertions(+), 4 deletions(-)
 
 diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
-index 67aa1af66c..053dedfc30 100644
+index 67aa1af66c..6ca0e7a69e 100644
 --- a/dlls/winemac.drv/macdrv.h
 +++ b/dlls/winemac.drv/macdrv.h
-@@ -214,6 +214,7 @@ extern INT macdrv_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyStat
- extern INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size);
- extern void macdrv_NotifyIMEStatus(HWND hwnd, UINT status);
- extern BOOL macdrv_SetIMECompositionRect(HWND hwnd, RECT rect);
-+extern BOOL decorated_mode;
- extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_param,
-                                         UINT flags);
- extern BOOL macdrv_ProcessEvents(DWORD mask);
+@@ -81,6 +81,7 @@
+ extern bool allow_vsync;
+ extern bool allow_set_gamma;
+ extern bool allow_software_rendering;
++extern bool decorated_mode;
+ 
+ extern UINT64 app_icon_callback;
+ extern UINT64 app_quit_request_callback;
 @@ -238,6 +239,7 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
      unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
      unsigned int        minimized : 1;          /* is window minimized? */
      unsigned int        fullscreen : 1;         /* is the window visible rect fullscreen? (unrelated to native AppKit/Cocoa fullscreen) */
-+    unsigned int        own_frame : 1;          /* does the app draw the window's whole frame (draws_own_frame)? */
++    unsigned int        own_frame : 1;          /* does the app draw the whole frame? */
  };
  
  struct macdrv_client_surface
 diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
-index fb20525788..a673ccf1f9 100644
+index fb20525788..9d7b1fba91 100644
 --- a/dlls/winemac.drv/macdrv_main.c
 +++ b/dlls/winemac.drv/macdrv_main.c
-@@ -42,6 +42,7 @@ bool capture_displays_for_fullscreen = false;
- bool allow_vsync = true;
- bool allow_set_gamma = true;
- bool left_option_is_alt = false;
-+BOOL decorated_mode = TRUE;
- bool right_option_is_alt = false;
- bool left_command_is_ctrl = false;
- bool right_command_is_ctrl = false;
-@@ -385,6 +386,29 @@ static void setup_options(void)
+@@ -58,6 +58,8 @@ int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
+ /* Games get the display's pixels, as on Windows; RetinaMode=n in the registry gives points. */
+ bool retina_enabled = true;
+ bool enable_app_nap = false;
++/* win32u's "Decorated" option: off, Wine draws no window's frame (see draws_own_frame) */
++bool decorated_mode = true;
+ 
+ pthread_key_t macdrv_thread_data_key = 0;
+ UINT64 app_icon_callback = 0;
+@@ -385,6 +387,29 @@ static void setup_options(void)
  
      if (appkey) NtClose(appkey);
      if (hkey) NtClose(hkey);
@@ -88,10 +89,10 @@ index fb20525788..a673ccf1f9 100644
  
  
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index ba8b33a3a7..2c9bb32948 100644
+index ba8b33a3a7..95d89ac10f 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -103,6 +103,27 @@ static BOOL region_covers_window(HWND hwnd)
+@@ -103,6 +103,28 @@ static BOOL region_covers_window(HWND hwnd)
  }
  
  
@@ -104,7 +105,8 @@ index ba8b33a3a7..2c9bb32948 100644
 + * asked instead: the window is all client area, it's shaped, Wine draws no frames (the
 + * "Decorated" option off), or its style has no frame Wine draws.
 + */
-+static BOOL draws_own_frame(HWND hwnd, UINT style, UINT ex_style, BOOL shaped, const struct window_rects *rects)
++static BOOL draws_own_frame(HWND hwnd, UINT style, UINT ex_style, BOOL shaped,
++                            const struct window_rects *rects)
 +{
 +    struct macdrv_window_features wf;
 +
@@ -119,7 +121,7 @@ index ba8b33a3a7..2c9bb32948 100644
  /***********************************************************************
   *              get_cocoa_window_features
   */
-@@ -111,7 +132,7 @@ static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win
+@@ -111,7 +133,7 @@ static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win
      struct macdrv_window_features wf = {0};
  
      if (ex_style & WS_EX_NOACTIVATE) wf.prevents_app_activation = TRUE;
@@ -128,7 +130,7 @@ index ba8b33a3a7..2c9bb32948 100644
      {
          /* The app draws its own frame, but a sizing border still lets the user resize the
           * window. The Cocoa window stays borderless, so its edges are the app's, as on Windows
-@@ -566,6 +587,7 @@ static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const struct wi
+@@ -566,6 +588,7 @@ static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const struct wi
  
      if (!(data = alloc_win_data(hwnd))) return NULL;
      data->rects = *rects;
@@ -136,15 +138,28 @@ index ba8b33a3a7..2c9bb32948 100644
  
      if (parent == NtUserGetDesktopWindow())
      {
-@@ -1682,6 +1704,7 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
+@@ -1496,7 +1519,10 @@ UINT macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
+ 
+     macdrv_get_cocoa_window_frame(data->cocoa_window, &frame);
+     *rect = rect_from_cgrect(frame);
+-    *rect = window_rect_from_visible(&data->rects, *rect);
++    /* as in macdrv_window_frame_changed: a new frame of a maximized window that draws its own
++     * frame is the whole window, its hidden border doesn't come back past the frame */
++    if (!data->own_frame || EqualRect(rect, &data->rects.visible))
++        *rect = window_rect_from_visible(&data->rects, *rect);
+     TRACE("rect %s -> %s\n", wine_dbgstr_cgrect(frame), wine_dbgstr_rect(rect));
+     swp &= ~(SWP_NOMOVE | SWP_NOCLIENTMOVE | SWP_NOSIZE | SWP_NOCLIENTSIZE);
+ 
+@@ -1682,6 +1708,8 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
  
      old_rects = data->rects;
      data->rects = *new_rects;
-+    data->own_frame = draws_own_frame(hwnd, new_style, NtUserGetWindowLongW(hwnd, GWL_EXSTYLE), data->shaped, new_rects);
++    data->own_frame = draws_own_frame(hwnd, new_style, NtUserGetWindowLongW(hwnd, GWL_EXSTYLE),
++                                      data->shaped, new_rects);
  
      TRACE("win %p/%p new_rects %s style %08x flags %08x surface %p\n", hwnd, data->cocoa_window,
            debugstr_window_rects(new_rects), new_style, swp_flags, surface);
-@@ -1790,7 +1813,12 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1790,7 +1818,12 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
            event->window_frame_changed.fullscreen, event->window_frame_changed.in_resize);
  
      rect = rect_from_cgrect(event->window_frame_changed.frame);
@@ -158,7 +173,7 @@ index ba8b33a3a7..2c9bb32948 100644
      width = rect.right - rect.left;
      height = rect.bottom - rect.top;
  
-@@ -2012,7 +2040,9 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
+@@ -2012,7 +2045,9 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
          if ((style & WS_MAXIMIZE) && (style & WS_VISIBLE) && (data = get_win_data(hwnd)))
          {
              RECT rect = rect_from_cgrect(event->window_restore_requested.frame);

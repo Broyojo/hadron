@@ -2072,7 +2072,17 @@ Patch 0053 keeps winemac in step. The driver took a window whose visible rect is
 rect for one that draws its own frame; a clipped one isn't, and would get a Mac title bar. It now
 asks what win32u asks, with no monitor queries: the window is all client area, it's shaped, or its
 style has no frame Wine draws. A frame the Mac side then gives such a window (a window tool) is the
-whole window; it isn't at the default maximize's place any more, so win32u shows all of it.
+whole window; it isn't at the default maximize's place any more, so win32u shows all of it. So it
+is where winemac's `ShowWindow` takes a window's rect from its Cocoa frame, during a frame change
+from the Mac side: with #182 (#65), which restores a maximized window a window tool tiles, a
+maximized `own-frame nccalc default-minmax` (Enterprise Architect's frame) tiled to the left half
+at 192 DPI restored to 1738×2058 px at -5,61, larger than the tile by the hidden border; it now
+restores to the tile, 1728×2048 at 0,66. The other kinds (`standard`, `nccalc`, `popup`, `border`)
+restored to the tile before and after.
+
+`own-frame check` expects the area Windows maximizes a window over: the work area, or the whole
+monitor for a window without a caption or a maximize box (`strip`, `popup default-minmax`) and for
+`monitor-minmax`, with the sizing border hanging past it where Windows' own maximize hangs it.
 
 On a second display, Windows shows the hanging border on the neighbouring display, where it
 bleeds over. This hides it there too.

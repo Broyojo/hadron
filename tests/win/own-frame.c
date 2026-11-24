@@ -12,10 +12,12 @@
  *   nccalc          caption styles, but the app takes the whole window as client area
  *                   (WM_NCCALCSIZE) and draws its own frame, as ribbon libraries do
  *   border          caption styles; the app takes all but the sizing border as client area
- *   check           maximize, compare the window's rect on the Windows side with the work area,
- *                   print PASS or FAIL and exit with 0 or 1 (the default). It counts the sizing
- *                   border that Windows hangs past the work area's edges, so for what the Mac
- *                   shows, use hold and ax-window
+ *   check           maximize, compare the window's rect on the Windows side with the area Windows
+ *                   maximizes it over (the work area; the whole monitor for a window without a
+ *                   caption or a maximize box, and for monitor-minmax), print PASS or FAIL and
+ *                   exit with 0 or 1 (the default). Where Windows' own maximize hangs the
+ *                   sizing border past the area's edges, it expects that too, so for what the
+ *                   Mac shows, use hold and ax-window
  *   hold            stay open and log every move and size: try a window tool on it, or run
  *                   tests/mac/ax-window from a Mac terminal
  *   hold-maximized  the same, starting maximized
@@ -119,12 +121,38 @@ static void describe( HWND hwnd, const char *event )
     InvalidateRect( hwnd, NULL, TRUE );
 }
 
+/* Whether Windows maximizes the window over the whole monitor rather than the work area: a window
+ * without a caption or a maximize box, unless the app answers WM_GETMINMAXINFO itself */
+static BOOL over_monitor( HWND hwnd )
+{
+    DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
+
+    if (monitor_minmax) return TRUE;
+    if (frame != STANDARD && frame != BORDER && !default_minmax) return FALSE; /* the work area */
+    return !(style & WS_MAXIMIZEBOX) || (style & WS_CAPTION) != WS_CAPTION;
+}
+
 static int verdict( HWND hwnd )
 {
-    RECT vis = visible_rect( hwnd ), work, mon;
+    RECT vis = visible_rect( hwnd ), work, mon, area;
+    BOOL monitor = over_monitor( hwnd );
     long left, top, right, bottom;
 
     monitor_rects( hwnd, &work, &mon );
+    area = monitor ? mon : work;
+    /* Windows' own maximize hangs the sizing border past the area; visible_rect takes it off the
+     * standard frame, and the other kinds are all window */
+    if (frame != STANDARD && !monitor_minmax && (frame == BORDER || default_minmax))
+    {
+        RECT border = {0};
+
+        AdjustWindowRectExForDpi( &border, GetWindowLongW( hwnd, GWL_STYLE ) & ~WS_CAPTION, FALSE, 0,
+                                  GetDpiForWindow( hwnd ) );
+        area.left += border.left;
+        area.top += border.top;
+        area.right += border.right;
+        area.bottom += border.bottom;
+    }
     describe( hwnd, "maximized" );
     printf( "%s %s\n", frame_name(), last );
     if (!IsZoomed( hwnd ))
@@ -132,17 +160,17 @@ static int verdict( HWND hwnd )
         printf( "FAIL: the window did not maximize\n" );
         return 1;
     }
-    left = vis.left - work.left;
-    top = vis.top - work.top;
-    right = vis.right - work.right;
-    bottom = vis.bottom - work.bottom;
+    left = vis.left - area.left;
+    top = vis.top - area.top;
+    right = vis.right - area.right;
+    bottom = vis.bottom - area.bottom;
     if (!left && !top && !right && !bottom)
     {
-        printf( "PASS: it fills the work area exactly\n" );
+        printf( "PASS: it fills the %s exactly\n", monitor ? "monitor" : "work area" );
         return 0;
     }
-    printf( "FAIL: its edges are off the work area's by left %+ld, top %+ld, right %+ld, bottom %+ld px\n",
-            left, top, right, bottom );
+    printf( "FAIL: its edges are off the %s's by left %+ld, top %+ld, right %+ld, bottom %+ld px\n",
+            monitor ? "monitor" : "work area", left, top, right, bottom );
     return 1;
 }
 
