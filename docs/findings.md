@@ -2010,14 +2010,35 @@ window is dragged or snapped, so a program that saves its placement or commits a
 the end of a move or size still hears it. `own-frame hold` prints the pair: with the tool's left
 half at 192 DPI, both arrive around the restore (before: neither), and the frames are unchanged.
 
-A window tool may arrange a window in the background (it sets every window's frame without
-activating the app). Only the window in front is restored: the title bar's restore activates a
-window, and restoring another some other way would pass over a program's own `SC_RESTORE`
-handling. A window in the background takes the frame as on 0.3.3. Window tools such as Rectangle
-act on the window in front. `own-frame hold-maximized second` opens a plain window in front of the
-maximized one: with the tool's left half, the window behind was activated (the one in front
-deactivated) and restored; now neither changes and it stays maximized, as on 0.3.3. The
-single-window case is unchanged.
+One rule for every window, as Windows' own window tools have it: FancyZones sets a window's
+placement (`SetWindowPlacement`, `ShowWindow`), not the title bar's `SC_RESTORE`. The new frame
+becomes the window's normal one, and it is shown normal without activating it
+(`SW_SHOWNOACTIVATE`), so a window a tool arranges in the background (a tool sets every window's
+frame without activating the app) is restored and stays in the background. A program's own
+`SC_RESTORE` handler isn't asked, as with FancyZones. `own-frame hold-maximized second` opens a
+plain window in front of the maximized one: with the tool's left half, the window behind is
+restored to the half, and neither window is activated or deactivated (on 0.3.3 it stayed
+maximized). The single-window case is unchanged.
+
+Also run once, at 192 DPI, against 0.3.3 and this patch:
+
+- A program changes the display mode while its window is maximized (`own-frame standard
+  hold-maximized mode`: 640×480 and back, emulated, as Hadron does every mode change). The window
+  stays maximized on both, and Wine doesn't move it for the mode on either.
+- A window started maximized on the other display (`own-frame standard hold-maximized
+  elsewhere`): maximized over that display's work area on both, and it stays maximized.
+- macOS's own fullscreen (the green button, through Accessibility), then `win-info maximize`. On
+  0.3.3, on the previous version of this patch and on this one, the program usually stops while
+  its window is in fullscreen (its thread waits in `sync_window_min_max_info`), so the maximize
+  never arrives: 4 runs of 4 on 0.3.3, 3 of 4 with this patch. In the run that got through, the
+  window was maximized and macOS left fullscreen; AppKit runs that as a live resize, and
+  `windowWillStartLiveResize` asked for the existing restore (`SC_RESTORE`, keeping the frame)
+  before any frame reached this patch, which then found the window not maximized. This patch
+  changes neither; the stop is a separate bug.
+- Not run: changing the Mac's display resolution while a maximized window is in front, which
+  would have reconfigured the displays of the Mac the tests ran on. `_displayChanged` posts
+  `REASSERT_WINDOW_POSITION`, which sets Wine's own frame again; a frame macOS moves a window to
+  meanwhile would come here as the Mac side's.
 
 Measured with `tests/win/own-frame.c standard hold-maximized` (a window started maximized), with
 `tests/mac/ax-window.swift --frame` setting a frame as Rectangle does, and then `tests/win/win-info.c

@@ -47,11 +47,17 @@
  *                   which in Retina mode is half the Mac window's pixels
  *   second          also open a plain window in front, so a window tool (ax-window sets every
  *                   window's frame) arranges the first one while it is in the background
+ *   elsewhere       create the window on a display other than the main one, so with
+ *                   hold-maximized it starts maximized there
+ *   mode            hold only: 3 s after it is shown, change the display mode to a smaller one, as
+ *                   a game does, and 3 s later back; logs each display change and whether the
+ *                   window is still maximized, which it is expected to stay
  *
  * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o own-frame.exe tests/win/own-frame.c -luser32 -lgdi32 */
 #define _WIN32_WINNT 0x0A00
 #define WIN32_LEAN_AND_MEAN
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <windows.h>
 #include <windowsx.h>
@@ -59,7 +65,8 @@
 enum frame { STANDARD, POPUP, NCCALC, BORDER };
 
 static enum frame frame = POPUP;
-static BOOL hold, second, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware, monitor_minmax, strip;
+static BOOL hold, second, start_maximized, default_minmax, region, shape, hit_client, no_sizing, layered, unaware, monitor_minmax, strip,
+            elsewhere, mode;
 static int step, result = 2;
 static char last[512];
 
@@ -148,6 +155,62 @@ static int verdict( HWND hwnd )
     printf( "FAIL: its edges are off the work area's by left %+ld, top %+ld, right %+ld, bottom %+ld px\n",
             left, top, right, bottom );
     return 1;
+}
+
+/* As a game does while its window is maximized: a smaller mode, and later the one from the
+ * registry again. Hadron emulates modes, so the Mac's displays don't change. */
+static void change_mode( HWND hwnd )
+{
+    static int changes;
+    DEVMODEW current = {.dmSize = sizeof(current)}, mode = {.dmSize = sizeof(mode)};
+    LONG ret;
+    DWORD i;
+
+    if (changes++)
+    {
+        KillTimer( hwnd, 2 );
+        ret = ChangeDisplaySettingsW( NULL, 0 );
+        printf( "mode back from the registry: %ld\n", ret );
+        fflush( stdout );
+        return;
+    }
+    EnumDisplaySettingsW( NULL, ENUM_CURRENT_SETTINGS, &current );
+    for (i = 0; EnumDisplaySettingsW( NULL, i, &mode ); i++)
+        if (mode.dmPelsWidth < current.dmPelsWidth && mode.dmPelsHeight < current.dmPelsHeight)
+            break;
+    mode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+    ret = ChangeDisplaySettingsW( &mode, CDS_FULLSCREEN );
+    printf( "mode %lux%lu from %lux%lu: %ld\n", mode.dmPelsWidth, mode.dmPelsHeight,
+            current.dmPelsWidth, current.dmPelsHeight, ret );
+    fflush( stdout );
+}
+
+/* Where to create the window: on the main display, or on the first other one */
+static POINT origin( UINT dpi )
+{
+    POINT pt = {MulDiv( 120, dpi, 96 ), MulDiv( 120, dpi, 96 )};
+    MONITORINFO info = {.cbSize = sizeof(info)};
+    POINT probe;
+
+    if (!elsewhere) return pt;
+    for (probe.x = GetSystemMetrics( SM_XVIRTUALSCREEN );
+         probe.x < GetSystemMetrics( SM_XVIRTUALSCREEN ) + GetSystemMetrics( SM_CXVIRTUALSCREEN );
+         probe.x += 64)
+        for (probe.y = GetSystemMetrics( SM_YVIRTUALSCREEN );
+             probe.y < GetSystemMetrics( SM_YVIRTUALSCREEN ) + GetSystemMetrics( SM_CYVIRTUALSCREEN );
+             probe.y += 64)
+        {
+            HMONITOR monitor = MonitorFromPoint( probe, MONITOR_DEFAULTTONULL );
+
+            if (monitor && GetMonitorInfoW( monitor, &info ) && !(info.dwFlags & MONITORINFOF_PRIMARY))
+            {
+                pt.x = info.rcWork.left + MulDiv( 60, dpi, 96 );
+                pt.y = info.rcWork.top + MulDiv( 60, dpi, 96 );
+                return pt;
+            }
+        }
+    fprintf( stderr, "elsewhere: there is no display other than the main one\n" );
+    exit( 2 );
 }
 
 static LRESULT hit_test( HWND hwnd, LPARAM lp )
@@ -304,7 +367,20 @@ static LRESULT CALLBACK window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
     case WM_PAINT:
         paint( hwnd );
         return 0;
+    case WM_DISPLAYCHANGE:
+        if (hold)
+        {
+            printf( "display changed to %ux%u; %s\n", LOWORD( lp ), HIWORD( lp ),
+                    IsZoomed( hwnd ) ? "maximized" : "not maximized" );
+            fflush( stdout );
+        }
+        break;
     case WM_TIMER:
+        if (wp == 2)
+        {
+            change_mode( hwnd );
+            return 0;
+        }
         if (step++ == 0) ShowWindow( hwnd, SW_MAXIMIZE );
         else
         {
@@ -326,6 +402,7 @@ int main( int argc, char **argv )
     WNDCLASSW wc = {0};
     DWORD style;
     UINT dpi;
+    POINT at;
     HWND hwnd;
     MSG msg;
     int i;
@@ -349,11 +426,13 @@ int main( int argc, char **argv )
         else if (!strcmp( argv[i], "monitor-minmax" )) monitor_minmax = TRUE;
         else if (!strcmp( argv[i], "strip" )) strip = TRUE;
         else if (!strcmp( argv[i], "second" )) second = TRUE;
+        else if (!strcmp( argv[i], "elsewhere" )) elsewhere = TRUE;
+        else if (!strcmp( argv[i], "mode" )) mode = TRUE;
         else
         {
             fprintf( stderr, "usage: own-frame.exe [standard|popup|nccalc|border] [check|hold|hold-maximized] "
                              "[default-minmax] [region|shape] [hit-client] [no-sizing] [layered] [unaware] "
-                             "[monitor-minmax] [strip] [second]\n" );
+                             "[monitor-minmax] [strip] [second] [elsewhere] [mode]\n" );
             return 2;
         }
     }
@@ -365,6 +444,7 @@ int main( int argc, char **argv )
     wc.hCursor = LoadCursorW( NULL, (LPCWSTR)IDC_ARROW );
     wc.lpszClassName = class_name;
     RegisterClassW( &wc );
+    at = origin( dpi );
 
     style = frame == POPUP ? WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
                            : WS_OVERLAPPEDWINDOW;
@@ -373,7 +453,7 @@ int main( int argc, char **argv )
                                          : frame == POPUP    ? L"own-frame (popup)"
                                          : frame == NCCALC   ? L"own-frame (nccalc)"
                                                              : L"own-frame (border)",
-                            style, MulDiv( 120, dpi, 96 ), MulDiv( 120, dpi, 96 ), MulDiv( 900, dpi, 96 ),
+                            style, at.x, at.y, MulDiv( 900, dpi, 96 ),
                             MulDiv( 600, dpi, 96 ), NULL, NULL, wc.hInstance, NULL );
     if (!hwnd)
     {
@@ -404,6 +484,7 @@ int main( int argc, char **argv )
     }
     if (hold) printf( "own-frame (%s): close the window to end\n", frame_name() );
     else SetTimer( hwnd, 1, 700, NULL );
+    if (hold && mode) SetTimer( hwnd, 2, 3000, NULL );
 
     while (GetMessageW( &msg, NULL, 0, 0 ) > 0)
     {

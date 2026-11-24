@@ -1,4 +1,4 @@
-From 4007e0130c627b299e1a3283b9ae464b127a5a4c Mon Sep 17 00:00:00 2001
+From 4aa0fb5b8d49b77b72d8e0a4b9d4d7a8cdbfdfa6 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:26:57 +0100
 Subject: [PATCH] winemac.drv: Restore a maximized window a window tool moves
@@ -8,13 +8,16 @@ A Mac window tool that tiles a maximized window, such as Rectangle,
 left it maximized as far as the app knew: it kept its restore button,
 and restoring it sent it back to its old rect.
 
-Do as a live resize and a title bar drag of a maximized window already
-do: when its frame changes on the Mac side, restore it at the first
-change, keeping the new frame. The restore is sent while the frame
-event is handled, so win32u doesn't set the Cocoa frame back over the
-steps a window tool takes after the first (Rectangle: the size, the
-position, the size again). An app that keeps the window maximized takes
-the frame, as before.
+Do as Windows' own window tools do (FancyZones sets the placement):
+when a maximized window's frame changes on the Mac side, restore it at
+the first change, keeping the new frame as its normal one, and show it
+normal without activating it, so a window the tool arranges in the
+background stays there. The restore is done while the frame event is
+handled, so win32u doesn't set the Cocoa frame back over the steps a
+window tool takes after the first (Rectangle: the size, the position,
+the size again). It comes between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE,
+as on Windows when a maximized window is dragged or snapped. An app
+that keeps the window maximized takes the frame, as before.
 
 Wine's own frame changes leave nothing changed for the handler, and
 the frames macOS adjusts from what Wine set come with
@@ -26,8 +29,8 @@ and would have been restored.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  dlls/winemac.drv/cocoa_window.m |  9 +++++++++
- dlls/winemac.drv/window.c       | 31 ++++++++++++++++++++++++++++++-
- 2 files changed, 39 insertions(+), 1 deletion(-)
+ dlls/winemac.drv/window.c       | 27 ++++++++++++++++++++++++++-
+ 2 files changed, 35 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 index 62425f1a49..17c4760e89 100644
@@ -60,20 +63,22 @@ index 62425f1a49..17c4760e89 100644
              BOOL isNonActivating = (currentStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
              BOOL shouldBeNonActivating = (newStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 872e317ad7..795a295e09 100644
+index 872e317ad7..977f7d1654 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -1783,9 +1783,38 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
+@@ -1783,9 +1783,34 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
      if (!(flags & SWP_NOSIZE) || !(flags & SWP_NOMOVE))
      {
          bool send_sizemove = !event->window_frame_changed.in_resize && !being_dragged && !event->window_frame_changed.skip_size_move_loop;
 +
 +        /* Something on the Mac side, a window tool such as Rectangle, moved or sized a maximized
-+         * window. Do as a live resize and a title bar drag of one do (cocoa_window.m): restore it,
-+         * keeping the new frame. Wine's own frame changes leave nothing changed here, and the
-+         * frames macOS adjusts from what Wine set come with skip_size_move_loop. The restore is
-+         * sent, not posted: a window tool sets a frame in steps, and while this event is handled,
-+         * win32u's restore doesn't set the Cocoa frame back over a step still to come. */
++         * window. Restore it, keeping the new frame, as Windows' own tools do (FancyZones sets
++         * the placement): the new frame becomes its normal one, and it is shown normal without
++         * activating it, so a window the tool arranges in the background stays there. Wine's own
++         * frame changes leave nothing changed here, and the frames macOS adjusts from what Wine
++         * set come with skip_size_move_loop. The restore is done while this event is handled: a
++         * window tool sets a frame in steps, and win32u's restore then doesn't set the Cocoa
++         * frame back over a step still to come. */
 +        BOOL restored = FALSE;
 +
 +        /* The restore is part of the move or size, as on Windows when a maximized window is
@@ -81,20 +86,14 @@ index 872e317ad7..795a295e09 100644
          if (send_sizemove)
              send_message(hwnd, WM_ENTERSIZEMOVE, 0, 0);
 -        NtUserSetRawWindowPos(hwnd, rect, flags, FALSE);
-+        /* Only the window in front: the title bar's restore activates a window, and a window tool
-+         * may arrange one in the background (it sets every window's frame without activating
-+         * the app). A window in the background takes the frame as before. */
-+        if (send_sizemove && !event->window_frame_changed.fullscreen && hwnd == NtUserGetForegroundWindow() &&
-+            (NtUserGetWindowLongW(hwnd, GWL_STYLE) & (WS_MAXIMIZE | WS_VISIBLE | WS_DISABLED)) == (WS_MAXIMIZE | WS_VISIBLE))
++        if (send_sizemove && !event->window_frame_changed.fullscreen &&
++            (NtUserGetWindowLongW(hwnd, GWL_STYLE) & (WS_MAXIMIZE | WS_VISIBLE)) ==
++                (WS_MAXIMIZE | WS_VISIBLE))
 +        {
-+            TRACE("%p maximized, its frame changed on the Mac side: restoring it to %s\n", hwnd, wine_dbgstr_rect(&rect));
++            TRACE("%p maximized, its frame changed on the Mac side: restoring it to %s\n",
++                  hwnd, wine_dbgstr_rect(&rect));
 +            NtUserSetRawWindowPos(hwnd, rect, 0, TRUE);
-+            send_message(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
-+            if ((data = get_win_data(hwnd)))
-+            {
-+                if (data->cocoa_window) set_cocoa_window_properties(data);
-+                release_win_data(data);
-+            }
++            NtUserShowWindow(hwnd, SW_SHOWNOACTIVATE);
 +            /* if the app kept it maximized, it takes the new frame, as before */
 +            restored = !(NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZE);
 +        }
