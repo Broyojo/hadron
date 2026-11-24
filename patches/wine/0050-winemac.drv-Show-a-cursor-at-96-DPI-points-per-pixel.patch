@@ -1,4 +1,4 @@
-From 51746b9914ab88cc249b2d455ad6cec11722a2d7 Mon Sep 17 00:00:00 2001
+From dc33367c844842ab43d303a39c26b1d733171427 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ond=C5=99ej=20=C5=A0imon?= <ondrej@dorhawk.software>
 Date: Tue, 17 Nov 2026 09:28:37 +0100
 Subject: [PATCH] winemac.drv: Show a cursor at 96 / DPI points per pixel in
@@ -12,8 +12,9 @@ Mac pointer.
 Windows shows every cursor at its size in pixels. In Retina mode, show
 each one at 96 / DPI points per pixel, the DPI of the window it is set
 for: a point per pixel at 96 DPI, as before, and a display pixel per
-pixel at 192, as on Windows. A cursor set with no window takes the DPI
-of the program's awareness, 96 for a program that isn't DPI aware.
+pixel at 192, as on Windows. A cursor set over none of the program's
+windows (win32u passes no window or the desktop's) takes the DPI of
+the program's awareness, 96 for a program that isn't DPI aware.
 
 The cursor cache keeps the frames as they are, and the scale goes on
 each time the cursor is set, so a cursor shared by windows of different
@@ -23,8 +24,8 @@ NSCursor, and makes the cursor in use again when the mode changes.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  dlls/winemac.drv/cocoa_app.m | 29 +++++++++---
- dlls/winemac.drv/mouse.c     | 85 ++++++++++++++++++++++++++++++++++++
- 2 files changed, 107 insertions(+), 7 deletions(-)
+ dlls/winemac.drv/mouse.c     | 88 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 110 insertions(+), 7 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
 index f3a23ce5d2..422495c7cf 100644
@@ -83,10 +84,10 @@ index f3a23ce5d2..422495c7cf 100644
          {
              if ([window isKindOfClass:[WineWindow class]])
 diff --git a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
-index 0c9ba0393b..d3ef948e5f 100644
+index 0c9ba0393b..aa58f083bc 100644
 --- a/dlls/winemac.drv/mouse.c
 +++ b/dlls/winemac.drv/mouse.c
-@@ -780,6 +780,80 @@ static BOOL get_icon_info(HICON handle, ICONINFOEXW *ret)
+@@ -780,6 +780,83 @@ static BOOL get_icon_info(HICON handle, ICONINFOEXW *ret)
  }
  
  
@@ -112,15 +113,17 @@ index 0c9ba0393b..d3ef948e5f 100644
 + * How many points a cursor covers per pixel in Retina mode. Windows shows every cursor at its
 + * size in pixels, and loads one from a resource in the size for the DPI: 32 pixels at 96 DPI, 64
 + * at 192. In Retina mode a cursor covers 96 / DPI points per pixel, the DPI of the window it's set
-+ * for, or of the program over no window: at 96 DPI a point per pixel, as the Mac's own cursors
-+ * do; at 192 a display pixel per pixel, as on Windows. Without Retina mode a pixel is a point;
-+ * Cocoa applies the mode (cursorForFrame:), so a cursor follows it when it changes.
++ * for, or of the program over none of its windows: at 96 DPI a point per pixel, as the Mac's own
++ * cursors do; at 192 a display pixel per pixel, as on Windows. Without Retina mode a pixel is a
++ * point; Cocoa applies the mode (cursorForFrame:), so a cursor follows it when it changes.
 + */
 +static double cursor_points_per_pixel(HWND hwnd)
 +{
 +    UINT dpi;
 +
-+    if (!hwnd || !(dpi = NtUserGetDpiForWindow(hwnd))) dpi = process_dpi();
++    /* over none of the program's windows, win32u passes the desktop window */
++    if (!hwnd || hwnd == NtUserGetDesktopWindow() || !(dpi = NtUserGetDpiForWindow(hwnd)))
++        dpi = process_dpi();
 +    return dpi ? 96.0 / dpi : 1;
 +}
 +
@@ -159,7 +162,8 @@ index 0c9ba0393b..d3ef948e5f 100644
 +        CFRelease(scaled);
 +        return NULL;
 +    }
-+    TRACE("cursor shown at %g points per pixel\n", points_per_pixel);
++    /* Cocoa applies it in Retina mode only (cursorForFrame:) */
++    TRACE("cursor shown at %g points per pixel\n", retina_on ? points_per_pixel : 1);
 +    return scaled;
 +}
 +
@@ -167,7 +171,7 @@ index 0c9ba0393b..d3ef948e5f 100644
  /***********************************************************************
   *              SetCursor (MACDRV.@)
   */
-@@ -866,6 +940,17 @@ void macdrv_SetCursor(HWND hwnd, HCURSOR cursor)
+@@ -866,6 +943,17 @@ void macdrv_SetCursor(HWND hwnd, HCURSOR cursor)
      }
  
  done:

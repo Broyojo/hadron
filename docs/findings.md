@@ -2034,11 +2034,15 @@ changes only when the Mac's main display changes its own mode (`check_retina_sta
 program's mode change, which Hadron emulates (Wine 0033). This wasn't measured: it would have
 changed the display mode of the Mac the tests ran on.
 
-A cursor set with no window takes the DPI of the program's awareness: 96 for a program that isn't
-DPI aware, as on Windows, the system's for an aware one. It is the process's: win32u hands the
-driver a cursor while it handles a hardware message, with the thread made per-monitor aware for
-that. Over no window of the program, Wine passes the desktop window, so the cases above never
-reach this.
+A cursor set over none of the program's windows takes the DPI of the program's awareness: 96 for
+a program that isn't DPI aware, as on Windows, the system's for an aware one. win32u passes no
+window or the desktop window then; the desktop's DPI is the system's, whatever the program's. It
+is the process's awareness, not the thread's: win32u hands the driver a cursor while it handles a
+hardware message, with the thread made per-monitor aware for that. The cases above don't reach
+this: each sets its cursor over a window of its own.
+
+`WINEDEBUG=+cursor` gives the scale Cocoa applies: 1 without Retina mode. With `RetinaMode=n`
+the `wait` case's hourglass is 64×64 points, and the trace says 1 point per pixel (before, 0.5).
 
 `scripts/play` drops `STEAM_DYLD_INSERT_LIBRARIES` for a program (`HADRON_PROGRAM`), so the logger
 went in through a copy of `play` without that line. The same cases run with `play` as shipped, and
