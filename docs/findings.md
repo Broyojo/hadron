@@ -2022,6 +2022,24 @@ Hadron 0.3.3's runtime, and the same runtime with this patch's `winemac.so`, at 
 Over a window that isn't DPI aware, a 64-pixel cursor stays 64 points: Windows enlarges a program's
 cursors with its windows when it scales a program that isn't DPI aware, and 96 / DPI is 1 there.
 
+Only 192 DPI, the Retina display's own scale, matches Windows exactly. At 120 or 144 DPI a cursor
+still covers 96 / DPI points per pixel, so the hourglass Windows loads at 40 or 48 pixels shows at
+32 points, 64 display pixels, while the program's pixels are display pixels: relative to the
+program, the cursor is 1.6 or 1.33 times the size Windows shows it at. At Hadron's 96 DPI nothing
+changes.
+
+Cocoa applies Retina mode as it makes the `NSCursor`: the frames carry 96 / DPI, and without Retina
+mode a pixel is a point. When the mode changes, the cursor in use is made again. In Hadron the mode
+changes only when the Mac's main display changes its own mode (`check_retina_status`), never for a
+program's mode change, which Hadron emulates (Wine 0033). This wasn't measured: it would have
+changed the display mode of the Mac the tests ran on.
+
+A cursor set with no window takes the DPI of the program's awareness: 96 for a program that isn't
+DPI aware, as on Windows, the system's for an aware one. It is the process's: win32u hands the
+driver a cursor while it handles a hardware message, with the thread made per-monitor aware for
+that. Over no window of the program, Wine passes the desktop window, so the cases above never
+reach this.
+
 `scripts/play` drops `STEAM_DYLD_INSERT_LIBRARIES` for a program (`HADRON_PROGRAM`), so the logger
 went in through a copy of `play` without that line. The same cases run with `play` as shipped, and
 `WINEDEBUG=+cursor` shows winemac's scale: `cursor shown at 0.5 points per pixel` for `file` and for

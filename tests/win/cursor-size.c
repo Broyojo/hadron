@@ -4,8 +4,9 @@
  * tests/mac/nscursor-log.m, which logs every NSCursor the process makes, or with WINEDEBUG=+cursor,
  * which logs how many points per pixel winemac shows a cursor at. (macOS shows only the active
  * app's cursor, and a program started from a script can't make itself active, so the cursor on
- * screen can't be read from outside.) Windows shows every cursor at its size in pixels; in Retina mode winemac shows it at
- * 96 / DPI points per pixel, the DPI of the window it is set for (#98, #67).
+ * screen can't be read from outside.) Windows shows every cursor at its size in pixels; in Retina
+ * mode winemac shows it at 96 / DPI points per pixel, the DPI of the window it is set for (#98,
+ * #67).
  *
  * Usage: cursor-size.exe [bitmap|wait|wait-unaware|file|ani|cache]
  *   bitmap        (the default) a game's own cursor: 32x32 pixels from CreateIconIndirect, hot spot
@@ -19,7 +20,8 @@
  *   cache         the hourglass of a per-monitor aware program, set first over a window that
  *                 isn't DPI aware, then over one that is: one HCURSOR over windows of two DPIs
  *
- * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o cursor-size.exe tests/win/cursor-size.c -luser32 -lgdi32 */
+ * Build: toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang -Os -o cursor-size.exe \
+ *            tests/win/cursor-size.c -luser32 -lgdi32 */
 #define _WIN32_WINNT 0x0A00
 #include <stdio.h>
 #include <string.h>
@@ -47,7 +49,8 @@ static void describe( const char *what, HCURSOR c )
     }
     GetObjectA( info.hbmColor ? info.hbmColor : info.hbmMask, sizeof(bm), &bm );
     printf( "%s: %ldx%ld pixels, hot spot %lu,%lu, %u DPI\n", what, bm.bmWidth,
-            info.hbmColor ? bm.bmHeight : bm.bmHeight / 2, info.xHotspot, info.yHotspot, GetDpiForSystem() );
+            info.hbmColor ? bm.bmHeight : bm.bmHeight / 2, info.xHotspot, info.yHotspot,
+            GetDpiForSystem() );
     fflush( stdout );
 }
 
@@ -59,7 +62,8 @@ static DWORD image_size( int size )
 
 static BYTE *put_image( BYTE *p, int size, DWORD colour )
 {
-    BITMAPINFOHEADER bih = {.biSize = sizeof(bih), .biWidth = size, .biHeight = size * 2, .biPlanes = 1,
+    BITMAPINFOHEADER bih = {.biSize = sizeof(bih), .biWidth = size, .biHeight = size * 2,
+                            .biPlanes = 1,
                             .biBitCount = 32};
     int i;
 
@@ -153,10 +157,12 @@ static void show_window( DPI_AWARENESS_CONTEXT awareness, const char *what )
      * current one, which leaves the pointer where it is. */
     GetCursorPos( &pt );
     SetCursorPos( pt.x, pt.y );
-    hwnd = CreateWindowExA( WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOOLWINDOW, "cursor-size", "",
-                            WS_POPUP, pt.x - 16, pt.y - 16, 32, 32, NULL, NULL, GetModuleHandleA( NULL ), NULL );
+    hwnd = CreateWindowExA( WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+                            "cursor-size", "", WS_POPUP, pt.x - 16, pt.y - 16, 32, 32, NULL, NULL,
+                            GetModuleHandleA( NULL ), NULL );
     SetLayeredWindowAttributes( hwnd, 0, 1, LWA_ALPHA );
-    printf( "over a window of %u DPI%s%s\n", GetDpiForWindow( hwnd ), what ? ", " : "", what ? what : "" );
+    printf( "over a window of %u DPI%s%s\n", GetDpiForWindow( hwnd ), what ? ", " : "",
+            what ? what : "" );
     fflush( stdout );
     ShowWindow( hwnd, SW_SHOWNOACTIVATE );
     SetTimer( hwnd, 1, 1000, NULL );
@@ -170,7 +176,8 @@ int main( int argc, char **argv )
     BITMAPV5HEADER bi = {.bV5Size = sizeof(bi), .bV5Width = 32, .bV5Height = -32, .bV5Planes = 1,
                          .bV5BitCount = 32, .bV5Compression = BI_BITFIELDS, .bV5RedMask = 0xff0000,
                          .bV5GreenMask = 0xff00, .bV5BlueMask = 0xff, .bV5AlphaMask = 0xff000000};
-    WNDCLASSA wc = {.lpfnWndProc = wndproc, .hInstance = GetModuleHandleA( NULL ), .lpszClassName = "cursor-size"};
+    WNDCLASSA wc = {.lpfnWndProc = wndproc, .hInstance = GetModuleHandleA( NULL ),
+                    .lpszClassName = "cursor-size"};
     const char *test = argc > 1 ? argv[1] : "bitmap";
     DPI_AWARENESS_CONTEXT aware = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
 
@@ -181,7 +188,8 @@ int main( int argc, char **argv )
         DWORD *bits;
         int i;
 
-        info.hbmColor = CreateDIBSection( NULL, (BITMAPINFO *)&bi, DIB_RGB_COLORS, (void **)&bits, NULL, 0 );
+        info.hbmColor = CreateDIBSection( NULL, (BITMAPINFO *)&bi, DIB_RGB_COLORS, (void **)&bits,
+                                          NULL, 0 );
         for (i = 0; i < 32 * 32; i++) bits[i] = (i % 32 == i / 32 || i % 32 < 2) ? 0xffff0000 : 0;
         info.hbmMask = CreateBitmap( 32, 32, 1, 1, NULL );
         cursor = CreateIconIndirect( &info );
@@ -198,8 +206,10 @@ int main( int argc, char **argv )
     }
     else if (!strcmp( test, "file" ) || !strcmp( test, "ani" ))
     {
+        BOOL ani = !strcmp( test, "ani" );
+
         SetProcessDpiAwarenessContext( aware );
-        cursor = load_file( !strcmp( test, "ani" ) ? "cursor-size.ani" : "cursor-size.cur", !strcmp( test, "ani" ) );
+        cursor = load_file( ani ? "cursor-size.ani" : "cursor-size.cur", ani );
         describe( test, cursor );
         show_window( aware, NULL );
     }
