@@ -2230,6 +2230,51 @@ Seen while testing: about one run in four of the test hung at process exit, afte
 with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
 `TerminateProcess`. Not looked into.
 
+## vkd3d-proton moved to 3.1 (#72, issue #125)
+
+vkd3d-proton is pinned to the v3.1 tag (2026-10-28) instead of v3.0.1. Patches 0005 and 0006 were
+upstream commits picked onto 3.0.1 (5505762a, 49a1e2c7) and are in 3.1, so they are dropped. The
+four of Hadron's own apply unchanged, except for one line of context in 0003 (`swapchain.c`, a
+`WARN` that 3.1 casts to `int`); upstream's swapchain rework in 3.1 does not touch the latency
+handle code 0003 changes.
+
+What 3.1 asks of the driver and the toolchain, and what Hadron has: maintenance5 and maintenance6
+are required now (KosmicKrisp has both); `VK_KHR_shader_untyped_pointers` is enabled when present,
+for NVAPI's fp16 atomics only (KosmicKrisp has it); the DLLs link `version` and `pathcch`, which
+llvm-mingw has. `scripts/build-vulkan.sh` builds 3.1 with no change. 3.1 also has a cross file for
+ARM64EC (c1e0926d); Hadron still builds x86_64 PE, and an ARM64EC vkd3d-proton, run natively
+rather than under FEX, is the step `build-vulkan.sh` already names for later.
+
+Checked in a scratch prefix set up as `scripts/play` sets up a D3D12 game (vkd3d-proton's DLLs in
+`system32`, DXVK's DXGI as `dxgi_dxvk.dll`, KosmicKrisp with `MESA_KK_EXPERIMENTAL=dgc,xfb,sparse`),
+with the shader caches off. `tools/d3d12probe.c` reports the same capabilities on both builds
+(feature level 12_0, shader model 6.6) and `tests/win/d3d12bigview.c` reads back what it wrote on
+both. vkd3d-proton's own suite (`-Denable_tests=true`, stress tests left out, a test that aborts or
+prints nothing for 180 s is excluded and the run goes on):
+
+| Build | Tests | Pass | Fail | Abort or hang |
+|---|---|---|---|---|
+| 3.0.1 with its tests | 532 | 485 | 40 | 7 |
+| 3.0.1, 3.1's tests | 578 | 510 | 56 | 12 |
+| 3.1, 3.1's tests | 578 | 525 | 47 | 6 |
+
+On the same tests no test does worse on 3.1. It passes 15 that fail or abort on 3.0.1 (among them
+`test_renderpass_rendering`, `test_tight_resource_alignment`, `test_write_buffer_immediate`,
+`test_resource_retain_workaround`); `test_resolve_image_exhaustive_descriptors` hung on 3.0.1 and
+finishes on 3.1, with the same wrong values. The remap variants of `test_update_tile_mappings` fail a
+different number of checks on every run (798 to 980), on both builds. The six aborts left on 3.1
+abort on 3.0.1 too: `test_texture_feedback_instructions_{sm51,dxil}`, `test_sparse_default_mapping` (an
+assertion in KosmicKrisp's MSL backend), `test_fence_wait_robustness_shared`,
+`test_large_texel_buffer_view`, `test_large_buffer_descriptors`. Of the tests new in 3.1, these fail
+on both builds, so on the driver: `test_custom_border_color_limits_compute` (zeros from some
+border colour index on), `test_structured_buffer_addressing_wrap`,
+`test_conservative_ssbo_vectorization_{dxbc,dxil}_heap_desc` (vectors read one element early),
+`test_fp16_rounding_behavior_legacy` (one round-toward-zero case), and
+`test_query_heap_cpu_resolve_timestamp`, which aborts on 3.0.1 and on 3.1 finds the timestamps
+not monotonic.
+
+Not tested yet: a game. Teardown, the D3D12 game installed here, and Jurassic World Evolution 2
+(the big structured view of #36) are the ones to run before this ships.
 ## mtld3d 0.15.5: a windowed resize stopped the picture for good (fixed, #69, issue #177)
 
 Portal 2 changing its windowed resolution, and Call of Duty: World at War picking its native one,
