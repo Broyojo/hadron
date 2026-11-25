@@ -203,7 +203,21 @@ on it pass with 0079. One Khronos ES 3.1 test,
 `geometry_shader.layered_fbo.fb_texture_invalid_level_number`, fails with the new Zink: Mesa now
 follows ES 3.1 on levels of immutable textures (upstream `384eddfdbf7`), and the test, which
 expected ES 3.2's error, was fixed after CTS 1.4.6.2 (findings #74). It is expected to fail until
-the suites are built from a CTS with that fix. The full runs are still to be made again.
+the suites are built from a CTS with that fix.
+
+The full runs on that build (Mesa main of 2026-11-23 with the queue through 0079, 2026-11-24, six
+jobs, results in `build/cts-results/040-*`), each against the last full run:
+
+| Suite | Pass | Fail | Notes |
+|---|---|---|---|
+| Vulkan, full must-pass list | 676,693 | 118 known | 8,111 more passes than `vk-full-r4`; 7 tests that failed there pass. The 118 are the sparse format properties and the 6 `dgc.ext` crashes, as before. The 8 memory model crashes and 19 second tries are open item 2 again; the 8 pass with one job (`040-vk-recheck`) |
+| OpenGL 4.6 | 15,303 | 1 known, 1 test bug | `limits.max_fragment_input_components` as before. `direct_state_access.buffers_errors` expects `GL_INVALID_VALUE` for flag bit 0x4000, which Mesa now accepts for its `GL_MESA_map_buffer_client_pointer` (upstream `c0bcffb1b0a`); the test learnt that bit in VK-GL-CTS `1d845abcb986` (2026-10-13), after 1.4.6.2 |
+| OpenGL ES 3.1 | 35,078 | 0 | the same as `gles31-r13` |
+| OpenGL ES 3 / ES 2 | 42,494 / 14,312 | 0 / 0 | |
+| Khronos ES 3.1 / ES 3 / ES 2 | 3,951 / 6,457 / 141 | 1 test bug / 0 / 0 | the ES 3.1 failure is the `layered_fbo` test above; 20, 19 and 327 tests that failed in the older Khronos runs pass |
+
+Zink now prints, once per test process, that "incorrect rendering will happen" because the device
+lacks `rectangularLines` (a check upstream added in `75e2bbad1f6`); no test fails for it.
 
 What is left, and what was decided about it with the project owner on 2026-10-04. "Left" means
 left for the alpha with the reason written here, not forgotten. The one gap that was ours and was
