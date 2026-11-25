@@ -4,7 +4,8 @@
  * unwind gives the same pc and stack pointer again. Wine's ARM64 and ARM64EC dispatchers looped on
  * that frame forever (docs/findings.md #79: Subnautica, where an emulator bug sent the main thread
  * to a bad address). The child process runs such code: it sets the link register to its own last
- * instruction and faults. Exit 0 when the child ends within 20 seconds, 1 when it hangs. Build:
+ * instruction and faults. Exit 0 when the child ends within 20 seconds after faulting, 1 when it
+ * hangs or did not run the test. Build:
  *   arm64ec-w64-mingw32-clang -O2 unwind-no-progress.c -o unwind-no-progress-ec.exe
  *   aarch64-w64-mingw32-clang -O2 unwind-no-progress.c -o unwind-no-progress-arm64.exe
  * Usage: unwind-no-progress.exe */
@@ -77,7 +78,18 @@ int main(int argc, char **argv)
         TerminateProcess(pi.hProcess, 1);
         return 1;
     }
-    GetExitCodeProcess(pi.hProcess, &code);
+    if (!GetExitCodeProcess(pi.hProcess, &code))
+    {
+        printf("FAIL GetExitCodeProcess %lu\n", GetLastError());
+        return 1;
+    }
+    /* 2: the child could not set up its code, 3: the code returned instead of faulting. Either way
+     * the unwinder was never exercised. */
+    if (code == 2 || code == 3)
+    {
+        printf("FAIL the child did not run the test (exit %lu)\n", code);
+        return 1;
+    }
     printf("child exited with %#lx\nPASS\n", code);
     return 0;
 }
