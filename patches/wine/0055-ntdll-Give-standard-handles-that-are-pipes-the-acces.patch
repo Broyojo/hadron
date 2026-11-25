@@ -1,0 +1,69 @@
+From f44bddeb91ee7ce5bf2eb4574a6ee101e8e8b9fa Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 23 Nov 2026 11:16:03 -0500
+Subject: [PATCH] ntdll: Give standard handles that are pipes the access of
+ CreatePipe's ends.
+
+CreatePipe gives its read end FILE_WRITE_ATTRIBUTES and its write end
+FILE_READ_ATTRIBUTES beside the generic rights, so that either end can
+set and query its pipe mode. A standard handle made from a Unix pipe or
+socket, an anonymous pipe to Windows programs, had only GENERIC_READ or
+GENERIC_WRITE, and GetNamedPipeHandleState on standard output failed
+with ERROR_ACCESS_DENIED.
+---
+ dlls/ntdll/unix/env.c | 25 +++++++++++++++++++++----
+ 1 file changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
+index bd888b9928..d080fa643d 100644
+--- a/dlls/ntdll/unix/env.c
++++ b/dlls/ntdll/unix/env.c
+@@ -1334,6 +1334,23 @@ static void add_registry_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
+ }
+ 
+ 
++/*************************************************************************
++ *		std_fd_to_handle
++ *
++ * Make the handle of a standard Unix descriptor. A pipe or socket is an anonymous pipe to Windows
++ * programs; it gets the access CreatePipe gives the same end, so that the end can query and set
++ * its mode.
++ */
++static void std_fd_to_handle( int fd, unsigned int access, HANDLE *handle )
++{
++    struct stat st;
++
++    if (!fstat( fd, &st ) && (S_ISFIFO( st.st_mode ) || S_ISSOCK( st.st_mode )))
++        access |= (access & GENERIC_READ) ? FILE_WRITE_ATTRIBUTES : FILE_READ_ATTRIBUTES;
++    wine_server_fd_to_handle( fd, access, OBJ_INHERIT, handle );
++}
++
++
+ /*************************************************************************
+  *		get_initial_console
+  *
+@@ -1343,9 +1360,9 @@ static void get_initial_console( RTL_USER_PROCESS_PARAMETERS *params )
+ {
+     int output_fd = -1;
+ 
+-    wine_server_fd_to_handle( 0, GENERIC_READ|SYNCHRONIZE,  OBJ_INHERIT, &params->hStdInput );
+-    wine_server_fd_to_handle( 1, GENERIC_WRITE|SYNCHRONIZE, OBJ_INHERIT, &params->hStdOutput );
+-    wine_server_fd_to_handle( 2, GENERIC_WRITE|SYNCHRONIZE, OBJ_INHERIT, &params->hStdError );
++    std_fd_to_handle( 0, GENERIC_READ|SYNCHRONIZE,  &params->hStdInput );
++    std_fd_to_handle( 1, GENERIC_WRITE|SYNCHRONIZE, &params->hStdOutput );
++    std_fd_to_handle( 2, GENERIC_WRITE|SYNCHRONIZE, &params->hStdError );
+ 
+     if (main_image_info.SubSystemType != IMAGE_SUBSYSTEM_WINDOWS_CUI)
+         return;
+@@ -1587,7 +1604,7 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
+     ps_attr->Attributes[1].Attribute    = PS_ATTRIBUTE_MACHINE_TYPE;
+     ps_attr->Attributes[1].Value        = native_machine;
+ 
+-    wine_server_fd_to_handle( 2, GENERIC_WRITE | SYNCHRONIZE, OBJ_INHERIT, &params.hStdError );
++    std_fd_to_handle( 2, GENERIC_WRITE | SYNCHRONIZE, &params.hStdError );
+ 
+     status = NtCreateUserProcess( &process, &thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
+                                   NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, &params,
+-- 
+2.54.0 (Apple Git-157)
+
