@@ -168,7 +168,7 @@ each upload still cost a page-aligned staging allocation (16 KiB for ~100 bytes)
 those filled the 32-bit address space (`page boxes 2416 MiB`) until mtld3d panicked. Watch
 `vbib_gpu_copy_bytes_total` and the address-space warnings after any change to upload paths.
 
-**D3DX's `DebugSetMute` lookup (mtld3d 0002).** The statically linked D3DX library looks up
+**D3DX's `DebugSetMute` lookup (mtld3d 0002; upstream since 0.15, #69).** The statically linked D3DX library looks up
 `DebugSetMute` in `d3d9d.dll`/`d3d9.dll` before its calls and caches only a found pointer.
 mtld3d didn't export it, so every D3DX call did `GetModuleHandle` twice, `LoadLibrary` and
 `GetProcAddress`: ~40% of the game thread, found by mapping samples through FEX's block map
@@ -294,7 +294,7 @@ vkd3d-proton's own test suite (`tests/d3d12.exe`, built with `-Denable_tests=tru
 through Wine and maps the remaining driver work. First findings: `SampleLevel` at LOD exactly 0.5/1.5
 picks the lower mip (D3D rounds up; Vulkan allows either), one depth-compare sampling case is wrong, and
 creating a pipeline statistics query pool asserted (KosmicKrisp supported only occlusion and timestamp
-queries; D3D12 requires pipeline statistics; added in patch 0019, below).
+queries; D3D12 requires pipeline statistics; added in patch 0013, below).
 
 Teardown's voxels are drawn GPU-driven: ExecuteIndirect with per-object root CBV, vertex and index
 buffers. vkd3d-proton implements that with VK_EXT_device_generated_commands, which KosmicKrisp lacked,
@@ -324,11 +324,12 @@ a build that can't create D3D devices. `HADRON_D3D12=vkd3d` now only selects vkd
 and `config/games.conf` sets it for Teardown. steam-run applies per-game settings from that file and
 from the user's ~/Library/Application Support/Hadron/games.conf; launch options win over both.
 
-Geometry shaders: Mesa patches 0004-0009 carry the pending upstream KosmicKrisp geometry shader
-merge request (!44786, by its author, one conflict resolved against DGC), which implements them with
+Geometry shaders: Mesa patches 0004-0009 carried the then pending upstream KosmicKrisp geometry shader
+merge request (!44786, by its author, one conflict resolved against DGC; merged since, and out of the
+queue with #74), which implements them with
 poly as compute passes before the draw. vkd3d-proton's geometry shader, layered rendering, topology
 mismatch and PS layer tests pass (527 checks; test_primitive_id_read_tess_geom has one failure).
-Patch 0010 lists the geometry stage for DGC: with geometryShader on, vkd3d-proton turns DGC off
+Patch 0004 lists the geometry stage for DGC: with geometryShader on, vkd3d-proton turns DGC off
 unless every graphics stage is supported, which briefly made Teardown's voxels vanish again.
 
 Vulkan CTS 1.4.6.2 (built in build/vk-gl-cts, run natively against KosmicKrisp): dEQP-VK.geometry.*
@@ -337,11 +338,11 @@ bugs with tessellation or a geometry shader:
 
 - The geometry heap was reset at every render pass split, but DGC unrolls every sequence's indices into
   it before drawing; a later sequence's vertex shader outputs overwrote earlier-unrolled indices. The
-  heap now lives for the whole draw command (Mesa patch 0012). Plain multi-draws that unroll had the same
+  heap now lives for the whole draw command (Mesa patch 0006). Plain multi-draws that unroll had the same
   latent bug.
 - Indirect tessellation dispatched its VS and TCS grids, written in threads, as threadgroup counts of 64,
   so surplus threads wrote other instances' vertex slots (an intermittent race) and past the allocation.
-  They now use exact-thread dispatch (patch 0013); this affects all indirect tessellation draws.
+  They now use exact-thread dispatch (patch 0007); this affects all indirect tessellation draws.
 
 dEQP-VK.dgc.ext, geometry and tessellation together: 1100 pass, 0 fail. Excluded: the DGC *_lib variants,
 which build pipeline libraries on a device without VK_EXT_graphics_pipeline_library (a CTS bug; KK then
@@ -349,7 +350,7 @@ dereferences the missing input assembly state), and
 dEQP-VK.tessellation.geometry_interaction.limits.output_required_max_geometry, which hangs the GPU on the
 driver as it was before these changes too. Open.
 
-Transform feedback (Mesa patch 0014, `MESA_KK_EXPERIMENTAL=xfb`, on by default in `scripts/play`) is
+Transform feedback (Mesa patch 0008, `MESA_KK_EXPERIMENTAL=xfb`, on by default in `scripts/play`) is
 built on poly's geometry shader emulation, which already wrote transform feedback from the GS
 rasterization pass; KosmicKrisp threw away the two helper shaders it needs. The pre-GS pass (one
 thread per draw) clamps each stream's primitive count to the bound buffers and advances the offsets and
@@ -366,7 +367,7 @@ rest need more than 4 streams or buffers, or transformFeedbackDraw), and vkd3d-p
 output tests pass on an unmodified vkd3d-proton. With single-texel alignment and transform feedback,
 D3D12CreateDevice no longer needs relaxed checks.
 
-Sparse resources (Mesa patches 0015-0017, `MESA_KK_EXPERIMENTAL=sparse`, on in `scripts/play`) use
+Sparse resources (Mesa patches 0009-0011, `MESA_KK_EXPERIMENTAL=sparse`, on in `scripts/play`) use
 Metal 4's placement sparse resources: buffers and textures created without memory whose 64 KB pages
 `MTL4CommandQueue updateBufferMappings`/`updateTextureMappings` map onto placement heaps, which is
 vkQueueBindSparse almost one to one, and 64 KB is D3D12's tile size. Device memory heaps of 64 KB or
@@ -383,7 +384,7 @@ split off in nir_to_msl). Findings on the way, each checked with standalone Meta
 - a texel-buffer view of a sparse buffer works once its descriptor carries the sparse page size;
 - mapping updates need a resource-state barrier before later work; a small command buffer after each
   sparse bind provides it (without it, reads saw pages after they were unmapped).
-Two gaps took a residency map kept by the driver (patch 0024). MSL's texture_buffer has no sparse_read,
+Two gaps took a residency map kept by the driver (patch 0018). MSL's texture_buffer has no sparse_read,
 and Metal does not discard a shader write to an unmapped buffer page: the value reads back at that
 address until the command buffer ends (`tools/metal-probes/strict-write.m`), where Vulkan's
 residencyNonResidentStrict wants the write discarded. KosmicKrisp keeps one byte per 64 KB page of
@@ -411,7 +412,7 @@ test_sparse_default_mapping end without a result, test_update_tile_mappings_rema
 D3D12 feature level 12_0 needs tiled resources tier 2, which needs min/max sampler filtering. Metal
 takes a sampler reductionMode on every GPU but only honours it from Apple family 10 (M5): on M2 Pro
 (family 8) and M4 (family 9, tested on another Mac) every mode returns the weighted average, through
-both the Metal 3 and Metal 4 paths, and MSL has no shader-side reduction. Patch 0018 emulates it below
+both the Metal 3 and Metal 4 paths, and MSL has no shader-side reduction. Patch 0012 emulates it below
 family 10: the sampler descriptor carries the reduction and filter modes, and each filtered sample
 branches on them; the emulated path reads the 2x2 (2x2x2 for 3D) footprint at texel centres, where
 linear filtering returns texels exactly and the sampler's address modes still apply, at one or two
@@ -427,16 +428,16 @@ checked against the code, the specification and a test before changing anything.
 (the code already did it, an earlier NIR pass had lowered the case away, or the specification allows
 the behaviour: totals in the first multiview query, primitive restart not affecting primitive counts).
 Nine were real: DGC draws of strips with primitive restart into a geometry shader joined the strips
-(`tools/dgc-test` case 3; patch 0020); the min/max emulation ignored the sampler's LOD clamp for
+(`tools/dgc-test` case 3; patch 0014); the min/max emulation ignored the sampler's LOD clamp for
 explicit LODs, skipped nearest filtering with linear mip filtering and sparse sampling, stayed off when
 the extension was enabled without the Vulkan 1.2 feature bit, and computed a LOD for every sample
-before looking at the sampler's mode (`tools/minmax-test`; patch 0022); sparse image queries offered
-multisampling (0023); a statistics pipeline that failed to build was silently skipped (0021); and the
-two sparse gaps above (0024). Its review of that fix made three more claims, all real: an
+before looking at the sampler's mode (`tools/minmax-test`; patch 0016); sparse image queries offered
+multisampling (0017); a statistics pipeline that failed to build was silently skipped (0015); and the
+two sparse gaps above (0018). Its review of that fix made three more claims, all real: an
 out-of-range texel index read past the residency map, a store straddling two pages was checked only at
 its start, and stores through device addresses were not guarded.
 
-Pipeline statistics queries (patch 0019) are counted by KosmicKrisp itself: Metal exposes only the
+Pipeline statistics queries (patch 0013) are counted by KosmicKrisp itself: Metal exposes only the
 timestamp counter set on Apple GPUs (checked on M2 Pro and M4; statistic counter heaps are refused).
 Direct draws and dispatches are counted on the CPU; indirect, predicated and DGC draws are summed by
 one parallel kernel per render pass, run when the pass ends so no pass is split; tessellation and
@@ -490,12 +491,12 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
 64-bit atomics, because the driver lacked four Vulkan features. Metal offers none of them directly;
 `tools/metal-probes` has the measurements behind each implementation.
 
-- *Compute shader derivatives* (Mesa 0026). Metal takes no derivatives in compute kernels, and
+- *Compute shader derivatives* (Mesa 0020). Metal takes no derivatives in compute kernels, and
   implicit sampling there uses LOD 0. But threads 4n..4n+3 of a threadgroup form a quad for every
   local size tried, which is Vulkan's linear derivative group. Derivatives become differences of
   `quad_broadcast` values, implicit sampling passes them as gradients, and LOD queries are computed
   from them with the sampler's clamp and mip filter. Quad groups shuffle the local invocation ids.
-- *Denormal modes for 32-bit floats* (Mesa 0027). Apple GPUs flush 32-bit denormals to zero as
+- *Denormal modes for 32-bit floats* (Mesa 0021). Apple GPUs flush 32-bit denormals to zero as
   operands and as results, in every math mode; 16-bit denormals are kept. Flush-to-zero is therefore
   native, except for operations that only move bits (min, max, negate, abs), which get an explicit
   flush. Preserve is emulated for shaders that ask for it: each operation keeps the native result
@@ -503,7 +504,7 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
   rounding. vkd3d-proton only requests preserve when a DXIL shader does (`-denorm preserve`), so
   ordinary shaders are unaffected. `tools/denorm-test` compares 24 operations on 65,536 inputs bit
   for bit with the CPU.
-- *64-bit atomics* on buffers, shared memory and images (Mesa 0028, 0029). Metal has 64-bit atomic
+- *64-bit atomics* on buffers, shared memory and images (Mesa 0022, 0023). Metal has 64-bit atomic
   `min` and `max` only, without a result, on buffers and on RG32Uint textures. Those stay native,
   which is what Nanite's visibility buffer uses. Every other operation is a read-modify-write under
   a lock from a device table of 4,096 32-bit atomics. What had to be found out
@@ -516,7 +517,7 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
     and fragment shaders first let lanes take turns (only the lane whose turn it is spins). That
     stalled in the memory model tests, with threads giving up on locks nobody held, whenever the
     kernel was dispatched three or more times in a command buffer with Metal 4 barriers between;
-    any small change to the kernel hid it (`tools/metal-probes/turn-lock-stall.m`, Mesa 0079). The
+    any small change to the kernel hid it (`tools/metal-probes/turn-lock-stall.m`, Mesa 0071). The
     cause is not established.
   - Plain loads, stores and texture reads are not coherent across threads, even under the lock.
     They are with `atomic_thread_fence` at device scope before the read, between the read and the
@@ -549,8 +550,8 @@ The first launch on this driver passed Unreal's check ("shader model 6.6 ... ato
 reserved texture, and Metal's shader compiler dying.
 
 **Reserved textures with UAV access.** `CreateReservedResource` failed for a 16384x768x2 `R32_UINT`
-texture: sparse residency with storage usage, which Mesa 0016 had reported unsupported. Mesa 0030
-and 0032 allow it. Writable sparse textures only get Metal's sparse tier 1, and on macOS 27.0.1 its
+texture: sparse residency with storage usage, which Mesa 0010 had reported unsupported. Mesa 0024
+and 0026 allow it. Writable sparse textures only get Metal's sparse tier 1, and on macOS 27.0.1 its
 residency queries can't be used:
 
 - A view's first mip level is ignored: `sparse_read` through a view of levels 1-2 reports the
@@ -579,7 +580,7 @@ first and the rest after.
 **Metal's compiler running out of memory.** `MTLCompilerService` aborted with a failed allocation,
 and every library being compiled at that moment failed with `XPC_ERROR_CONNECTION_INTERRUPTED`;
 Unreal treats a failed pipeline as fatal. Two causes, both in the shape of the generated MSL, which
-declares every temporary at the top of the function (Mesa 0031):
+declares every temporary at the top of the function (Mesa 0025):
 
 - The declarations were zero-initialised, which made LLVM's mem2reg and SROA see two stores per
   temporary. Dropping the initialiser took one shader from 25 s and 2.5 GB to 5 s and 0.6 GB.
@@ -587,7 +588,7 @@ declares every temporary at the top of the function (Mesa 0031):
   shader with 97,000 temporaries and 19,000 selects needed 2.6 GB just to parse. Three
   `#pragma clang diagnostic ignored` lines turn the analysis off: 160 MB.
 
-The driver now saves any MSL that Metal refuses to compile (Mesa 0033, `MESA_KK_FAILED_MSL_DIR`;
+The driver now saves any MSL that Metal refuses to compile (Mesa 0027, `MESA_KK_FAILED_MSL_DIR`;
 `scripts/play` points it at `build/logs/failed-msl`), which is how the second cause was found.
 
 **Where it stands (2026-10-01, paused).** With those fixes a launch initialises the engine in about
@@ -601,9 +602,9 @@ driver. Instruction counts for one such shader, pass by pass:
 |---|---|---|
 | SPIR-V to NIR | 6,600 | 55 |
 | compute derivatives, texture lowering | 7,700 | 107 |
-| sparse buffer store guard (Mesa 0024) | 16,100 | 214 |
+| sparse buffer store guard (Mesa 0018) | 16,100 | 214 |
 | explicit I/O | 21,500 | 214 |
-| sampler min/max emulation (Mesa 0018) | 48,800 | 1,558 |
+| sampler min/max emulation (Mesa 0012) | 48,800 | 1,558 |
 | descriptor lowering | 93,400 | 1,350 |
 | null descriptor checks | 101,600 | 1,350 |
 | NIR optimisation, as emitted | 63,200 | 1,350 |
@@ -710,7 +711,8 @@ libraries.
 
 Wine patch 0024 registers 14.51.36247, which is what the redistributable Steam installs today
 writes. The entries are written without overwriting, as upstream has them, so a prefix made
-earlier keeps 14.42; such a prefix has to be made again for a game that needs it.
+earlier keeps 14.42; such a prefix has to be made again for a game that needs it. Upstream made
+the same change in Wine 11.22 (08cb610c0d), and the patch left the queue (#73).
 
 That was not enough for Astroneer: its launcher still asked. It wants 14.24.28127.4 or newer
 and then loads `msvcp140_2.dll` and `vcruntime140_1.dll`, and the tester's logs show it never
@@ -767,6 +769,9 @@ not see those writes here. Not verified. The next experiment is the same `jjs` t
 `FEX_SMCCHECKS=full`, and with `FEX_DISKCACHE=0`; `scripts/wine-run` passes only `FEX_DISKCACHE`
 on, so run `dist/bin/wine` with its environment by hand.
 
+FEX-2611.1 (#67) keeps a guest load whose value is unused, which C1's null checks rely on: the
+likeliest cause so far. Repeat the `jjs` test, and the game's own `java.exe`, on it first.
+
 ## Wine: native host mappings stall thread creation on macOS (fixed, #28)
 
 Astroneer froze for 2.7–2.9 seconds on mission completion on an Apple M5 Max with
@@ -785,7 +790,7 @@ attempt correctly failed, but the search advanced by only 64 KiB. The two
 allocations made 7,372,814 and 7,372,815 failed attempts. The stall was in Wine's
 address search, not FEX compilation or a graphics driver.
 
-Wine patch 0025 queries the overlapping native region after a mapping collision
+Wine patch 0024 queries the overlapping native region after a mapping collision
 and skips to its aligned boundary in the search direction. It descends through
 Mach submaps at the candidate address and requests short region information, which
 does not ask for resident-page statistics. The caller still enforces allocation
@@ -868,7 +873,7 @@ pauses and lets go of the cursor when Steam tells it the overlay is open; Subnau
 Dash carried on, with the cursor locked in the middle of the window, and the overlay could only
 be used after pausing the game. lsteamclient sets the event
 `__wine_steamclient_GameOverlayActivated` while the overlay is open, and nothing in Hadron's Wine
-read it. Wine patch 0026 makes winemac.drv act on it. A thread in a game started by Steam waits
+read it. Wine patch 0025 makes winemac.drv act on it. A thread in a game started by Steam waits
 for the event, so nothing is polled while the overlay is closed. While it is set, key presses,
 mouse buttons, movement and scrolling are not sent to the game; key releases are, and held mouse
 buttons are released, so nothing stays down. The game's clipping rectangle is lifted and
@@ -1068,8 +1073,10 @@ bits and the surface was not created with `EGL_PRESENT_OPAQUE_EXT`, the Metal la
 composited with the frame's alpha, and a frame with alpha 0 came out black. Mesa offered the
 extension only on Wayland, and Wine's Mac driver did not ask for it.
 
-Mesa patch 0084 offers `EGL_EXT_present_opaque` for window surfaces on a Metal layer, and Wine
+Mesa patch 0075 offers `EGL_EXT_present_opaque` for window surfaces on a Metal layer, and Wine
 patch 0028 creates every OpenGL window surface with it, as Wine's Wayland driver does. The
+Mesa patch 0084 offers `EGL_EXT_present_opaque` for window surfaces on a Metal layer, and Wine
+patch 0027 creates every OpenGL window surface with it, as Wine's Wayland driver does. The
 swapchain is then opaque, and KosmicKrisp drops the alpha when it copies the frame to the
 drawable. What the application reads back is unchanged: the alpha stays in its framebuffer.
 
@@ -1220,7 +1227,7 @@ after two seconds. Shell argument handling and arm64 spawn selection are unchang
 
 Inactive fullscreen windows also had an ordering defect: `minimumLevelForActive:`
 returned normal level under Wine's inactive-floating policy, but
-`adjustWindowLevels:` then raised floating windows above the Dock. Wine patch 0029
+`adjustWindowLevels:` then raised floating windows above the Dock. Wine patch 0028
 applies that floor only when the computed minimum exceeds normal. An inactive game
 stays at level 0; active fullscreen and permitted windowed topmost windows retain
 their elevation.
@@ -1283,21 +1290,21 @@ saved settings asked for resolution 5 of that monitor's list, 3008x2005. Three t
 - Wine's Mac driver changed the mode of the main display only. For any other display it logged
   `Changing non-primary adapter settings is currently unsupported` and still returned success:
   the game sized its window to 3008x2005 on a monitor that stayed 1920x1280.
-- With that fixed (Wine 0030), macOS switched the BenQ to 3008x2005, a Retina mode with a
+- With that fixed (Wine 0029), macOS switched the BenQ to 3008x2005, a Retina mode with a
   6016x4010 backing at 100 Hz, and moved the larger display from above the built-in one to its
-  right (-204,-1280 to 1512,-1280). The window stayed behind. Wine 0031 moves windows placed at a
+  right (-204,-1280 to 1512,-1280). The window stayed behind. Wine 0030 moves windows placed at a
   display's top-left corner with it, and back when the mode is restored.
 - Even then the game showed only a sliver, and every switch to another app restored the mode and
   every return set it again. Real mode changes on macOS capture the display, rearrange displays,
   give Retina displays scaled modes and offer modes larger than the desktop (the BenQ's list ran
   to 3840x2560 while its desktop is 1920x1280).
 
-So Hadron no longer changes display modes at all (Wine 0033): win32u's emulated mode changes,
+So Hadron no longer changes display modes at all (Wine 0032): win32u's emulated mode changes,
 which upstream offers as the `EmulateModeset` option, are on by default on macOS. A game sees
 modes up to each monitor's desktop size, a mode change succeeds at once and leaves the display
 alone, and the game's window covers the monitor with its picture scaled and its aspect ratio kept.
 That is what native Mac games do: they render at a size of their choice and let the system scale
-it. `EmulateModeset=n` in `HKCU\Software\Wine\X11 Driver` turns it off; 0030 and 0031 then make
+it. `EmulateModeset=n` in `HKCU\Software\Wine\X11 Driver` turns it off; 0029 and 0030 then make
 real mode changes work on every display.
 
 Measured with test programs (`fsmode.exe`: a mode change and a popup window covering the
@@ -1310,7 +1317,7 @@ games that set brightness with gamma ramps get no effect, as under Proton. Rende
 display's full pixel size is #71; fullscreen in its own Space is #72.
 
 The built-in display of an Apple silicon Mac has no EDID Wine can read, and the one Wine
-generates for it was named "Wine Monitor"; games now list it as "Built-in" (Wine 0032).
+generates for it was named "Wine Monitor"; games now list it as "Built-in" (Wine 0031).
 ## .NET: mscoree was switched off for every game (fixed, #37)
 
 Fable Anniversary exited at once (issue #57): `Library mscoree.dll (which is needed by ... Fable
@@ -1340,14 +1347,14 @@ it; whether Fable's mixed native and .NET code runs on Wine Mono is the next que
 ## macOS partial decommit retained stale guest data (#42)
 
 On a 16K host, decommitting/recommitting a 4K boundary page retained old bytes.
-Wine patch 0034 clears partial host pages through temporary writable aliases,
+Wine patch 0033 clears partial host pages through temporary writable aliases,
 without relaxing committed neighbours' protections; MAP_JIT uses per-thread write
 mode. Both aliases are prepared before clearing, so preparation failure leaves
 contents intact. Alias writes invalidate the original instruction-cache range too.
 Whole-view decommit still remaps the rounded host range, including
 a view smaller than one host page, to release its backing. Other hosts keep their prior behaviour.
 
-Patch 0035 makes it cheap: a host page that is already writable, the usual case, is cleared in
+Patch 0034 makes it cheap: a host page that is already writable, the usual case, is cleared in
 place with no alias, and mprotect runs afterwards only when the host page's protection changes.
 Aliases remain for read-only, executable and no-access host pages. Whole and partial decommits
 take one path: a boundary host page is replaced whole only when nothing else in it is in use (no
@@ -1357,8 +1364,8 @@ a host page today; the check does not rely on that.
 
 Decommit plus recommit, x86_64 / ARM64 on an M2 Pro (`tests/win/decommit-bench.c`): a 4K page
 inside a host page 1.2 / 0.8 us before, 5.2 / 4.7 us with aliases always, 1.3 / 0.9 us with
-0035; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12 and 2.1 / 1.7 us; a 4K page alone
-in its host page 3.2 / 2.9 us with 0035, the cost of a whole host page.
+0034; 36K with partial pages at both ends 1.8 / 1.4, 12.5 / 12 and 2.1 / 1.7 us; a 4K page alone
+in its host page 3.2 / 2.9 us with 0034, the cost of a whole host page.
 `tests/win/decommit-neighbours.c` covers the alias path (read-only, executable and no-access
 neighbours), which main fails, and a decommit at the end of a view shorter than its host page.
 
@@ -1366,7 +1373,7 @@ The zero/preservation regression covers 19 cases on x86_64 and i386, including a
 whole 4K views with RW, read-only and RX protections. The Windows ARM64 concurrent read-only/RX-neighbour tests reject
 protected writes and preserve adjacent data/code; a delayed old RW-protection build
 reproduced the race. A native MAP_JIT mechanism probe passes; full Wine JIT-view integration is not covered.
-Subnautica, Teardown and Portal 2 played normally on 0034 (2026-10-16).
+Subnautica, Teardown and Portal 2 played normally on 0033 (2026-10-16).
 
 ## Media Foundation could not play anything: no GStreamer (fixed, #38)
 
@@ -1433,7 +1440,7 @@ The Paradox Launcher's GPU process died creating a compute pipeline whose receiv
 0xbaadf00dbaadf00d, Wine's fill for uninitialized heap memory. `ClearUAV`'s constructor compiles
 its pipelines through `ArgumentEncodingContext::device_`, which was declared, and so initialized,
 after it. Upstream DXMT fixed the order in fb4515681d (2026-09-30), after our pin; DXMT patch
-0003 is that commit, to drop when the pin moves past it. Found by Lennard Zehner (#80).
+0003 was that commit until the pin moved past it (#68). Found by Lennard Zehner (#80).
 
 ## Writable shared sections on 16 KB pages (fixed, #43)
 
@@ -1445,7 +1452,7 @@ with the end of `.data`, so `map_file_into_view` refused ("unaligned shared mapp
 image did not load. Any image or DLL with a writable shared section whose address, or whose
 offset in the shared-section file, is not a multiple of 16 KB failed the same way.
 
-Wine patch 0036 maps such a section as a private copy, with a FIXME in the log, and keeps the
+Wine patch 0035 maps such a section as a private copy, with a FIXME in the log, and keeps the
 real shared mapping wherever the section lines up with host pages. One process sees exactly
 what Windows gives it. Two instances of the image do not share the section's data: a second
 one starts from the section's initial contents. A correct general answer is not possible at
@@ -1504,7 +1511,7 @@ A game used to see a Retina display at its size in points, 1512×982 for a MacBo
 3024×1964 panel, and macOS scaled its picture up 2× (issue #71). Windows shows a high-density
 display at its pixels and lets a game pick a lower mode, so Hadron does too: Wine's Mac driver has
 a Retina mode, read from the `RetinaMode` value of `HKCU\Software\Wine\Mac Driver`, and Wine patch
-0037 makes it the default. A game that draws at the desktop's size now draws four times the pixels;
+0036 makes it the default. A game that draws at the desktop's size now draws four times the pixels;
 its own resolution setting goes back to 1512×982 or lower, and MetalFX upscaling (Direct3D 10 and
 11) is another way back. `RetinaMode=n` in a prefix's registry still gives points.
 
@@ -1519,12 +1526,12 @@ With it, `tests/win/display-report.c` reports the built-in display as 3024×1964
 looks (monitor rectangle, current mode, mode list up to 3024×1964, `SM_CXSCREEN`), against 1512×982
 with `RetinaMode=n`. `HORZRES` reported 6048: winemac doubled the size win32u returns, a 2018 change
 from when that size was in points, which it no longer is in Retina mode (upstream too). Wine patch
-0038 drops the doubling. The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL (Zink) run
+0038 drops the doubling (upstream since Wine 11.22, d9590c210a; dropped from the queue, #73). The triangle tests for D3D9 (mtld3d), D3D11 (DXMT) and OpenGL (Zink) run
 in both modes at 120 fps (2026-10-17). A windowed game is half as
 large on screen as before, since its pixels are now the display's.
 
 A game's own cursor was half as large too (issue #98): winemac made the Mac cursor from its image
-at half its pixel size in points, as for windows. Wine patch 0039 makes a cursor cover a point for
+at half its pixel size in points, as for windows. Wine patch 0037 makes a cursor cover a point for
 each of its pixels, as the Mac's own cursors and every cursor without Retina mode do; macOS scales
 it up on the display. `tests/win/cursor-size.c` sets a 32×32 cursor with its hot spot at (5,9) and
 `tests/mac/nscursor-log.m` logs the NSCursor made from it: 16×16 points with the hot spot at
@@ -1626,7 +1633,8 @@ top-down request that may go there, and only then the whole range: all eight lan
 0x7ffd9f000000 and 0x7ffe9f000000. A top-down request bounded below 4 GB (`VirtualAlloc2` with
 `HighestEndingAddress`) is still placed there, and 32-bit programs, whose bound is 2 or 4 GB, are
 unchanged. The reporter's own fix, a 4 GB floor for unbounded top-down requests, moved the same
-reservations and got BELOW to its menu.
+reservations and got BELOW to its menu. Wine 11.22's rework of the reserved areas gives top-down
+requests a range of their own that grows downward, and the patch left the queue (#73).
 
 Checked with the change, on an M2 Pro: the decommit tests of #42 as 32- and 64-bit programs,
 `shared-section` (#43), `hello` in all three architectures, `bench`, `d3d11tri` and `d3d9tri`.
@@ -1646,7 +1654,7 @@ that fault was dispatched the same way, and so on.
 The bitmap has one bit per 4 KB page up to Wine's address space limit, rounded up to a host page.
 `tests/win/is-ec-code.c` calls `RtlIsEcCode` from an x64 program: on main's Wine it answers for
 0x7ffffffff000 and faults at 1 << 47, at 0x7ffff0000000, the first byte after the bitmap. Wine
-patch 0041 sizes the bitmap for the whole 47-bit user space whatever the host's limit (4 GB of
+patch 0038 sizes the bitmap for the whole 47-bit user space whatever the host's limit (4 GB of
 address space, as before on this Mac) and has `RtlIsEcCode` return FALSE above it; the test then
 passes for 1 << 47, the value from the report and all bits set. Whether Hogwarts Legacy gets
 further with this is not known yet: the reporter has to try it. The first problem in #95, the
@@ -1692,7 +1700,7 @@ Vulkan loader and fell back to Apple's OpenGL 4.1, which Hadron does not otherwi
 M2 Pro the windowed game drew a black frame there; through `scripts/program-run` it reached its
 menu, windowed and fullscreen.
 
-Wine patch 0043 makes the loader set the same defaults when `WINE_MAC_OPENGL` is unset and the
+Wine patch 0040 makes the loader set the same defaults when `WINE_MAC_OPENGL` is unset and the
 runtime's Zink is next to it, then start again, since dyld reads `DYLD_FALLBACK_LIBRARY_PATH` only
 when a process starts. Settings already in the environment are kept, so launches through `play`,
 which sets them all, do not start again. Those that do: `wine` run by hand, `scripts/wine-run`,
@@ -1714,7 +1722,7 @@ active, Wine sends each key except the modifiers through it: the window gets `WM
 arrow) comes back as a normal `WM_KEYDOWN`. SDL3 drops `VK_PROCESSKEY` keys, and Daemon keeps
 SDL's text input on, so the letters arrived only as text. Upstream Wine fixed the test in
 a07e981c ("imm32: Do not classify aliased HKLs as IME", 2026-10-01): an IME layout id is
-`0xe0xx`. Wine patch 0044 is that commit.
+`0xe0xx`. Wine patch 0044 was that commit, until the move to Wine 11.22 (#73).
 
 With one U.S. layout, as on this Mac, nothing changes: Wine answers SDL's keymap questions
 correctly (scancode 0x11 is VK 'W' and types `w`, and so on for A, S and D). Not reproduced yet:
@@ -1761,7 +1769,7 @@ emulated mode changes the two sizes are arbitrary: 96 × 2628 / 1025 and, on a M
 not fit, and `make_ratio` asserted. Retina mode, in which the physical size is in pixels, doubles
 the numerator and makes it likelier. Upstream Wine has the same code.
 
-Wine patch 0045 makes `make_ratio` return the closest fraction whose terms fit, from the
+Wine patch 0041 makes `make_ratio` return the closest fraction whose terms fit, from the
 continued fraction (the last convergent or the largest semiconvergent that fits, whichever is
 closer), and keeps the exact fraction whenever it fits. Over 2,424 combinations of DPI, screen
 and mode width it matched a brute-force search for the best such fraction every time; the worst
@@ -1798,7 +1806,7 @@ range to the new process in `WINEPRELOADRESERVE`; on Linux the preloader reserve
 runs, but on arm64 macOS nothing runs that early. `tests/win/fixed-base.c` builds an executable
 with the same base and size and no relocations: on main it failed 11 of 30 direct starts.
 
-Wine patch 0046, the reporter's approach moved into the loader: before anything else, `main()`
+Wine patch 0042, the reporter's approach moved into the loader: before anything else, `main()`
 looks up the range with `mach_vm_region` and, while something is in it, starts the loader again
 (at most 32 times), which draws new placements. The range is not reserved, as the reporter
 pointed out: a reserved area there would be taken by the top-down allocations made before the
@@ -1806,14 +1814,15 @@ image is mapped (the first thread's data, the ARM64EC code map). With it the tes
 loaded 30 of 30 direct starts and 40 of 40 as a child, the way the game's bootstrap starts it.
 Upstream Wine's rework of the reserved areas (#120) may offer a fuller fix at the next rebase. The
 report's minor case, an x64 `infinst.exe` with base 0x100000000 from DirectX's June 2010
-redistributable, is not covered: its range starts below 4 GB, in the page zero.
+redistributable, is not covered: its range starts at 4 GB, in the part of the page zero the loader
+left (fixed in #75).
 
 ## Depth bounds before Apple family 10 (fixed, #57, issue #128)
 
 Metal has a depth bounds test only on Apple GPU family 10 (`setDepthTestMinBound:maxBound:`), so
 KosmicKrisp reported `depthBounds` there only. DOOM (2016) asks for it and will not create its
 device without it (#128), and vkd3d-proton tells a D3D12 game the test is missing and fails a
-pipeline that asks for it anyway with `E_INVALIDARG`. Mesa patch 0085 implements the test
+pipeline that asks for it anyway with `E_INVALIDARG`. Mesa patch 0076 implements the test
 on the earlier families and reports the feature on all of them.
 
 The test needs the depth already stored in the attachment, which an Apple GPU keeps in tile
@@ -1830,7 +1839,7 @@ shader whose pipeline may use it, a benchmark of 200 opaque full-screen layers d
 front took 75 ms a frame where it took 1.15 ms: a discard turns off hidden surface removal, so
 every layer is shaded. Zink makes the test's enable dynamic in every pipeline, so every OpenGL
 game would have paid that. The variant is built like the one that counts fragment shader
-invocations for statistics queries (patch 0019, which 0085 generalises to the combinations of
+invocations for statistics queries (patch 0013, which 0076 generalises to the combinations of
 the two): its MSL is made with the shader, its Metal pipeline at the first draw that needs it.
 With it the benchmark takes 1.20 ms with the enable dynamic.
 
@@ -1881,7 +1890,7 @@ them on (`--buildtype=debugoptimized`, #47), so the game aborts.
 
 Turning the assertions off would only trade the abort for reads of other memory: with the range
 as given, KosmicKrisp's bounds checks let the shader read past the buffer into whatever is
-allocated after it. Mesa patch 0086 clamps the range of a buffer descriptor (and of a transform
+allocated after it. Mesa patch 0077 clamps the range of a buffer descriptor (and of a transform
 feedback buffer) to the part of the buffer from its offset, so that a read past the buffer's end
 is out of bounds and is handled as any other one: zero with robust buffer access, nothing outside
 the buffer without it. A valid range is unchanged.
@@ -1905,14 +1914,14 @@ command buffer is reset. DOOM draws that way with bounds [0, 1], thousands of ti
 Without `VK_EXT_depth_range_unrestricted` every defined value a depth attachment can hold is in
 [0, 1]: the reporter checked the specification's chapters on fragment depth, clears and copies,
 where values outside [0, 1] are either clamped, not allowed, or leave the result undefined. So
-bounds that cover [0, 1] cannot reject a sample, and Mesa patch 0088 skips the emulation for them: no break of the render pass, no copy, no
+bounds that cover [0, 1] cannot reject a sample, and Mesa patch 0078 skips the emulation for them: no break of the render pass, no copy, no
 shader variant. Depth written by such a draw still counts as changed, so a later draw with
 narrower bounds reads it from memory again. The reporter's version of the same check held DOOM at
 6.4 GB in the scene that grew to 30 GB.
 
 `tests/mac/vk-depth-bounds-memory.sh` records 128 such draws on a 1024×1024 depth buffer and then
 checks bounds of [0.4, 0.6] (which must draw) and [0.6, 0.9] (which must not). With the 0.3.2
-driver the process grew by 597 MB, with 0088 by 18 MB; both draw correctly. The 26,830 depth
+driver the process grew by 597 MB, with 0078 by 18 MB; both draw correctly. The 26,830 depth
 bounds cases of the Vulkan CTS give the same 1,986 pass and 24,844 not supported with and without
 it, case for case, and `tests/mac/vk-depth-bounds-msaa.sh` passes.
 
@@ -1957,7 +1966,7 @@ point the Mac's pointer moved became two counts of raw input. On Windows raw inp
 device's movement and does not depend on the display's pixel density. Wine's X11 and Wayland
 drivers already send it separately (`SEND_HWMSG_RAWINPUT`); winemac did not.
 
-Wine patch 0047 sends it in points, separately from the cursor, which stays in pixels and under
+Wine patch 0043 sends it in points, separately from the cursor, which stays in pixels and under
 the Mac's pointer. A first version took it from the events' deltas, and Portal 2's view snapped
 back with every move: the game puts the cursor back in the middle after each movement, and the
 deltas of the first event after `CGWarpMouseCursorPosition` include the warp (the comment in
@@ -2005,34 +2014,35 @@ belonged. Four things in winemac were wrong:
 - They were upside down. They were a `CAShapeLayer` path, and copying the content view layer's
   `geometryFlipped` does not make a path follow it. A native test (a flipped, layer-backed view as
   winemac's) put a path at y 0 to 50 at the bottom of the view; a plain layer framed with
-  `-[NSView convertRectToLayer:]` lands where the view's coordinates say. Wine patch 0050 draws the
+  `-[NSView convertRectToLayer:]` lands where the view's coordinates say. Wine patch 0044 draws the
   bars that way, from the window rect relative to the window, in points.
 - They were never taken down: `BOOL fullscreen = swp_flags & WINE_SWP_FULLSCREEN` went into a
   one-bit field, and the flag is bit 31, so the field always held 0 and leaving fullscreen did not
   look like a change. Upside down, the bar left behind was at the bottom of the screen-sized layer,
   outside the smaller window that came back; the right way up it blacked out the top 132 rows of
-  d3d11fs's 640×480 window. 0050 stores a boolean, as
+  d3d11fs's 640×480 window. 0044 stores a boolean, as
   winex11 does.
 - The window surface was anchored at the top of the screen. Its scaled surface starts at the
   letterbox's corner and is the letterbox's size (3072×1920 for 3024×1701); the content view's layer
-  showed it from the top of the screen, 1964 rows tall. Wine patch 0051 crops it to the letterbox and
+  showed it from the top of the screen, 1964 rows tall. Wine patch 0045 crops it to the letterbox and
   places it there with the layer's `contentsRect`, whose edge pixels, repeated outward past the
-  unit square, are under the bars.
+  unit square, are under the bars. Since Wine 11.22 the surface is an IOSurface and is not cropped
+  (#73).
 
 That left a strip of the window surface beside the picture with Retina mode off: at 1024×768 the
 window is 1310 points wide, from 101 to 1411, and the Direct3D view 1309, to 1410. win32u maps the
 window's edges one by one (`map_monitor_rect`, rounding each) but placed a client surface by
 scaling the present rect's size and adding the mapped origin (`get_client_surface_rects`), which
 rounds differently; in Retina mode the same mode gives a surface a pixel wider than the window, under
-the bar. Wine patch 0052 maps the present rect's edges as the window's.
+the bar. Wine patch 0046 maps the present rect's edges as the window's.
 
 Measured on the built-in display, Retina mode on, capturing only the test's own window
 (`screencapture -l`) and counting rows and columns of its colour, 2026-11-16;
 `tests/mac/picture-bounds.swift` prints the picture's bounds and the black bars around it in such a
 capture, and on 2026-11-23 gave the same numbers for d3d9fs and letterbox-gdi at 1280×720. `tests/win/d3d9fs.c`
 (wined3d), `tests/win/d3d11fs.c` (DXMT) and `tests/win/letterbox-gdi.c`, which sets the present rect
-itself, draws only with GDI and marks the window's top-left quarter. "After" is with 0050 to 0052;
-in Retina mode 0052 changes none of these numbers.
+itself, draws only with GDI and marks the window's top-left quarter. "After" is with 0044 to 0046;
+in Retina mode 0046 changes none of these numbers.
 
 | Test | Before | After |
 |---|---|---|
@@ -2042,11 +2052,11 @@ in Retina mode 0052 changes none of these numbers.
 | letterbox-gdi 1280×720 | surface from row 0, top-anchored; quarter rows 0–848 | quarter columns 0–1509, rows 132–980 (half of 3024×1701, then a blended line) |
 | letterbox-gdi 1024×768 | surface columns 406–2687 | quarter columns 203–1510, rows 0–979 |
 | 1512×982, 3024×1964 (the screen's shape) | whole window | unchanged |
-| d3d11fs back in a window | whole window | whole window (top 132 rows black with 0050's bars and the old flag) |
+| d3d11fs back in a window | whole window | whole window (top 132 rows black with 0044's bars and the old flag) |
 | d3d11fs 1280×720, Retina mode off | black 0–131, picture 132–1831, black 1832–1963 (the bars, upside down, are alike) | same |
 | letterbox-gdi 1280×720, Retina mode off | quarter rows 132–849, surface ends at row 1701 | quarter rows 132–981 |
 | letterbox-gdi 1280×720 norect (a borderless popup over the monitor, no present rect) | | black 0–131, picture 132–1832, black 1833–1963: letterboxed like the rest |
-| d3d11fs 1024×768, Retina mode off | picture columns 202–2819 | 0050 and 0051: a 2-pixel strip of surface at 2820–2821; with 0052: picture 202–2821 (1310 points), black 0–201, 2822–3023; d3d9fs the same |
+| d3d11fs 1024×768, Retina mode off | picture columns 202–2819 | 0044 and 0045: a 2-pixel strip of surface at 2820–2821; with 0046: picture 202–2821 (1310 points), black 0–201, 2822–3023; d3d9fs the same |
 
 The issue also saw the Dock and asked for the displays to be captured. winemac captures no display
 for fullscreen at any mode (that is the `CaptureDisplaysForFullscreen` option, off by default); it
@@ -2066,13 +2076,112 @@ came back letterboxed after Cmd-Tab out and back (owner's run, 2026-11-23).
 Not tested: mtld3d 0.15's patch 0004 and FNaF (#136), an external display, and Vulkan and D3D12
 (vkd3d-proton) programs, which take their surfaces' place from the same client rect.
 
-Left open: 0050 places the letterbox at the window rect clipped to the screen. A window whose
+Left open: 0044 places the letterbox at the window rect clipped to the screen. A window whose
 window rect starts past the monitor's edge, a decorated window whose client area fills the mode,
 would have its surface anchored at the clipped corner rather than at the surface's own origin (the
 virtual visible rect's, in `get_surface_rect`). Whether such a window reaches the driver as
 fullscreen at all is unchecked. In the GDI-only test the window's last pixel row is off-colour at the screen's
 shape, before and after: win32u's scaled surface, not the letterbox.
 
+## FEX moved to FEX-2611.1 (#67)
+
+FEX moved from `0df84d384` (2026-09-28) to the FEX-2611.1 release (`4f9c1f1e3`, 2026-11-11),
+which is FEX-2611 with the CPUID crash fix (FEX 0006 before) and the forced-assert fix
+(`cf2f831ad`: a FEX assert now ends the process with 0x42 instead of faulting on). One upstream
+commit from after the release is on top: `bfad5d692`, without which 2611 decodes RDPKRU and
+WRPKRU as SERIALIZE. Hadron's five patches rebased with two conflicts, both where upstream's new
+`CheckSupportsTPIDRRO_CPU` unix call sits in the same places as ours (its `PR_GET_TPIDRRO_CPU`
+define, the function enum, `__wine_unix_call_funcs`); ours follow it.
+
+What it changes for Hadron, checked with a test program in x86-64 and i386 against the old
+build (same prefix setup, `FEX_DISKCACHE=1`):
+
+- **HotSpot's null checks.** `4e1ad46b1` keeps a guest load whose value is unused. HotSpot's C1
+  checks for null with `cmp reg, [obj]` whose flags the next instruction overwrites, and relies
+  on the access violation. The old build dropped the load and no exception came; the new one
+  raises it. This may be #27: not yet tried with a JRE.
+- **SERIALIZE** is now reported (CPUID 7 EDX bit 14) and runs; RDPKRU and WRPKRU still raise
+  illegal instruction, as before.
+- **CLFLUSH** now becomes `DC CIVAC` on Wine (`7d0cf9b16` turned an inverted check around); it
+  ran without a fault on macOS, as did CLFLUSHOPT.
+- **TPIDRRO.** FEX now asks the unix side whether `TPIDRRO_EL0` holds the CPU number, to offer
+  RDTSCP and RDPID. Hadron's `prctl` stub (FEX 0001) answers no, so both stay hidden, as before.
+- **Disk cache** format 28 to 44: each game's cache is rebuilt once.
+- **Unwind information.** `ef006bdb1` builds the DLLs with `-fno-asynchronous-unwind-tables`
+  (a clash with `preserve_all` under MinGW). `libwow64fex.dll` keeps 2304 of 4015
+  `RUNTIME_FUNCTION`s (`llvm-readobj --unwind`; `llvm-objdump --unwind-info` reads only x86-64).
+  The entry points in `Source/Windows` keep theirs (`BTCpuSimulate`, `ProcessInit`,
+  `ResetToConsistentState`, the memory notifications); FEXCore's internals lose them (the JIT,
+  `ExitFunctionLink`, `InvalidateRange`, `HandleUnalignedAccess`). Wine's unwinder takes such a
+  function for a leaf, so a backtrace through it, or an exception raised inside it, unwinds
+  wrongly. Guest exceptions are not affected: they are raised from the context FEX rebuilds. Keep
+  it in mind when reading a FEX crash, as in #53.
+- **Build.** FEX's Windows `FEXOfflineCompiler` now links FEX's unix-call code through the
+  TPIDRRO check, and with it FEX 0005's `AllocateJIT`, whose `VirtualAlloc2` only the DLLs'
+  own Windows API layer provides: the link failed. `AllocateJIT` now calls
+  `NtAllocateVirtualMemoryEx` itself, with the same address requirement for WoW64.
+
+Found along the way, the same in both builds: an integer division by zero raises no exception
+under FEX (`div` by a zero register returns), where Windows raises
+`EXCEPTION_INT_DIVIDE_BY_ZERO`. Open.
+
+## Subnautica hung loading a world: FEX's x87 fallbacks returned with RBX overwritten (fixed, #79)
+
+On the 0.4.0 test build Subnautica showed its menu, and loading a save stopped for good at
+"loading scene: Essentials", one core busy (#77, on the `subnautica-hang` branch). Run by hand
+from a copy of its prefix with `WINEDEBUG=+seh FEX_SILENTLOG=0`, the main thread's last exception
+was an execute fault at `0x6500000054`, which FEX passed through: the pc was in neither its JIT nor
+its dispatcher. The native registers (logged by a debugging build of FEX) put the jump in the
+dispatcher's ABI handler for the F80 fallbacks, `blr x13` with `x13` loaded from
+`Pointers.FallbackHandlerPointers`: entries 18, 19, 42 and 43 of that table held pairs of small
+integers, the same every run, in the shape of Subnautica's `Int3` bounds. The guest had stored them
+there. At the moment the table changed, the guest's RBX held the `CpuStateFrame` pointer, and the
+code before it was Mono's `Math.Cos`: `fld qword [rsp-8]; fcos; fstp qword [rsp-8]`.
+
+The cause is in the compiler. FEX-2611 enables `preserve_all` for MinGW builds with clang 22.1 or
+newer (`c76fccf25`, with `ef006bdb1` turning asynchronous unwind tables off for it), so its ABI
+handlers keep the guest's callee-saved registers live across a fallback call. Clang 23.1.2 (our
+llvm-mingw) places a spill slot over the save slot of a callee-saved register in these functions,
+in the ARM64EC and the AArch64 builds alike, with or without unwind tables:
+
+```
+stp  x27, x30, [sp, #16]   // save RBX
+...
+str  x8, [sp, #16]         // spill the frame pointer over it
+...
+ldp  x27, x30, [sp, #16]   // "restore" RBX
+```
+
+`tests/win/x87-registers.c` runs each x87 instruction with a known value in every register: under
+FEX-2611.1 FSIN, FCOS, FPTAN, F2XM1 and FPATAN return with RBX replaced by the frame pointer, FYL2X
+and FYL2XP1 with R12; FSQRT, FPREM, FSCALE and the rest keep everything. 0.3.3's FEX (`0df84d384`
+with its queue) passes it all. Any program that uses x87 transcendentals is exposed: Subnautica's
+next store through RBX wrote its cell bounds over FEX's thread state, and the next F80 fallback
+jumped to them. In the AArch64 (WoW64) build the overlapped save slot is x28's in most of these
+handlers, which holds the same frame pointer there, but x19's in FYL2X; no 32-bit program was tried.
+
+FEX 0007 treats `preserve_all` as unavailable under MinGW again, as before 2611, which also brings
+the asynchronous unwind tables back (`libwow64fex.dll` has 4033 `RUNTIME_FUNCTION`s again, against
+2304, see #67). The ABI handlers then spill and fill around fallback calls as they did in 0.3.3; the
+cost is a few more stores per x87 transcendental, to be measured if a game spends its time there.
+The change was written by an agent, and FEX takes no AI-written code, so it stays downstream; the
+compiler bug is worth reporting to LLVM with the reduced handler.
+
+Why it hung instead of crashing is Wine's: the AV at the bad address went to the SEH handlers, and
+the ARM64EC dispatcher unwound a frame without unwind data as a leaf, `Pc = Lr` with the stack
+pointer kept, which it then unwound to itself again forever (#77 has the sample). Wine 0055 makes
+`virtual_unwind` fail a frame whose pc, sp, fp and lr come out unchanged, and the dispatchers treat
+that like an invalid frame: the stack is marked invalid and the exception goes unhandled, so the
+program ends with its code. Raising `STATUS_INVALID_DISPOSITION` instead, as for a frame without
+unwind data, recursed through `KiUserExceptionDispatcher`'s frame back to the same one until the
+stack overflowed. `tests/win/unwind-no-progress.c` hangs without the patch, as ARM64EC and as ARM64,
+and its child ends with `0xc0000005` with it. Subnautica on FEX-2611.1 with Wine 0055 quits when the
+load reaches the bad jump instead of hanging.
+
+With FEX 0007 Subnautica loads a save in about 19 seconds ("LOADING FINISHED", `'Root' took
+18.89 seconds`) and keeps its heartbeats going in the world. `tests/win/jit-unwind.c` (including
+the null check that now faults, #67), `mono-host.c` with Subnautica's Mono, `hello` (x86-64 and
+i386), `is-ec-code` and `thread-allocation` pass.
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
 Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play
@@ -2094,7 +2203,7 @@ What the stub did lose is the reset between streams. With the bit reservoir (the
 encoder's streams, and what FAudio declares for xWMA), the bytes of a frame that continues in
 the next packet stay in libavcodec, so a second stream on the same decoder came out one frame
 longer (24576 samples instead of 23552 for `wmaencdata.bin`), the first frame made from the end
-of the old stream, and a flush did not drop it. Wine patch 0053 drains and flushes the
+of the old stream, and a flush did not drop it. Wine patch 0047 drains and flushes the
 `wg_transform`, as the video decoder does; the second stream then gives 23552, after a drain and
 after a flush. FAudio does not drain between the buffers of a voice (only when the voice is
 destroyed), so a second buffer queued on one xWMA voice still starts with that extra frame; that
@@ -2111,8 +2220,40 @@ bytes a second instead of its 4003 decodes to 0 samples with 15 to 17 errors, an
 stream declared with FAudio's flags (`0x1f`, bit reservoir and variable block length) to 0 with
 242. FAudio declares fixed codec flags for xWMA and corrects `nAvgBytesPerSec` to a table of
 rates (`fixup_wma_bitrate`); a format of the game's that does not match either would give this.
-The next step is to log the `WAVEFORMATEX` the game passes to `CreateSourceVoice` and decode one
-of its buffers with the test.
+
+Wine patch 0053 logs what is needed to find out. When a buffer of an xWMA voice gives no output by
+the end of its stream, or a decoder call fails, FAudio writes four `err:faudio:report_failure`
+lines, once per voice (FAudio's voice, not the game's `IXAudio2SourceVoice`): what failed and how
+much of the buffer was pushed; the format the game passed to `CreateSourceVoice`, with `cbSize`
+and its extra bytes in hex, which FAudio drops when it turns `WAVE_FORMAT_WMAUDIO2` into an
+extensible format; the media type FAudio gave the decoder, with the corrected bytes a second and
+the codec data; and the buffer's packets, decoded sizes, play and loop range and first 16 bytes.
+A buffer that decodes costs one comparison after the decode loop and logs nothing.
+`tests/win/xwma-voice.c` plays packets on two voices through XAudio2 2.9, each with the buffer
+queued twice and a volume meter on it. `wmaencdata.bin` declared as what it is (22050 Hz stereo,
+1487-byte packets, 4003 bytes a second) sounds and logs nothing, on i686 under FEX and on aarch64.
+Declared as 44100 Hz it is silent, with the game's pattern (libavcodec's `next_block_len_bits 5
+out of range`, 214 `NOTIFY_START_OF_STREAM` fixmes a voice over two buffers) and one report for
+each voice (i686):
+
+```
+err:faudio:report_failure voice 007AEAE0: no output at the end of the stream, 4461 of 4461 bytes pushed.
+err:faudio:report_failure voice 007AEAE0: the game's format: tag 0x161, 2 channels, 44100 Hz, 4003 bytes/s, block align 1487, 16 bits, cbSize 0, extra bytes none.
+err:faudio:report_failure voice 007AEAE0: given to decoder 007AB8FC: {00000161-0000-0010-8000-00aa00389b71}, 2 channels, 44100 Hz, 4000 bytes/s, block align 1487, 16 bits, codec data 000000001f0000000000000000000000.
+err:faudio:report_failure voice 007AEAE0: buffer 007ACE50: 3 packets, decoded bytes 31400 after the first, 94208 in all, play 0+0, loop 0+0 x0, starts 09000177e9480c8444884a4064222443.
+```
+
+An FFmpeg stream (44100 Hz stereo, 278-byte packets, 6000 bytes a second, codec flags `0x0001`)
+played the same way is silent and reported too, its codec data given to the decoder as
+FAudio's `0x1f`.
+
+What to ask the reporter, with a build that has 0053: a report (Save a report in the app) of a
+session that reaches a silent voice line, and the four lines for each silent voice from it. If
+the game's format and what the decoder was given differ (bytes a second, or extra bytes in
+place of which FAudio declares its flags), that is the candidate. `xwma-voice.exe` takes the
+game's rate, channels, block align and bytes a second, `wma-decoder-drain.exe` also codec data in
+place of FAudio's. Both need the game's own packets, cut from its sound files, which the buffer's
+first 16 bytes can find.
 
 No call in the path blocks. Measured in the test (i686 under FEX, then aarch64), before and after
 the patch alike: `ProcessOutput` at most 0.6 ms (0.2), `ProcessInput` 0.1 ms (0.2 on i686 with
@@ -2127,3 +2268,607 @@ in the test; whether that is the game's hitch was not measured.
 Seen while testing: about one run in four of the test hung at process exit, after `MFShutdown`,
 with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
 `TerminateProcess`. Not looked into.
+
+## Mesa moved to main of 2026-11-23 (#74)
+
+The Mesa pin moves from `30da39187d` (2026-09-30) to `b7f76842460`, Mesa main on 2026-11-23:
+3,975 commits later, 45 of them in KosmicKrisp. The queue goes from 89 patches to 79.
+
+Ten patches left it, because upstream has the same change or its own fix of the same bug:
+
+| Old | What | Upstream |
+|---|---|---|
+| 0004-0009 | The geometry shader merge request !44786, by its author | merged as `9a40f0c6150`, `5c145789399`, `531e208d92e`, `14f59d06388`, `2d817e53680`, `d9d36e788e8`, in their reviewed form |
+| 0037 | Zink looks the pipeline up again when only the vertex layout changed, on a driver without dynamic vertex input | `fd12422cce0` (vertex input as a draw atom, which marks the pipeline dirty in that case) |
+| 0083 | Zink's races between a batch's submission and waits on its usage | merge request 45147: `aa6740cae14` (broadcast under the usage mutex), `c103abf4193` (wait in a loop on the condition), `5c3c8e94c0c` (read `unflushed` before `usage`, both atomic), `ac3c0d9870a`, `ca96e474477` |
+| 0087, 0089 | Cherry-picks of upstream fixes | `bb172922a46`, `1d396c4031a` |
+
+One more left because a later patch had undone it: 0070, the first workaround for the indirect
+dispatch bug, which 0076 (now 0068) replaced line for line (below). One is new: 0079, a fix in the
+Metal emitter that upstream's scalarized tessellation outputs needed (below).
+
+The rest were rebased with `git am -3`. Where upstream had changed the code they touch, they now
+follow upstream's version:
+
+- KosmicKrisp's geometry shaders as merged moved `outputs_written` out of the vertex shader info,
+  compile the rasterization shader as the stage's own MSL, and pass a new `apply_wa19` flag to
+  `kk_compile_msl` and `kk_compile_shader`. The transform feedback, statistics, 64-bit atomics,
+  flat input and depth bounds patches (0008, 0013, 0022, 0059, 0076) take their place in that
+  code; the count and transform feedback passes of the geometry shader and the fragment shader
+  variants pass the flag on as the stage they come from would.
+- Timestamp pools (0003) split their counter heaps inside upstream's new guard for GPU captures,
+  which use no counter heaps.
+- Sampler min/max emulation and the 32-bit LOD bias (0012, 0073) sit beside upstream's native LOD
+  bias from Apple family 10 on (`4d1b5322870`): the bias is still lowered in the shader below
+  family 10, now in 32 bits, and is 0 in the descriptor above it, as upstream has it.
+- Compute shader derivatives (0020): NIR's texture lowering now passes its options to the
+  gradient helpers (`80431817a40`, for drivers whose texture size query needs a callback), so the
+  exported `nir_tex_gradient_lod` takes them too; KosmicKrisp passes empty options.
+- 64-bit image atomics, residency views, 3D render views (0023, 0026, 0053, 0061): upstream
+  replaced `mtl_new_texture_view_with_no_swizzle` with a flag, gave format table entries a GPU
+  family, moved the input attachment view into its own usage-gated block and computes usage per
+  aspect; the patches use all of that.
+- The EGL window surfaces on a Metal layer (0030) follow EGL's rework: no `_EGL*` typedefs, loader
+  interfaces as `struct dri_loader_funcs` without an extension base, no `get_dri_drawable` in the
+  platform table, and `swap_buffers` with damage rectangles, which go to `kopperSwapBuffers` as on
+  X11 and Wayland.
+- libkk kernels (0059, 0049, 0066) pass the alignment that `poly_heap_alloc` now takes (16, what it
+  used to apply itself) and the read-only sink address `poly_index_buffer` now takes.
+- Depth bounds (0076) use upstream's `kk_gpu_supports_depth_bounds` instead of a second helper of
+  their own, and report `depthBounds` on every family. Upstream added `kk_fake_depth_bounds`, a
+  driconf option that reports the feature without the test for idTech games (`5ecabeae837`); with
+  the real test reported everywhere it does nothing here.
+
+Upstream also found the mechanism behind the Metal bug that 0068 works around (and 0063 did
+before it): under `dispatchThreadsWithIndirectBuffer`, registers that the compiler spills to
+threadgroup memory read back as zero beyond the first few bytes, on M1 and M2 only (Apple
+feedback FB25516856). Its workaround, `KK_WORKAROUND_19` (`a8ea6555e28`), adds an unused
+threadgroup argument to the shaders that feed a geometry shader, which stops the spilling. 0068 is
+kept; the old 0063, which 0068 had undone line for line, is dropped (the queue's tree is the same
+without it). Checked on the M2 Pro (Apple family 8, where `KK_WORKAROUND_19` is on), with Mesa's
+shader cache off, since its key does not include the workarounds (a cached shader from a run with
+other workarounds is reused, which made one comparison look fixed when it was not):
+
+- With neither (0063 and 0068 reverted, `MESA_KK_DISABLE_WORKAROUNDS=19`), the tests the two
+  patches cite fail again: Vulkan `clipping.user_defined.*.vert_tess_geom` (6 fail) and
+  `tessellation.geometry_interaction.limits.output_required_max_geometry` (timeout); ES 3.1
+  `per_patch_block_array` (9) and `tessellation_geometry_interaction.feedback` (6) fail and its two
+  `limits` tests time out; OpenGL 4.6 `geometry_shader.primitive_counter.*_rp` (8) and
+  `gpu_shader_fp64.fp64.varyings` fail and `.max_uniform_components` times out.
+- With upstream's workaround alone, all of them pass (82 Vulkan, 40 ES 3.1, 21 OpenGL 4.6).
+- An indirect tessellation draw is not covered by it. `tests/mac/gl-tess-indirect.sh` draws 1,024
+  patches with `glDrawArraysIndirect` and with `glDrawArrays`, with vertex and control shaders
+  that hold N floats live, and compares the two. With upstream's workaround
+  alone, 676 of 1,024 patches differ at 60 and 64 floats and 1,004 at 72 (none up to 56); with
+  0068, none at any count. Applying `KK_WORKAROUND_19` to those two passes as well (the threadgroup
+  argument, and `setThreadgroupMemoryLength` in the tessellation launch; a local experiment) also
+  gives none, which confirms the mechanism. The indirect path of a tessellation draw dispatches its
+  vertex and control shaders with `dispatchThreadsWithIndirectBuffer` in upstream's code too, so
+  the gap is upstream's as well.
+
+With 0068 the driver no longer makes that call at all, so on M1 and M2 `KK_WORKAROUND_19` costs a
+threadgroup argument and a branch that never runs in the shaders before a geometry shader. It is
+left as upstream has it rather than removed by another patch. Offering 0068 upstream, or
+`KK_WORKAROUND_19` for the tessellation passes, would close upstream's gap.
+
+Build requirements did not change: the same meson options, LLVM 23, libclc, SPIR-V tools and
+Python modules configure and build both KosmicKrisp and Zink.
+
+Checked on an M2 Pro with macOS 27.0.1, against the installed 0.4 test build:
+
+- Every commit of the queue builds on its own: KosmicKrisp for each, and Zink as well for each one
+  that touches code Zink shares.
+- `vulkaninfo`, with and without `MESA_KK_EXPERIMENTAL=dgc,xfb,sparse`: the same extensions,
+  features and limits, except `storageInputOutput16`, which upstream reports now (`26e66124a0b`).
+  (The heap budget differs too, but it follows the memory the system has free at the time.)
+- Vulkan CTS lists that touch what the move changed, 1 in 10 of transform feedback and sparse
+  resources, everything else in full: geometry, tessellation, clipping and transform feedback
+  (14,979 tests: 1,885 pass, no failure); `dgc.ext` (266 pass, the 6 known `_lib` crashes); a third
+  of the query pool list with every timestamp test (6,050 pass); every LOD bias, min/max reduction,
+  compute derivative, border colour and `max_varyings` test (154 pass); format properties (the
+  same 111 failures as `vk-full-r4`, test for test); half of the 64-bit atomic tests (316 pass); input attachments
+  (857 pass); the 26,830 depth bounds cases of `dbounds-full-range-all` (1,986 pass, the rest not
+  supported, the same case for case).
+- The depth bounds emulation first drew wrong: draws that do not write depth read zeros for the
+  depth (`tests/mac/vk-depth-bounds-msaa.sh` and `-memory.sh` failed, and one CTS case). Upstream
+  now makes an input attachment view only for images that are used as input attachments
+  (`181fc89ccab`), and the emulation reads the depth attachment through that view. 0076 now makes
+  it for depth views that are attachments too, when the test is emulated; both scripts and
+  `tests/mac/vk-ubo-range-past-end.sh` pass.
+- OpenGL on Zink: `tools/zink-test` gets 4.6 core and compatibility contexts and draws its
+  triangle right. One test in 20 of the OpenGL 4.6 (744 pass), ES 3 (2,126 pass, 1 warning) and
+  ES 3.1 suites (1,746 pass, 2 fail).
+
+Found by that ES 3.1 sample, and fixed by 0079: all 18 `tessellation.user_defined_io.per_vertex_block`
+tests failed (in the evaluation shader, the check of `teBlock[0].blockS.y`). They passed with
+upstream's `26e66124a0b` reverted, which turns the inputs and outputs of the tessellation control
+shader into scalars. The scalars were not the bug; they exposed one in the Metal emitter:
+
+- Zink packs varyings: here it put the control shader's per-vertex block into `VAR0` and into the
+  components of `gl_Position`, which the stages do not use otherwise (`ZINK_DEBUG=spirv`: the
+  output `blockS` is decorated `BuiltIn Position`), and writes the block a piece at a time, each a
+  read-modify-write of the slot. The Vulkan versions of the tests have no such packing, so they
+  passed.
+- The NIR before and after scalarization is the same program, and so is the NIR handed to the
+  Metal emitter (printed before `nir_to_msl`, a local change): every store and load goes to the
+  right address of the control shader's output buffer.
+- The MSL is not (`MESA_KK_DEBUG=msl`): the emitter typed each global load and store after its
+  value, so the scalar code stored `*(device float*)p = v` and then read `*(device uint*)p`.
+  Metal's compiler applies C++'s type-based aliasing rules: a store through a `float` pointer
+  cannot change what a `uint` pointer reads, so it reused the value read before the store, and the
+  shader wrote the old contents back over `blockS.y`. A ten-line kernel shows it with `xcrun metal
+  -O2 -S -emit-llvm`: the second load is gone; with `-fno-strict-aliasing`, or with both accesses
+  typed `uint`, it stays. This is the language's rule (the Metal shading language is based on C++),
+  not a Metal bug. The vector code before `26e66124a0b` also mixed `packed_uint2` and
+  `packed_float2` at one address and was right by luck.
+- 0079 makes the emitter's type inference give every `load_global` and `store_global` an unsigned
+  integer type of its size, as it already did for shared and scratch memory: values are bitcast
+  into and out of memory, and all accesses to device memory have one type.
+
+With 0079 the 18 pass. The ES 3.1 tessellation and geometry groups (655 pass, 149 not supported),
+OpenGL 4.6 `tessellation_shader` and `geometry_shader` (278 pass), the Khronos ES 3.1 tessellation
+and geometry tests (275 pass, 1 fail, below) and the Vulkan geometry, tessellation, clipping and
+transform feedback lists (1,885 pass, the rest not supported, as before) have no other failure.
+Since every shader that touches device memory changes, also one ES 3.1 test in 10 (3,485 pass, no
+failure) and one in 50 of the Vulkan `ssbo`, `compute`, `spirv_assembly`, `memory_model` and
+`binding_model` lists (3,531 pass, nothing new against `vk-full-r4`). The full suites are still to
+run on it.
+
+Khronos ES 3.1 `geometry_shader.layered_fbo.fb_texture_invalid_level_number` fails with the new
+Zink, with or without 0079. The suite's test is wrong, and Mesa's new behaviour is right. The test
+makes 3D and 2D array textures with two levels by `glTexStorage3D`, attaches level 2 of each with
+`glFramebufferTexture` and expects `GL_INVALID_VALUE`. Zink on KosmicKrisp gives an ES 3.1 context
+(it does not reach 3.2). With the Zink of the 0.3.3 runtime, the call gives `GL_INVALID_VALUE`;
+with the new one it gives no error, and `glCheckFramebufferStatus` gives
+`GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT` (a short EGL program, both against the new KosmicKrisp).
+The change is upstream's `384eddfdbf7` ("mesa: check right levels depending on the context"):
+Mesa used to require level < `TEXTURE_IMMUTABLE_LEVELS` for an immutable texture in every API,
+and now does so only on desktop OpenGL and ES 3.2. ES 3.1's section 9.2.8 asks only that the level
+be no larger than log2 of `MAX_3D_TEXTURE_SIZE` (3D) or `MAX_TEXTURE_SIZE` (2D array); the
+`TEXTURE_IMMUTABLE_LEVELS` condition first appears in ES 3.2's 9.2.8, and `OES_geometry_shader`
+refers to 9.2.8's "supported texture level". On ES 3.1 such an attachment is legal and leaves the
+framebuffer incomplete. The commit names this test as one it breaks; VK-GL-CTS fixed the test on
+2026-11-06 (`b62f70f03ae4`, Khronos issue 7122), on its main branch only, after the 1.4.6.2 that
+Hadron builds and in no release yet. The fixed test expects exactly what the new Zink does. Mesa's
+main of 2026-11-25 has the same `fbobject.c`. Nothing to fix in Mesa; the failure goes away with a
+CTS that has the fix.
+
+Old numbers to new: 0001-0003 stay; 0010-0036 are now 0004-0030 (six less); 0038-0069 are
+0031-0062 (seven less); 0070 is dropped; 0071-0082 are 0063-0074 (eight less); 0084-0086 are
+0075-0077; 0088 is 0078. 0079 is new. The documents now use the new numbers; the few dated notes
+that name a range of the queue as it was then say so.
+## Node and Electron stopped with "open EBADF" when their output was a pipe (fixed, #70)
+
+Riot Client, and any Node or Electron program, stopped at once with `open EBADF` when Hadron logged
+it. `scripts/play` with `HADRON_LOG` points the game's stdout and stderr at a FIFO read by
+`scripts/logcap`, and Wine makes a Unix descriptor it is given into a file object, which
+`GetFileType` reports as `FILE_TYPE_PIPE` (`get_device_info`: `S_ISFIFO` or `S_ISSOCK`). Node takes
+such a standard handle for a pipe and libuv opens it with `SetNamedPipeHandleState(PIPE_READMODE_BYTE
+| PIPE_WAIT)`. On Windows the handle is an anonymous pipe, a named pipe end in byte mode, and that
+succeeds. In Wine the server's `set_named_pipe_info` took only named pipe ends and failed with
+`STATUS_OBJECT_TYPE_MISMATCH`, error 6, which libuv turns into `UV_EBADF`; querying the mode
+(`FilePipeInformation`, which `GetNamedPipeHandleState` reads) failed with
+`STATUS_NOT_IMPLEMENTED`. Neither upstream Wine (to 11.22, which moved setting the mode into the
+server's `set_file_info`) nor Proton's Wine (`bleeding-edge`) handles it.
+
+Wine patch 0048 answers on such a handle what a pipe from `CreatePipe` answers: its mode is byte mode,
+blocking; setting that mode succeeds, message mode fails with `STATUS_INVALID_PARAMETER` as on any
+byte pipe, and the access checks are the named pipe's (`FILE_READ_ATTRIBUTES` to query,
+`FILE_WRITE_ATTRIBUTES` to set). The server answers it, from the file's `st_mode`, so ntdll now sends
+`FilePipeInformation` queries there for every handle. Patch 0049 gives the standard handles that are
+pipes the access `CreatePipe` gives the same end: the read end also `FILE_WRITE_ATTRIBUTES`, the
+write end also `FILE_READ_ATTRIBUTES`. Without it `GetNamedPipeHandleState` on stdout failed with
+`ERROR_ACCESS_DENIED`. Each end of a CreatePipe pipe then has the same access as the standard handle
+of the same direction (0x120189 and 0x120196).
+
+`tests/win/stdio-pipe.c` checks a `CreatePipe` pair, then each standard handle that is a pipe, against
+the same expectations. Run with the release runtime, 2026-11-23:
+
+| Standard handles | Before | After |
+|---|---|---|
+| stdin, stdout, stderr pipes (`echo \| stdio-pipe.exe 2>&1 \| cat`), x64 and arm64 | 15 failures: set 6, query `c0000002`, access lacking | 0 failures |
+| stdout, stderr on a FIFO with a reader, as `play` does | 10 failures | 0 failures |
+| socket pairs (Python `socketpair`) | not run | 0 failures |
+| the same pipes through `cmd /c` (inherited by a child) | not run | 0 failures |
+| stdout a regular file | skipped | skipped |
+
+Open: non-blocking mode (`PIPE_NOWAIT`), which Windows allows on an anonymous pipe, is refused with
+`STATUS_NOT_SUPPORTED`, as the file's reads and writes are made on the Unix descriptor, which
+blocks. `FilePipeLocalInformation` (`GetNamedPipeInfo`, the instance count of
+`GetNamedPipeHandleState`) is still unanswered on these handles: its quotas and free space are not
+known for a Unix pipe, and a made-up value would mislead programs that wait for write space. Riot
+Client itself was not started with the fix.
+
+## A fixed-base executable reaching 0x16c000000 never loaded: the main thread's stack (fixed, #71)
+
+Black Myth: Wukong never started: `wine: 140000000-16c3d0000 still in use after 32 restarts`, then
+`failed to create main module ... b1-Win64-Shipping.exe, status c0000018`. Its 708 MB executable has
+no relocations, so it needs 0x140000000-0x16c3d0000, and patch 0042 (#56) starts the loader again
+while anything is mapped there. What was there every time is the main thread's stack. Listing the
+regions of a plain program at `main()` (`mach_vm_region_recurse`, 400 starts) shows macOS placing
+the stack's top at random between 0x16ae10000 and 0x16fddc000, with 8 MB of stack below it and,
+under that, 56 MB more of the same reservation (`VM_MEMORY_STACK`, no access, what `vmmap` calls
+Stack Guard), the room the stack may grow into when `RLIMIT_STACK` is raised. 64 MB below a top of
+at most 0x16fe00000 is always below 0x16c3d0000: every start had the reservation in the range, and
+129 of the 400 the 8 MB of stack itself. Hogwarts Legacy's range ends at 0x15bcc2000, below all of
+it, and was only hit by libmalloc (#56).
+
+An executable that sets its main thread's stack size (`ld -stack_size`, `LC_MAIN`'s `stacksize`) gets
+that much stack and one guard page below it, nothing more, and `setrlimit(RLIMIT_STACK)` then fails
+with `EINVAL`. Wine never sets `RLIMIT_STACK`, and no Windows code runs on that stack: on macOS the
+process's first thread runs the Core Foundation run loop (`apple_main_thread`), and Wine's own main
+thread is a new one with a Windows stack. Wine patch 0050 links the arm64 loader with `-stack_size
+0x800000`, the 8 MB it had. The stack region is then 8 MB and 16 KB; 104 of 300 starts of a probe
+linked that way had it in Wukong's range, and the loader starts again for those as it does for
+libmalloc's region. The patch also touches `loader/main.c`'s comment, so that an existing build
+tree relinks the loader: `make` reruns configure when `configure` changes but does not relink an
+executable whose flags alone changed.
+
+Shrinking the reservation from the loader at run time, or unmapping the part in the range, would
+leave the kernel believing the stack may grow there: a later `setrlimit` would change the
+protection of whatever was mapped in its place, the game's image. Placing the stack elsewhere is not
+possible: `LC_MAIN` takes only a size, and no public `posix_spawn` attribute sets a location.
+
+`tests/win/fixed-base.c` built with `-DBULK_SIZE=0x2c3c0000` maps at 0x140000000-0x16c3d7000.
+With the release runtime and the loader signed as its bundle is, 2026-11-23:
+
+| Test | Before | After |
+|---|---|---|
+| fixed-base, Wukong's size, direct starts | 0 of 20 loaded (32 restarts each) | 30 of 30 |
+| the same, 30 starts as a child | not run | 0 of 30 failed |
+| fixed-base, Hogwarts' size, direct / as a child | not run (#56: 30 of 30, 0 of 40) | 30 of 30 / 0 of 30 failed |
+| is-ec-code, a 32-bit hello | not run | pass |
+
+In a running Wine process `vmmap` shows thread 0's stack as 8192K with a 16K guard. The game itself
+was not started.
+
+## Wine 11.22 (#73)
+
+Wine moved from 6880117619 (wine-11.18-246) to the wine-11.22 release (9f8c4ae4d3, 2026-11-13),
+1034 upstream commits, and the queue from 56 patches to 51. Upstream reworked the address space in
+those releases (Alexandre Julliard, from 35a1ff5be8 to 5ab6d627ee): the reserved areas are one
+array of states, the whole low 8 GB is reserved on 64-bit, top-down allocations take a range of
+their own below 0x7ff600000000 that grows down 4 GB at a time, allocations and executable bases are
+randomized, and `WINEPRELOADRESERVE` is set for 32-bit executables only. winemac's window surfaces
+became IOSurfaces (b77a5f9b60), and setting `FilePipeInformation` moved into the server's
+`set_file_info` (b7547f964c).
+
+Dropped, as upstream has them:
+
+| Old | Patch | Upstream |
+|---|---|---|
+| 0024 | wine.inf: VC runtime 14.51.36247 (#26) | 08cb610c0d, the same values with Version "14.51.36247.00" |
+| 0038 | winemac.drv: HORZRES and VERTRES not doubled in Retina mode (#45) | d9590c210a |
+| 0040 | ntdll: top-down allocations above 4 GB (#48) | superseded by the rework (1cae1f531b, 3480ed6ff1, 169fba59a7): a top-down request no longer falls into the loader's low reserve |
+| 0044 | imm32: aliased HKLs not an IME (#52) | a07e981c59, of which it was a copy |
+| 0048 | winemac: autorelease pools in the WineMetalSwapChain wrappers | 1300ec99c7 |
+| 0049 | ntdll: threadpool worker timeout 60 s | c37cb58e4c |
+
+Adapted to upstream's new code:
+
+- 0003 (`WINE_HIGH_USER_SHARED_DATA`, the `--dev` build): `mmap_init()` is gone; the low allocation
+  range now starts empty at 0x7000000000 and grows up from there. Compiled, not run.
+- 0005 (16 MB below the top): only the lower host limit is left, as there is no top-down area at the
+  top any more. A top-down request that does not fit the new range still goes to the highest free
+  address.
+- 0042, before 0046 (the loader starts again while a fixed-base range is in use, #56, #71): ntdll set
+  no `WINEPRELOADRESERVE` for a 64-bit executable any more, so the loader had no range to check. On
+  arm64 macOS ntdll now sets it for a 64-bit executable that is only mapped at its base (relocations
+  stripped or no dynamic base, the test `map_image_view` makes since 8eb8dd9977).
+- 0045, before 0051 (the letterboxed surface, #66): the surface is an IOSurface given to the layer
+  whole, drawn unscaled from the corner (`NSViewLayerContentsPlacementTopLeft`), with no image to
+  crop. The surface is rounded up to 128 pixels, 3072×1920 for a 3024×1701 letterbox, so the
+  `contentsRect` is now worked out from the surface's size. Worked out from the letterbox's, as
+  before, the picture came out 17 rows too low: letterbox-gdi's marked quarter on rows 132–997
+  at 1280×720, against 132–980 with the old Wine.
+- 0048, before 0054 (pipe mode on Unix pipes, #70): `set_named_pipe_info` is gone; a Unix pipe or
+  socket now answers in the file object's `set_file_info`, whose request checks
+  `FILE_WRITE_ATTRIBUTES` itself.
+- Context only: 0002, 0014, 0015.
+
+New, 0051: `alloc_free_area`, upstream's new search of the free areas, searched each area top-down
+from the request's upper bound down to the area's own start, which can be below the request's lower
+bound. `tests/win/thread-allocation.c` asks `VirtualAlloc2` for 64 KB top-down within
+0x1000200000–0x10005fffff, inside the host's guard mapping at 0x1000000000–0x7000000000 (#28), and
+got 0x17fe00000. The patch starts the search at the lower bound, as the bottom-up search does; the
+request then fails, as it does with the old Wine. Upstream's master (2026-11-20) has the same code.
+
+The others moved down one to six numbers: 0025–0037 are 0024–0036, 0039 is 0037, 0041–0043 are
+0038–0040, 0045–0047 are 0041–0043, 0050–0056 are 0044–0050. The entries above name the new
+numbers, except where they describe a dropped patch.
+
+Tests, 2026-11-23, M2 Pro, macOS 27, one prefix per runtime (`scripts/wine-run`'s environment), the
+loader signed as its bundle is. "Old" is the runtime in `dist/` at the time (the 11.18 queue with
+0001–0056), "new" the same runtime with this Wine:
+
+| Test | Old | New |
+|---|---|---|
+| `wineboot -u`, `cmd /c ver`, syswow64 `cmd` through FEX | pass | pass |
+| hello, x64, i386, arm64 | pass | pass |
+| is-ec-code (#49) | pass | pass |
+| top-down-low-memory (#48) | pass, blocks from 0x7ffe7f000000 down | pass, blocks from 0x7ff56fe30000 down (no 0040) |
+| decommit-zero x64 and i386, decommit-neighbours (#42) | pass | pass |
+| shared-section, 4 KB alignment (#43) | private copy, as expected | the same |
+| wma-decoder-drain, arm64 and i686 (#63) | 23552 / 23552, second buffer 24576 | the same |
+| stdio-pipe: pipes x64 and arm64, FIFOs (#70) | 0 failures | 0 failures |
+| console-title through hadron-steam.exe (issue #184) | pass | pass |
+| fixed-base, Hogwarts' size, 30 direct / 30 as a child (#56) | 0 / 0 failed | 0 / 0 failed |
+| fixed-base, Wukong's size, the same (#71) | 0 / 0 failed | 0 / 0 failed |
+| odd-mode-dpi (#54), display-report (#45, `HORZRES` 3024) | pass | pass |
+| thread-allocation (#28) | pass | pass (without 0051: a bounded top-down request got 0x17fe00000) |
+| test-wine-address-search, host gaps injected, arm64 / x64 (#28) | pass, threads 0.46–0.54 / 0.96–1.06 ms | pass, 0.05–0.07 / 0.05–0.09 ms |
+| gltri (Zink), d3d11tri (DXMT), d3d9tri | 102, 121, 114 fps | 119, 121, 120 fps |
+| letterbox-gdi 1280×720 | picture rows 132–1832, quarter rows 132–980 | before the `contentsRect` fix: picture rows 132–1832, quarter 132–997; with it: not captured (the screen was locked) |
+
+Not tested: the final 0045 on screen, games, the `--dev` build, d3d11fs and d3d9fs, Vulkan and D3D12, Steam's overlay
+(0025), and the minimization and window-level patches (0026, 0028) against upstream's rework of
+inactive window commands (c63ff8b706 to 1fd19f83c8).
+
+What games may notice from upstream: allocations are placed at random, above 4 GB for a 64-bit
+program with high-entropy ASLR, and an executable with relocations and a dynamic base no longer
+loads at its preferred base.
+winemac draws window surfaces through IOSurfaces, sends IME updates from the main thread
+(8b2f29dfc2) and updates the clipboard asynchronously; win32u creates OpenGL compatibility contexts
+by default (72a296b688) and gives macOS extra root contexts (cc91be7b65); ARM64EC gained XSTATE in
+its contexts (fc0d79cf5b and the commits around it), which FEX's x64 code sees.
+
+## An executable based at 4 GB never loaded: the page zero reaches past 4 GB (fixed, #75)
+
+Forza Horizon 4's first start runs DirectX's June 2010 redistributable, whose x64 `infinst.exe` has
+base 0x100000000 and no relocations. It never loaded: `wine: 100000000-100010000 still in use after
+32 restarts`, then `failed to create main module ... infinst.exe, status c0000018`. #56 put that
+down to the range starting below 4 GB; it starts at 4 GB. `tests/win/fixed-base.c` linked with
+`--image-base,0x100000000` (and `-DBULK_SIZE=0x10000`, 0x27000 bytes in all) fails the same way.
+
+At `main()` of the loader (lldb with ASLR on, the bundle's own signature), `mach_vm_region` at
+0x100000000 returns one PROT_NONE region from 0x4000 to the loader's image, 0x100dd8000,
+0x102740000 and 0x102104000 in three starts. With the cross-architecture entitlement the page zero
+is that region: it does not end at 4 GB but at the executable, which the kernel slides. Over 2000
+starts of a plain probe the slide was 0x8000 to 0x4ff8000, about evenly spread, so the region
+always holds 4 GB itself. The loader replaced it below 4 GB only (`low_reserve`), so its rest stayed
+mapped and nothing could be mapped there; patch 0042 saw it at every start and started again in
+vain. Without the entitlement the kernel raises the lowest address instead, and a mapping there
+fails as well.
+
+Wine patch 0052 makes all of the region, rounded down to 64 KB, the loader's low reserve, which
+ntdll uses like the rest of the low memory: an image based there is mapped into it. 0042 leaves that
+part of an executable's range out of its check. What is left is the loader itself, at 4 GB plus the
+slide: an executable based at 4 GB loads when the slide is larger than the image, and the loader
+starts again otherwise (by the slide's spread, a third of starts for a 16 MB image, two thirds for
+64 MB). One larger than 80 MB cannot load at 4 GB here. On Linux the preloader reserves the low
+8 GB, and Windows maps nothing there before the executable; an arm64 macOS executable must be
+position-independent, and `ld` ignores `-image_base` for it and caps `-pagezero_size` at 4 GB, so
+the loader cannot be put elsewhere.
+
+With the release runtime's loader rebuilt and signed as its bundle is, 2026-11-24:
+
+| Test | Before | After |
+|---|---|---|
+| fixed-base at 4 GB, 0x27000 bytes (infinst.exe's case), direct starts | 0 of 5 loaded (32 restarts each) | 20 of 20 |
+| the same, 30 starts as a child | not run | 0 of 30 failed |
+| fixed-base at 4 GB, 16 MB / 64 MB, direct, and 30 as a child | 16 MB: 0 of 5 | 20 of 20, 0 of 30 failed, each |
+| fixed-base, Hogwarts' size (#56), direct / as a child | 5 of 5 / not run | 20 of 20 / 0 of 30 failed |
+| fixed-base, Wukong's size (#71), the same | not run | 20 of 20 / 0 of 30 failed |
+| hello x64, i386 and arm64, is-ec-code, thread-allocation (#28), `cmd /c ver`, syswow64 `cmd` | not run | pass |
+| `wineboot -u` in a new prefix | the same 8 `err` lines | the same 8 |
+
+In a running process `vmmap` shows the reserved region from 0x7ffe4000 to 0x102950000, 16 KB below
+the loader's image. ntdll places each thread's data and the ARM64EC emulator stacks bottom-up above
+4 GB (`virtual_alloc_thread_data`, `limit_4g`), so these now go there too, after the image: in a
+trace of the 16 MB test the main thread's data went to 0x101020000, where it was at 0x7000000000
+before. That moves the allocations of a program without ASLR as well. 64 MB reservations by such a
+program went to 0x7001060000 and up before, as ntdll's bottom-up search started where it had
+reserved room for the thread data, and to 0x4040000 only from the 65th; now they start at 0xc80000
+and fill the 4 GB first, as Windows places them. Not tested: the game itself, Steam's DirectX
+install, the `--dev` build.
+
+## Forza Horizon 4 stops while its DLLs initialize, holding the loader lock (open, #76)
+
+Two reports (Hadron 0.3.3, M4 Pro, macOS 27.3) end the same way three times: the main thread loads
+the game's imports (the last ones `libcef.dll` and `xrnm.dll`), runs their initialization
+(`__telemetry_main_invoke_trigger` for `commonEventLoggingLibrary_Release.dll`; ETW registrations
+from code in `PartyWin.dll` and `xrnm.dll`, by address), loads `winemac.drv`, calls
+`GetPackagesByPackageFamily("Microsoft.VCLibs.140.00_8wekyb3d8bbwe")` and prints nothing more.
+Another thread, 13 thread ids after the main one in every run, then reports every minute that it
+waits for `loader_section`, held by the main thread. The loader lock is held while a DLL is loaded
+and while `DllMain`s run, so the main thread is in one of those.
+
+The waiting thread is very likely a bystander: winemac.drv starts one in its own `DllMain` when
+`SteamGameId` is set (patch 0025, the overlay's input), and a new thread waits for the loader lock
+before it runs. `tests/win/dllmain-display.c` has a `DllMain` that loads the display driver (screen
+size, a screen DC, a window); with `SteamGameId=1` and `DM_SLEEP=1` the same message comes from that
+thread, and without `SteamGameId` none. The first message comes 5 seconds into the wait, later ones
+every 60 (`RtlpWaitForCriticalSection`), and the main thread's last line comes after the first, so
+it was still running then. No other thread reports waiting for the loader lock, and the main thread
+reports no critical section wait of its own: whatever it waits for, if it waits, is something else.
+Loading the display driver in a `DllMain` is not it by itself: the test finishes in about a second.
+
+Not known yet: what the main thread does after the last line. A new log with
+`WINEDEBUG=err+all,+loaddll,+module,+timestamp,+pid` in the game's launch options says which
+`DllMain` is running (`+module` traces each call and return), and a `sample` of the game's process
+taken while it hangs shows where each thread is on the native side: a server wait, the Cocoa main
+thread, or FEX.
+
+## 32-bit D3D9 games ran out of memory with Wine 11.22: snmalloc's reservations went above 4 GB (fixed, #78)
+
+With Wine 11.22 (#73), Five Nights at Freddy's, Portal 2 and Ultimate Custom Night, all 32-bit
+D3D9 on mtld3d 0.15.5, failed from Steam: mtld3d refused every texture (`the resource's
+system-memory copy cannot be allocated → E_OUTOFMEMORY`) or stopped on `PageBox alloc failed`.
+mtld3d v0.11 and the 11.18-based Wine of 0.3.3 did not fail. It looked like the overlay's: with the
+game's overlay disabled in Steam, FNaF ran. Run directly with the overlay's libraries inserted as
+`scripts/play` does (a copy of the executable, a scratch prefix), it failed in 3 of 6 starts, but
+without them in 2 of 6 too, also as `memory allocation of 2048 bytes failed` and snmalloc's `Failed
+to initialise thread local allocator`. The overlay changes the odds, not the cause.
+
+Nothing of the host was in the 32-bit range. In a `+virtual` trace of a failing start, snmalloc
+(the Rust allocator in mtld3d's `d3d9.dll`) reserved 4 MB with `VirtualAlloc2` and an address
+requirement that gives only an alignment, `{NULL, NULL, size}`, and Wine placed it at
+0x7200800000. The WoW64 layer converts such a requirement as it is: a highest address of zero went
+to the 64-bit ntdll, which takes it as no limit (`mem_extended_parameters_32to64` adds the 32-bit
+limit only when there is no requirement at all). The game got the low 32 bits, 0x800000, which
+was not its reservation, and the trace shows the same 4 MB commit at 0x800000 again and again.
+
+Wine 11.18 placed such a request in the low reserve below 4 GB, as bottom-up searches started at
+the bottom. 11.22 grows the reserved areas when they run out (3480ed6ff1) and starts bottom-up
+searches in the part reserved last (a `static hint`). ntdll takes each thread's 64-bit data above
+4 GB (`virtual_alloc_thread_data`, `limit_4g`), first from the part of the page zero above 4 GB
+(#75, 0 to 80 MB by the loader's slide, about 1 MB a thread). When that is used up, the low range
+grows past the shared cache and the host's guard at 0x1000000000–0x7000000000 (#28), 113 steps of
+4 GB to 0x7200000000 in that trace, and from then on every such request lands there. So a game
+fails when it has started enough threads before snmalloc reserves its first chunk, which depends on
+the slide and on the threads Steam and the overlay add. Without 0052 the page zero above 4 GB was
+not in the low reserve and it failed every time. A top-down request with no highest address went
+above 4 GB with the old Wine as well.
+
+On 64-bit Windows a WoW64 process gets memory only below its own highest address. Wine patch 0054
+applies the process's limit (2 GB or 4 GB) when a requirement leaves the highest address at zero,
+in `NtAllocateVirtualMemoryEx` and `NtMapViewOfSectionEx` from 32-bit code in the same process,
+as it already did with no requirement. Upstream's master (2026-11-24) has the same code.
+`tests/win/wow64-address-requirements.c` (i686) starts 128 threads, then reserves with an alignment
+only, with an empty requirement, and top-down, and checks that Wine has each block where the
+returned pointer says.
+
+2026-11-25, M2 Pro, macOS 27.0.1, a scratch prefix and copy of FNaF's executable, mtld3d 0.15.5:
+
+| Test | Before (queue 0001–0053) | After (0001–0054) |
+|---|---|---|
+| wow64-address-requirements | fail, all four (0EC00000 and so on, nothing reserved there); with 1 thread only top-down fails; 0.3.3's Wine: only top-down fails | pass, 3 of 3 (aligned at 0x9000000, top-down at 0xFFEE0000) |
+| FNaF, 15 s, overlay libraries inserted | 3 of 6 starts failed | 0 of 6 |
+| FNaF, 15 s, without them | 2 of 6 failed | 0 of 3 |
+| FNaF traced with the overlay | 4 MB reservation at 0x7200800000 | 179 reserving steps, all 13 of the game's `VirtualAlloc2` reservations below 0xf000000 |
+| as32 free space and 1 GB reservations, VirtualAlloc2 aligned and top-down, 64 threads | pass | pass |
+| d3d9tex: 300 managed 1024² textures through mtld3d | pass | pass |
+| fixed-base, normal, Wukong's size and at 4 GB, 20 starts each | not run | 0 failed each |
+| hello x64, i386 and arm64, is-ec-code, thread-allocation x64 and arm64 | not run | pass |
+| d3d11tri x64 (DXMT) | not run | 121 fps |
+
+Not tested: the games from Steam, Portal 2 and UCN, and a 32-bit program that asks for memory in
+another process with such a requirement (left as it was).
+## vkd3d-proton moved to 3.1 (#72, issue #125)
+
+vkd3d-proton is pinned to the v3.1 tag (2026-10-28) instead of v3.0.1. Patches 0005 and 0006 were
+upstream commits picked onto 3.0.1 (5505762a, 49a1e2c7) and are in 3.1, so they are dropped. The
+four of Hadron's own apply unchanged, except for one line of context in 0003 (`swapchain.c`, a
+`WARN` that 3.1 casts to `int`); upstream's swapchain rework in 3.1 does not touch the latency
+handle code 0003 changes.
+
+What 3.1 asks of the driver and the toolchain, and what Hadron has: maintenance5 and maintenance6
+are required now (KosmicKrisp has both); `VK_KHR_shader_untyped_pointers` is enabled when present,
+for NVAPI's fp16 atomics only (KosmicKrisp has it); the DLLs link `version` and `pathcch`, which
+llvm-mingw has. `scripts/build-vulkan.sh` builds 3.1 with no change. 3.1 also has a cross file for
+ARM64EC (c1e0926d); Hadron still builds x86_64 PE, and an ARM64EC vkd3d-proton, run natively
+rather than under FEX, is the step `build-vulkan.sh` already names for later.
+
+Checked in a scratch prefix set up as `scripts/play` sets up a D3D12 game (vkd3d-proton's DLLs in
+`system32`, DXVK's DXGI as `dxgi_dxvk.dll`, KosmicKrisp with `MESA_KK_EXPERIMENTAL=dgc,xfb,sparse`),
+with the shader caches off. `tools/d3d12probe.c` reports the same capabilities on both builds
+(feature level 12_0, shader model 6.6) and `tests/win/d3d12bigview.c` reads back what it wrote on
+both. vkd3d-proton's own suite (`-Denable_tests=true`, stress tests left out, a test that aborts or
+prints nothing for 180 s is excluded and the run goes on):
+
+| Build | Tests | Pass | Fail | Abort or hang |
+|---|---|---|---|---|
+| 3.0.1 with its tests | 532 | 485 | 40 | 7 |
+| 3.0.1, 3.1's tests | 578 | 510 | 56 | 12 |
+| 3.1, 3.1's tests | 578 | 525 | 47 | 6 |
+
+On the same tests no test does worse on 3.1. It passes 15 that fail or abort on 3.0.1 (among them
+`test_renderpass_rendering`, `test_tight_resource_alignment`, `test_write_buffer_immediate`,
+`test_resource_retain_workaround`); `test_resolve_image_exhaustive_descriptors` hung on 3.0.1 and
+finishes on 3.1, with the same wrong values. The remap variants of `test_update_tile_mappings` fail a
+different number of checks on every run (798 to 980), on both builds. The six aborts left on 3.1
+abort on 3.0.1 too: `test_texture_feedback_instructions_{sm51,dxil}`, `test_sparse_default_mapping` (an
+assertion in KosmicKrisp's MSL backend), `test_fence_wait_robustness_shared`,
+`test_large_texel_buffer_view`, `test_large_buffer_descriptors`. Of the tests new in 3.1, these fail
+on both builds, so on the driver: `test_custom_border_color_limits_compute` (zeros from some
+border colour index on), `test_structured_buffer_addressing_wrap`,
+`test_conservative_ssbo_vectorization_{dxbc,dxil}_heap_desc` (vectors read one element early),
+`test_fp16_rounding_behavior_legacy` (one round-toward-zero case), and
+`test_query_heap_cpu_resolve_timestamp`, which aborts on 3.0.1 and on 3.1 finds the timestamps
+not monotonic.
+
+Not tested yet: a game. Teardown, the D3D12 game installed here, and Jurassic World Evolution 2
+(the big structured view of #36) are the ones to run before this ships.
+## mtld3d 0.15.5: a windowed resize stopped the picture for good (fixed, #69, issue #177)
+
+Portal 2 changing its windowed resolution, and Call of Duty: World at War picking its native one,
+left the window black with the sound still playing. A `sample` of the game showed mtld3d's submit
+thread stopped in Wine's `segv_handler`, called from `encode_pass` (`command.rs:2748`) retaining a
+pass's colour texture. Upstream's #919 (fixed in `4aa8014`, #985, mtld3d 0.15): a windowed device
+that binds its back buffer or implicit depth surface by hand and then gets a `WM_SIZE` has them
+destroyed and recreated by mtld3d's auto-resize, while the saved bindings keep the old handles, and
+the next `Present` puts them back into the frame. The fault is on mtld3d's own Unix thread, so no
+frame is submitted again and nothing is logged at the default level.
+
+`tests/win/d3d9resize.c` does what those games do: a windowed device with an automatic depth
+surface, `GetBackBuffer` + `SetRenderTarget` and `GetDepthStencilSurface` +
+`SetDepthStencilSurface`, then `SetWindowPos` to three other sizes, presenting 60 frames at each
+and reading the back buffer's middle pixel back after each. On the old pin (2070771 with Hadron's
+patches, the 0.3.3 build) it hangs in the first `Present` after the first resize, 32- and 64-bit
+alike, and a sample shows the issue's stack (`execute_submit` `encoder.rs:9125` → `encode_pass`
+`command.rs:2748` → `segv_handler`). On 0.15.5 all four sizes pass and read back their colour.
+
+The pin moved to upstream's v0.15.5 (553d758), 2026-11-17:
+
+- Patch 0001 (system-memory vertex buffers, #18) is rebased onto upstream's `buffer.drawTimeUpload`
+  (55d7097): its pre-draw flush is now `flush_bound_buffers_before_draw` /
+  `flush_staged_before_draw`, and the deferred upload of a system-memory buffer runs after it.
+- 0002 (`DebugSetMute`, #18) is dropped: upstream exports it at Windows' ordinal 35 since
+  `665dcd7`; the new `d3d9.dll`s (i386 and ARM64X) export it.
+- 0003 (display sync, #20) rebased with one conflict, in its tests' imports. `a4c67eb` moved
+  mtld3d's pure layer helpers (pacing, drawable sizes) out of `macdrv` into `metal/layer.rs`, but
+  `configure_metal_layer`, the refresh pass and `clear_covered_window_layers` stay in
+  `metal/macdrv.rs`, where this patch and the next still apply.
+- #136's patch 0004 (present rect on entering and leaving fullscreen, cover test against the view's
+  bounds) applies unchanged; upstream sets no present rect. The queue is renumbered 0001 to 0003.
+- The unix crate is now a library (`crate-type = ["rlib"]`, for a native d3d9 upstream is
+  building), so `build-mtld3d.sh` links `mtld3d.so` with `cargo rustc --crate-type cdylib` and the
+  install name upstream's `make unix-arm64` gives it. Rust is pinned at 1.99.1, the minimum the
+  crates name (`rust-version = "1.99"`). mtld3d's host unit tests pass (2,741); its e2e legs need
+  upstream's own Wine build and were not run.
+
+Measured 2026-11-23 on the built-in 3024×1964 display, Retina mode on, through a copy of the
+letterbox build's runtime (Wine 0050–0052) with each mtld3d, new scratch prefixes, capturing only
+the test's window (`tests/mac/window-id.swift` for its CGWindowID, `screencapture -x -o -l`, then
+`tests/mac/picture-bounds.swift`):
+
+| Test | 2070771 (0.3.3) | 0.15.5 |
+|---|---|---|
+| d3d9fs 1280×720 | `CreateDevice` makes it 3024×1964 (the mode list has only the screen's shape); whole window | 1280×720 set; picture rows 132–1832 (1701), 132 black rows above, 131 below, as wined3d's in #66 |
+| d3d9fs 1024×768 | 1024×768 set, no present rect: a 512×384-point window at the top left, under the menu bar | picture columns 203–2820 (2618), 203 black columns each side, as wined3d's |
+| d3d9resize, 32- and 64-bit | hangs after the first resize (above) | 4 sizes, every read-back right |
+| d3d9ex (`Direct3DCreate9Ex`, `CreateDeviceEx`, `PresentEx`, `ResetEx`, `CheckDeviceState`, a refused `D3DPOOL_MANAGED`), 32- and 64-bit | `Direct3DCreate9Ex` fails, `D3DERR_NOTAVAILABLE` | passes, read-backs right |
+| d3d9tri windowed, `IMMEDIATE`, 4 s | 59 fps 32-bit, 108 fps 64-bit | 120 fps both (the panel's rate: a windowed device syncs to it, 0003) |
+
+In one of two 1024×768 runs on 0.15.5, mtld3d logged "app deactivated, fullscreen window left in
+place: registry display mode 3024x1964 restored" a second in, with nothing in the test asking for it;
+the window then covered the screen in dark grey (30, 30, 30) with no picture until the device was
+released. The other run, and the 1280×720 one, stayed active. Where a fullscreen game should go when
+it loses focus is #178's question (Windows minimizes it); this run did not settle it.
+
+Not tested here: games (FNaF fullscreen at 16:9 and its focus loss #178 and office edges #135,
+Portal 2's resolution change, Ultimate Custom Night, ROAM for #88), 0004's `Reset` that keeps
+fullscreen, an external display.
+## DXMT moved to upstream main; its geometry shaders drop strips restarted at odd positions (open, #68)
+
+The DXMT pin moved from e86484e to upstream main, 25ea28f (2026-11-23), 163 commits. Eleven of
+the thirteen patches were upstream commits and are gone; Hadron's own two (display sync, and
+handing other devices' swapchains to DXVK's DXGI) apply unchanged. About 120 of the commits are
+DXIL and Direct3D 12 work, built only with `enable_d3d12`, which stays off. The risk is a
+refactor of the DXBC converter (`IOHelper`, 4b255b7, and `VertexPuller`, 5c80192, the code that
+fetches vertex attributes in the shader). Two tests compare it with the old build, both run as
+x86_64 and as i686 programs: `tests/win/d3d11vfmt.c` reads back what 43 vertex formats, a
+per-instance step rate, a start instance and a base vertex give, and `tests/win/d3d11gs.c` draws
+points and an indexed strip through geometry shaders. Both printed the same numbers with either
+build, and nothing under Metal API validation. `d3d11tri`, DXMT's own cube and Blinn-Phong
+tests and `d3d11fs` (exclusive fullscreen at 1280×720) looked and reported the same, at the
+display's 120 Hz.
+
+Both builds share two gaps the tests found. A strip restarted by a cut index through a geometry
+shader: DXMT's geometry stage numbers a strip's triangles by their position in the index buffer
+(`dxbc_converter_gs.cpp`, whose comment says restarts "can be broken"), so a triangle after a cut
+at an odd position is wound the wrong way and culled (it is drawn with culling off), and
+`SV_PrimitiveID` after a cut counts positions, not primitives (5 instead of 2 in the test).
+Without a geometry shader the strip is right. And `CreateInputLayout` refuses
+`R10G10B10A2_UINT`, a format Direct3D 11 requires for vertex buffers: it has no attribute format
+in `dxmt_format.cpp`, though the vertex puller could fetch it. Neither has been seen in a game.

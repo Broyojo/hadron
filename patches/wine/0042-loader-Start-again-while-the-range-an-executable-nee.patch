@@ -1,0 +1,133 @@
+From ee67a0a7fd52ec002f99d7b91626fecf06e6a6d8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Sat, 24 Oct 2026 14:42:17 -0400
+Subject: [PATCH] loader: Start again while the range an executable needs is in
+ use.
+
+An executable without relocations must be mapped at its preferred base.
+On Linux the preloader reserves memory before libc runs. On arm64 macOS
+nothing runs that early, and libmalloc maps its metadata at a random
+2MB-aligned address before main(), inside such a range above 4GB about a
+third of the time (Hogwarts Legacy, 0x140000000-0x15bcc2000), and the
+image then fails to map with STATUS_CONFLICTING_ADDRESSES. The loader now
+checks the range, which ntdll passes in WINEPRELOADRESERVE, and starts
+again, up to 32 times, while something is in it.
+
+ntdll sets WINEPRELOADRESERVE for 32-bit executables only. On arm64
+macOS it now sets it for a 64-bit executable that is only mapped at its
+base as well: one without relocations or without a dynamic base, as
+map_image_view() decides.
+
+The range is not reserved: a reserved area there would be taken by the
+allocations made before the image is mapped.
+
+Approach and analysis by matteofuligni (Hadron issue #95).
+---
+ dlls/ntdll/unix/loader.c | 14 +++++++++++
+ loader/main.c            | 51 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 65 insertions(+)
+
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 30bc63a7f9e..e5f62396255 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -501,6 +501,20 @@ NTSTATUS exec_wineloader( char **argv, int socketfd, const struct pe_image_info
+                   (UINT)pe_info->base, (UINT)(pe_info->base + pe_info->map_size) );
+         putenv( preloader_reserve );
+     }
++#if defined(__APPLE__) && defined(__aarch64__)
++    /* The arm64 macOS loader reserves nothing above 4GB, and macOS maps memory there before it
++     * runs; it starts again while the range of an executable that is only mapped at its base
++     * is in use (loader/main.c). */
++    else if (pe_info->base && !pe_info->wine_fakedll &&
++             ((pe_info->image_charact & IMAGE_FILE_RELOCS_STRIPPED) ||
++              !(pe_info->dll_charact & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)))
++    {
++        snprintf( preloader_reserve, sizeof(preloader_reserve), "WINEPRELOADRESERVE=%llx-%llx",
++                  (unsigned long long)pe_info->base,
++                  (unsigned long long)(pe_info->base + pe_info->map_size) );
++        putenv( preloader_reserve );
++    }
++#endif
+ 
+     return loader_exec( argv, machine );
+ }
+diff --git a/loader/main.c b/loader/main.c
+index da0216e3f6e..9460aeac9dc 100644
+--- a/loader/main.c
++++ b/loader/main.c
+@@ -36,6 +36,8 @@
+ #endif
+ #ifdef __APPLE__
+ # include <mach-o/dyld.h>
++# include <mach/mach.h>
++# include <mach/mach_vm.h>
+ #endif
+ 
+ #include "main.h"
+@@ -261,6 +263,54 @@ static void set_runtime_defaults( const char *exe, char *argv[] )
+     execv( exe, argv );  /* on failure, go on without the library path */
+ }
+ 
++/* An executable that can only load at its preferred base (no relocations) needs the range ntdll
++ * names in WINEPRELOADRESERVE free when it maps the image. On Linux the preloader reserves it
++ * before libc runs. Here nothing can run that early, and libmalloc maps its metadata at a random
++ * 2MB-aligned address before main(), at times inside a range above 4GB such as Hogwarts
++ * Legacy's 0x140000000-0x15bcc2000, and the image then fails with STATUS_CONFLICTING_ADDRESSES.
++ * Start the loader again while something is in the range: the next start draws new placements.
++ * The range is not reserved here: a reserved area there would be taken by the top-down
++ * allocations made before the image is mapped. */
++static void reexec_while_reserve_taken( const char *exe, char *argv[] )
++{
++    static const char attempt_var[] = "WINEHADRONRESERVEATTEMPT";
++    const char *str = getenv( "WINEPRELOADRESERVE" ), *attempt_str;
++    unsigned long long start, end;
++    mach_vm_address_t addr;
++    mach_vm_size_t size = 0;
++    vm_region_basic_info_data_64_t info;
++    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
++    mach_port_t object;
++    char *p, attempt_buf[16];
++    int attempt;
++
++    if (!str || !exe) return;
++    start = strtoull( str, &p, 16 );
++    if (*p != '-') return;
++    end = strtoull( p + 1, NULL, 16 );
++    /* below 4GB the loader's own low reserve keeps the range free */
++    if (end <= start || start < 0x100000000ULL) return;
++
++    addr = start;
++    if (mach_vm_region( mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
++                        (vm_region_info_t)&info, &count, &object ) != KERN_SUCCESS || addr >= end)
++    {
++        unsetenv( attempt_var );
++        return;
++    }
++
++    attempt = (attempt_str = getenv( attempt_var )) ? atoi( attempt_str ) : 0;
++    if (attempt >= 32)
++    {
++        fprintf( stderr, "wine: %llx-%llx still in use after %d restarts\n", start, end, attempt );
++        unsetenv( attempt_var );
++        return;
++    }
++    snprintf( attempt_buf, sizeof(attempt_buf), "%d", attempt + 1 );
++    setenv( attempt_var, attempt_buf, 1 );
++    execv( exe, argv );  /* on failure, go on and let the image fail as before */
++}
++
+ #endif
+ 
+ /**********************************************************************
+@@ -272,6 +322,7 @@ int main( int argc, char *argv[] )
+ 
+ #if defined(__APPLE__) && defined(__aarch64__)
+     set_runtime_defaults( get_self_exe(), argv );
++    reexec_while_reserve_taken( get_self_exe(), argv );
+ #endif
+     init_reserved_areas();
+ 
+-- 
+2.54.0 (Apple Git-157)
+

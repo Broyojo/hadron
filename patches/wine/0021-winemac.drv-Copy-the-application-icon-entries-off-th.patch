@@ -1,4 +1,4 @@
-From 371391b530be9138394b6902168bc9e79f590aad Mon Sep 17 00:00:00 2001
+From c910b616adb1d61bd8858b61e7ac46b71cbda4f7 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 12:40:04 -0400
 Subject: [PATCH] winemac.drv: Copy the application icon entries off the
@@ -15,7 +15,7 @@ whichever were left.
  1 file changed, 10 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/winemac.drv/image.c b/dlls/winemac.drv/image.c
-index 7fb45f357a..e9b07b2b76 100644
+index 7fb45f357a0..e9b07b2b769 100644
 --- a/dlls/winemac.drv/image.c
 +++ b/dlls/winemac.drv/image.c
 @@ -249,7 +249,7 @@ CFArrayRef create_app_icon_images(void)

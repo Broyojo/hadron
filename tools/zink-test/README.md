@@ -10,13 +10,13 @@ It creates the newest core context EGL offers, prints the version, lists the ext
 newer OpenGL version still lacks, creates a compatibility context, and draws a triangle into a
 framebuffer object and reads it back.
 
-On 2026-10-02 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0034): OpenGL 3.3 core and 3.3
+On 2026-10-02 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0034 as numbered then, 0001-0028 now): OpenGL 3.3 core and 3.3
 compatibility, the triangle correct. One extension stands between that and OpenGL 4.6:
 `ARB_texture_buffer_object_rgb32`, buffer textures in the three-channel 32-bit formats, which
 KosmicKrisp does not offer as texel buffers (Metal has no such pixel format). Zink also warns that
 `VK_EXT_custom_border_color` is missing.
 
-`zink-window.m` makes an EGL window surface on a CAMetalLayer (Mesa 0035 and 0036: Zink presents
+`zink-window.m` makes an EGL window surface on a CAMetalLayer (Mesa 0029 and 0030: Zink presents
 through a Vulkan swapchain on the layer, as it does for X11, Wayland and Win32 windows). Same day:
 a 480x360 window at scale 2 gave a 960x720 surface and 403 frames in 4 s, with the triangle's pixel
 right in the back buffer of every frame and no failed swap. What the window showed was not checked
@@ -39,5 +39,6 @@ Its "streak" mode is what Geometry Dash's ship trail does: between two batches o
 interleaved buffer, a triangle strip from three separate arrays. That draw came out wrong in every
 frame. Zink skipped looking its pipeline up again when only the vertex layout had changed since
 the last draw, which goes unnoticed on drivers with `VK_EXT_vertex_input_dynamic_state` (there the
-layout is not part of the pipeline) and KosmicKrisp has none. Mesa 0037 looks the pipeline up
-again in that case; all modes pass.
+layout is not part of the pipeline) and KosmicKrisp has none. Mesa 0037 looked the pipeline up
+again in that case; all modes pass. Upstream Zink does the same since `fd12422cce0`, which replaced
+the patch (findings #73).

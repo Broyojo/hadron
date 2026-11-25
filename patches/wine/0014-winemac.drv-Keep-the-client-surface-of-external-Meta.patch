@@ -1,4 +1,4 @@
-From c297496a46eb8e019dec8cc651ff7d5c8be9a4b6 Mon Sep 17 00:00:00 2001
+From 45c27d086bb7b089d5ddc9dbf3c3a4691cacbe58 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 10:23:41 -0400
 Subject: [PATCH] winemac.drv: Keep the client surface of external Metal views
@@ -19,35 +19,35 @@ with the window, so win32u keeps the view in step with the client area.
  4 files changed, 47 insertions(+), 4 deletions(-)
 
 diff --git a/dlls/win32u/win32u_private.h b/dlls/win32u/win32u_private.h
-index 5e3f7550a4..0e7f421c51 100644
+index 4f3eea733dc..a4439158004 100644
 --- a/dlls/win32u/win32u_private.h
 +++ b/dlls/win32u/win32u_private.h
-@@ -331,8 +331,6 @@ extern HWND get_taskman_window(void);
- extern BOOL is_client_surface_window( struct client_surface *surface, HWND hwnd );
+@@ -347,8 +347,6 @@ extern HWND get_client_surface_window( struct client_surface *surface );
  extern void client_surface_update( struct client_surface *surface );
+ extern BOOL client_surface_set_color_space( struct client_surface *surface, VkColorSpaceKHR color_space );
  extern BOOL client_surface_get_size( struct client_surface *surface, SIZE *virtual_size, SIZE *monitor_size );
 -extern void use_window_client_surface( struct client_surface *surface, BOOL use );
 -extern struct client_surface *get_unused_client_surface( HWND hwnd, int format, BOOL raw );
+ extern SIZE get_client_swapchain_size( HWND toplevel, HWND hwnd );
  extern HICON get_window_icon_info( HWND hwnd, UINT type, HICON icon, ICONINFO *ret );
  extern void init_startup_info(void);
- 
 diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
-index 6643cc6770..6322d52a8b 100644
+index 92bcd2fabb6..ffd83fdc863 100644
 --- a/dlls/winemac.drv/macdrv.h
 +++ b/dlls/winemac.drv/macdrv.h
-@@ -227,6 +227,7 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+@@ -234,6 +234,7 @@ extern void macdrv_ime_set_text(HWND hwnd, CFStringRef text, bool complete,
      HWND                hwnd;                   /* hwnd that this private data belongs to */
      WineWindow         *cocoa_window;
      WineContentView    *client_view;
 +    struct client_surface *metal_client_surface; /* client surface holding the view of an external Metal layer (DXMT, mtld3d) */
      struct window_rects rects;                  /* window rects in monitor DPI, relative to parent client area */
-     int                 pixel_format;           /* pixel format for GL */
      HANDLE              drag_event;             /* event to signal that Cocoa-driven window dragging has ended */
+     unsigned int        on_screen : 1;          /* is window ordered in? (minimized or not) */
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 02c6788170..872e317ad7 100644
+index 4b7cdebacb5..8fb033079e8 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
-@@ -1258,6 +1258,7 @@ LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+@@ -1275,6 +1275,7 @@ LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
  void macdrv_DestroyWindow(HWND hwnd)
  {
      struct macdrv_win_data *data;
@@ -55,7 +55,7 @@ index 02c6788170..872e317ad7 100644
  
      TRACE("%p\n", hwnd);
  
-@@ -1267,9 +1268,13 @@ void macdrv_DestroyWindow(HWND hwnd)
+@@ -1284,9 +1285,13 @@ void macdrv_DestroyWindow(HWND hwnd)
  
      destroy_cocoa_window(data);
  
@@ -69,7 +69,7 @@ index 02c6788170..872e317ad7 100644
  }
  
  
-@@ -2236,8 +2241,45 @@ static struct dxmt_win_data *dxmt_get_win_data(HWND hwnd)
+@@ -2231,8 +2236,45 @@ static struct dxmt_win_data *dxmt_get_win_data(HWND hwnd)
      has_client_view = data->client_view != NULL;
      release_win_data(data);
  
@@ -118,10 +118,10 @@ index 02c6788170..872e317ad7 100644
      if (!(data = get_win_data(hwnd))) return NULL;
      if (!data->client_view || !(ret = malloc(sizeof(*ret))))
 diff --git a/include/wine/gdi_driver.h b/include/wine/gdi_driver.h
-index ad00912c4d..24ca5ac58b 100644
+index 1b431fe125f..96a75d3bbcc 100644
 --- a/include/wine/gdi_driver.h
 +++ b/include/wine/gdi_driver.h
-@@ -278,6 +278,8 @@ W32KAPI void *client_surface_create( const struct client_surface_funcs *funcs, H
+@@ -286,6 +286,8 @@ W32KAPI void *client_surface_create( const struct client_surface_funcs *funcs, H
  W32KAPI void client_surface_add_ref( struct client_surface *surface );
  W32KAPI void client_surface_release( struct client_surface *surface );
  W32KAPI void client_surface_present( struct client_surface *surface );

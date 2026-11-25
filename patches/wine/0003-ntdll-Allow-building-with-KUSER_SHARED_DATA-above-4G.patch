@@ -1,4 +1,4 @@
-From 638a1357ccd98e74056a4ce19cd3de33dbfe1960 Mon Sep 17 00:00:00 2001
+From 246c5953ab35c816fb0344c359a3e1d5eb87eb48 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 14:49:43 -0400
 Subject: [PATCH] ntdll: Allow building with KUSER_SHARED_DATA above 4GB.
@@ -17,15 +17,15 @@ work in this mode.
  dlls/kernelbase/sync.c      |  2 +-
  dlls/ntdll/signal_arm64ec.c |  5 +++++
  dlls/ntdll/thread.c         |  2 +-
- dlls/ntdll/unix/virtual.c   |  8 +++++++-
+ dlls/ntdll/unix/virtual.c   | 11 ++++++++++-
  dlls/ntoskrnl.exe/instr.c   |  2 +-
  dlls/win32u/message.c       |  2 +-
  include/ddk/wdm.h           | 10 ++++++++++
  include/wine/asm.h          |  7 ++++++-
- 11 files changed, 35 insertions(+), 9 deletions(-)
+ 11 files changed, 38 insertions(+), 9 deletions(-)
 
 diff --git a/dlls/kernel32/process.c b/dlls/kernel32/process.c
-index 9bbb18d89d..5e7a8f65b6 100644
+index 9bbb18d89dc..5e7a8f65b67 100644
 --- a/dlls/kernel32/process.c
 +++ b/dlls/kernel32/process.c
 @@ -39,7 +39,7 @@
@@ -38,7 +38,7 @@ index 9bbb18d89d..5e7a8f65b6 100644
  typedef struct
  {
 diff --git a/dlls/kernel32/sync.c b/dlls/kernel32/sync.c
-index 5b2a8489a0..99e8080c03 100644
+index f3ca4043bca..b0d0773c498 100644
 --- a/dlls/kernel32/sync.c
 +++ b/dlls/kernel32/sync.c
 @@ -42,7 +42,7 @@
@@ -51,7 +51,7 @@ index 5b2a8489a0..99e8080c03 100644
  
  static void get_create_object_attributes( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nameW,
 diff --git a/dlls/kernelbase/memory.c b/dlls/kernelbase/memory.c
-index 2ce2dcad30..bf48cae1b6 100644
+index 2ce2dcad30e..bf48cae1b60 100644
 --- a/dlls/kernelbase/memory.c
 +++ b/dlls/kernelbase/memory.c
 @@ -40,7 +40,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(heap);
@@ -64,7 +64,7 @@ index 2ce2dcad30..bf48cae1b6 100644
  static CRITICAL_SECTION memstatus_section;
  static CRITICAL_SECTION_DEBUG critsect_debug =
 diff --git a/dlls/kernelbase/sync.c b/dlls/kernelbase/sync.c
-index 94036acfad..40d24c9169 100644
+index 94f846eeb53..f2605aca702 100644
 --- a/dlls/kernelbase/sync.c
 +++ b/dlls/kernelbase/sync.c
 @@ -39,7 +39,7 @@
@@ -77,10 +77,10 @@ index 94036acfad..40d24c9169 100644
  /* check if current version is NT or Win95 */
  static inline BOOL is_version_nt(void)
 diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
-index 1a8174e7d7..beea4ecabb 100644
+index ee2936ef9e9..29e509c7d8d 100644
 --- a/dlls/ntdll/signal_arm64ec.c
 +++ b/dlls/ntdll/signal_arm64ec.c
-@@ -1973,8 +1973,13 @@ static void __attribute__((naked)) arm64x_check_call(void)
+@@ -2039,8 +2039,13 @@ static void __attribute__((naked)) arm64x_check_call(void)
           ".Lsyscall_seq:\n\t"
           ".byte 0x4c, 0x8b, 0xd1\n\t"       /* mov  %rcx,%r10 */
           ".byte 0xb8, 0, 0, 0, 0\n\t"       /* mov  $xxx,%eax */
@@ -95,7 +95,7 @@ index 1a8174e7d7..beea4ecabb 100644
           ".byte 0x0f, 0x05\n\t"             /* syscall */
           ".byte 0xc3\n\t"                   /* ret */
 diff --git a/dlls/ntdll/thread.c b/dlls/ntdll/thread.c
-index 1c25c8ff1d..97630b3cae 100644
+index 1c25c8ff1d5..97630b3cae8 100644
 --- a/dlls/ntdll/thread.c
 +++ b/dlls/ntdll/thread.c
 @@ -35,7 +35,7 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
@@ -108,13 +108,13 @@ index 1c25c8ff1d..97630b3cae 100644
  struct debug_info
  {
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 07ebf670c0..98ed79dfa4 100644
+index 5cdc3f4d6d4..1599a1754f7 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -183,7 +183,11 @@ static const UINT_PTR host_page_mask = 0xfff;
- #endif
+@@ -175,7 +175,11 @@ static const UINT_PTR host_page_mask = 0xfff;
  
  /* Note: these are Windows limits, you cannot change them. */
+ static void *dos_space_start     = (void *)0x10000;         /* start of available DOS space (between 0 and 64K) */
 +#ifdef WINE_HIGH_USER_SHARED_DATA
 +static void *address_space_start = (void *)0x7000000000;  /* arm64 macOS reserves 4GB-0x7000000000 */
 +#else
@@ -123,7 +123,7 @@ index 07ebf670c0..98ed79dfa4 100644
  #ifdef _WIN64
  static void *address_space_limit = (void *)0x7fffffff0000;  /* top of the total available address space */
  static void *user_space_limit    = (void *)0x7fffffff0000;  /* top of the user address space */
-@@ -199,7 +203,7 @@ static void *host_addr_space_limit;  /* top of the host virtual address space */
+@@ -192,7 +196,7 @@ static ULONG_PTR top_down_wow_offset;  /* offset for top-down randomization in w
  static struct file_view *arm64ec_view;
  
  ULONG_PTR user_space_wow_limit = 0;
@@ -132,20 +132,21 @@ index 07ebf670c0..98ed79dfa4 100644
  
  /* TEB allocation blocks */
  static void *teb_block;
-@@ -758,9 +762,11 @@ static void mmap_init( const struct preload_info *preload_info )
- #else
-     reserve_area( (void *)0x7ffff0000000, (void *)0x7ffffe000000 ); /* top-down area */
-     if (preload_info) return;
-+#ifndef WINE_HIGH_USER_SHARED_DATA
-     reserve_area( (void *)0x000000010000, (void *)0x000068000000 );
-     reserve_area( (void *)0x00007f000000, (void *)0x00007fff0000 );
- #endif
+@@ -261,7 +265,12 @@ struct alloc_range
+ };
+ 
+ #ifdef _WIN64
++#ifdef WINE_HIGH_USER_SHARED_DATA
++/* nothing can be mapped below address_space_start: start empty there and grow up */
++static struct alloc_range low_range  = { (void *)0x7000000000, (void *)0x7000000000 };
++#else
+ static struct alloc_range low_range  = { (void *)0x10000, (void *)0x200000000 };
 +#endif
- }
- 
- 
+ static struct alloc_range high_range = { (void *)0x7ff600000000, (void *)0x7ff600000000 };
+ #else
+ static struct alloc_range low_range  = { (void *)0x10000, (void *)0x40000000 };
 diff --git a/dlls/ntoskrnl.exe/instr.c b/dlls/ntoskrnl.exe/instr.c
-index 31e1e6e28a..35df3ffa80 100644
+index 31e1e6e28a4..35df3ffa806 100644
 --- a/dlls/ntoskrnl.exe/instr.c
 +++ b/dlls/ntoskrnl.exe/instr.c
 @@ -490,7 +490,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(int);
@@ -158,7 +159,7 @@ index 31e1e6e28a..35df3ffa80 100644
  
  static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
 diff --git a/dlls/win32u/message.c b/dlls/win32u/message.c
-index 8c9a2aaef7..68551961c6 100644
+index de1a4841789..e635e9297c1 100644
 --- a/dlls/win32u/message.c
 +++ b/dlls/win32u/message.c
 @@ -45,7 +45,7 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
@@ -171,7 +172,7 @@ index 8c9a2aaef7..68551961c6 100644
  static const struct ratio no_dpi;
  
 diff --git a/include/ddk/wdm.h b/include/ddk/wdm.h
-index bce13425a2..0ca6be93b9 100644
+index bce13425a23..0ca6be93b90 100644
 --- a/include/ddk/wdm.h
 +++ b/include/ddk/wdm.h
 @@ -1479,6 +1479,16 @@ typedef struct _KUSER_SHARED_DATA {
@@ -192,7 +193,7 @@ index bce13425a2..0ca6be93b9 100644
  #define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE 0x02
  #define SHARED_GLOBAL_FLAGS_QPC_BYPASS_DISABLE_32BIT 0x04
 diff --git a/include/wine/asm.h b/include/wine/asm.h
-index 3cb21255fc..4125ff0a73 100644
+index 3cb21255fce..4125ff0a734 100644
 --- a/include/wine/asm.h
 +++ b/include/wine/asm.h
 @@ -269,13 +269,18 @@

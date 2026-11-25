@@ -56,6 +56,10 @@ build_zink() {
             -Dvulkan-loader-rpath="$BREW/lib" >/dev/null
     fi
     log "building Zink"
+    PATH="$path" ninja -C "$BUILD/mesa-zink" >/dev/null
+    # Gallium's library carries Mesa's version in its name, and install leaves the last version's
+    # copy behind, which package-runtime.sh would then ship. Install puts the current one back.
+    rm -f "$DIST/mesa-zink/lib"/libgallium-*.dylib
     PATH="$path" ninja -C "$BUILD/mesa-zink" install >/dev/null
 }
 
