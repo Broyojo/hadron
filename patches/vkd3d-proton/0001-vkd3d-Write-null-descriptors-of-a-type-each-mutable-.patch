@@ -1,4 +1,4 @@
-From 5375d17caa333f54f99ca5c035403576e96fa958 Mon Sep 17 00:00:00 2001
+From 5b2baff49d04be796d3b468c596956ee2cc44016 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 14:53:50 -0400
 Subject: [PATCH] vkd3d: Write null descriptors of a type each mutable set can
@@ -20,10 +20,10 @@ initial null type when it can't hold the requested one.
  3 files changed, 33 insertions(+), 2 deletions(-)
 
 diff --git a/libs/vkd3d/resource.c b/libs/vkd3d/resource.c
-index 0fa8fb1e..42c7d0bc 100644
+index 25754b76..35558e4b 100644
 --- a/libs/vkd3d/resource.c
 +++ b/libs/vkd3d/resource.c
-@@ -5701,7 +5701,15 @@ static void d3d12_descriptor_heap_write_null_descriptor_template(vkd3d_cpu_descr
+@@ -5989,7 +5989,15 @@ static void d3d12_descriptor_heap_write_null_descriptor_template(vkd3d_cpu_descr
          {
              writes[i] = null_descriptor_template->writes.descriptors.writes[i];
              if (writes[i].descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT)
@@ -40,7 +40,7 @@ index 0fa8fb1e..42c7d0bc 100644
              writes[i].dstArrayElement = offset;
          }
  
-@@ -8878,6 +8886,23 @@ static void d3d12_descriptor_heap_add_null_descriptor_template_descriptors(
+@@ -10100,6 +10108,23 @@ static void d3d12_descriptor_heap_add_null_descriptor_template_descriptors(
      /* For mutable, will be replaced when instantiating template. */
      write->descriptorType = set_info->vk_descriptor_type;
  
@@ -65,10 +65,10 @@ index 0fa8fb1e..42c7d0bc 100644
      write->pImageInfo = &descriptor_heap->null_descriptor_template.writes.descriptors.image;
      write->pTexelBufferView = &descriptor_heap->null_descriptor_template.writes.descriptors.buffer_view;
 diff --git a/libs/vkd3d/state.c b/libs/vkd3d/state.c
-index ce7f54ec..6884d961 100644
+index 1945f15a..95a0d964 100644
 --- a/libs/vkd3d/state.c
 +++ b/libs/vkd3d/state.c
-@@ -6710,7 +6710,7 @@ static uint32_t d3d12_max_host_descriptor_count_from_heap_type(struct d3d12_devi
+@@ -7276,7 +7276,7 @@ static uint32_t d3d12_max_host_descriptor_count_from_heap_type(struct d3d12_devi
      }
  }
  
@@ -78,10 +78,10 @@ index ce7f54ec..6884d961 100644
      uint32_t count = 0;
  
 diff --git a/libs/vkd3d/vkd3d_private.h b/libs/vkd3d/vkd3d_private.h
-index 63154f9d..4247773f 100644
+index 80244859..3586901e 100644
 --- a/libs/vkd3d/vkd3d_private.h
 +++ b/libs/vkd3d/vkd3d_private.h
-@@ -1540,6 +1540,10 @@ struct d3d12_null_descriptor_template
+@@ -1620,6 +1620,10 @@ struct d3d12_null_descriptor_template
          struct
          {
              struct VkWriteDescriptorSet writes[VKD3D_MAX_BINDLESS_DESCRIPTOR_SETS];
@@ -92,7 +92,7 @@ index 63154f9d..4247773f 100644
              VkDescriptorBufferInfo buffer;
              VkDescriptorImageInfo image;
              VkBufferView buffer_view;
-@@ -4364,6 +4368,8 @@ static inline struct vkd3d_descriptor_binding vkd3d_bindless_state_binding_from_
+@@ -4610,6 +4614,8 @@ static inline struct vkd3d_descriptor_binding vkd3d_bindless_state_binding_from_
      return binding;
  }
  
