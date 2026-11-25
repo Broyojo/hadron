@@ -1,8 +1,8 @@
-From d6c8c93e73016e4797bf490ec4b94e5e99ed79a6 Mon Sep 17 00:00:00 2001
+From e83d0fde130ad2e3d392c389fc507df88a7ce8ba Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 10:39:57 -0400
-Subject: [PATCH] d3d9: Draw from system-memory vertex buffers the way Windows
- does
+Subject: [PATCH 1/3] d3d9: Draw from system-memory vertex buffers the way
+ Windows does
 
 A Windows runtime processes a D3DPOOL_SYSTEMMEM vertex buffer in
 software: each draw copies the vertices it names out of it, and the
@@ -31,15 +31,15 @@ to read, forcing a rename with a whole-buffer GPU copy.
 Ultimate Custom Night's menu: vertex buffer time 65 ms -> 0 per frame,
 no staging uploads or retention, encoder 8 -> 1 ms per frame.
 ---
- windows/d3d9/src/device.rs        | 232 +++++++++++++++++++++++++++++-
+ windows/d3d9/src/device.rs        | 216 +++++++++++++++++++++++++++++-
  windows/d3d9/src/vertex_buffer.rs |  74 +++++++++-
- 2 files changed, 301 insertions(+), 5 deletions(-)
+ 2 files changed, 286 insertions(+), 4 deletions(-)
 
 diff --git a/windows/d3d9/src/device.rs b/windows/d3d9/src/device.rs
-index 34e499c..dd02f20 100644
+index 54d80d9..48bf167 100644
 --- a/windows/d3d9/src/device.rs
 +++ b/windows/d3d9/src/device.rs
-@@ -10131,6 +10131,16 @@ extern "system" fn device_draw_primitive(
+@@ -12449,6 +12449,16 @@ extern "system" fn device_draw_primitive(
          std::hint::cold_path();
          return D3DERR_INVALIDCALL;
      }
@@ -53,10 +53,10 @@ index 34e499c..dd02f20 100644
 +    ) {
 +        return hr;
 +    }
-     // Flush any bound buffer that's drawn while still mapped, before the draw
-     // snapshot reads it.
-     flush_mapped_bound_buffers(obj.inner());
-@@ -10375,8 +10385,8 @@ extern "system" fn device_draw_indexed_primitive(
+     flush_bound_buffers_before_draw(obj.inner());
+     if let Err(hr) = obj.inner().latched_encoder_status() {
+         std::hint::cold_path();
+@@ -12689,8 +12699,8 @@ extern "system" fn device_draw_indexed_primitive(
      this: *mut c_void,
      primitive_type: u32,
      base_vertex_index: i32,
@@ -67,7 +67,7 @@ index 34e499c..dd02f20 100644
      start_index: u32,
      primitive_count: u32,
  ) -> i32 {
-@@ -10417,6 +10427,19 @@ extern "system" fn device_draw_indexed_primitive(
+@@ -12732,6 +12742,19 @@ extern "system" fn device_draw_indexed_primitive(
          std::hint::cold_path();
          return D3DERR_INVALIDCALL;
      }
@@ -85,46 +85,32 @@ index 34e499c..dd02f20 100644
 +        return hr;
 +    }
  
-     // Flush any bound buffer that's drawn while still mapped, before the draw
-     // snapshot reads it.
-@@ -10470,13 +10493,20 @@ extern "system" fn device_draw_indexed_primitive(
- ///
- /// A buffer drawn while locked never reached `Unlock`'s upload, so its latest
+     flush_bound_buffers_before_draw(obj.inner());
+     if let Err(hr) = obj.inner().latched_encoder_status() {
+@@ -12785,6 +12808,8 @@ extern "system" fn device_draw_indexed_primitive(
  /// CPU writes are flushed here. The lock stays open and `dirty` stays set, so
--/// `Unlock` still flushes afterwards.
-+/// `Unlock` still flushes afterwards. A system-memory buffer whose `Unlock`
-+/// left its range for the next GPU read uploads it here too, when the draw's
-+/// declaration reads its stream: a buffer merely left bound is not read.
- fn flush_mapped_bound_buffers(dev: &mut DeviceInner) {
-+    let read_streams = declared_stream_mask(dev);
-     for stream in 0..mtld3d_types::MAX_STREAMS as usize {
+ /// `Unlock` still flushes afterwards. Under `buffer.drawTimeUpload` `Unlock`
+ /// uploads nothing, and an unlocked buffer's writes are flushed here instead.
++/// A system-memory buffer whose `Unlock` left its range for the next GPU read
++/// uploads it here too.
+ ///
+ /// Only the streams the bound declaration reads are visited, the same set
+ /// [`snapshot_bound_streams`] captures: a buffer bound to a stream the draw
+@@ -12798,7 +12823,9 @@ fn flush_bound_buffers_before_draw(dev: &mut DeviceInner) {
          let vb = dev.bound_buffers().stream_vertex_buffer(stream);
          if !vb.is_null() {
              // SAFETY: a bound vertex buffer is a live wrapper while bound.
--            unsafe { (*vb).inner_mut() }.flush_staged_if_mapped(dev);
+-            unsafe { (*vb).inner_mut() }.flush_staged_before_draw(dev);
 +            let inner = unsafe { (*vb).inner_mut() };
-+            inner.flush_staged_if_mapped(dev);
-+            if read_streams & (1 << stream) != 0 {
-+                inner.upload_deferred(dev);
-+            }
++            inner.flush_staged_before_draw(dev);
++            inner.upload_deferred(dev);
          }
      }
      let ib = dev.bound_buffers().index_buffer();
-@@ -10610,6 +10640,200 @@ fn snapshot_bound_index_source(dev: &DeviceInner, start_index: u32) -> Option<In
+@@ -12936,6 +12963,189 @@ fn snapshot_bound_index_source(dev: &DeviceInner, start_index: u32) -> Option<In
      })
  }
  
-+/// The streams the bound vertex declaration reads, one bit per stream; an FVF reads stream 0.
-+fn declared_stream_mask(dev: &DeviceInner) -> u16 {
-+    let decl_ptr = dev.vertex_decl();
-+    if decl_ptr.is_null() {
-+        return 1;
-+    }
-+    // SAFETY: non-null; the device slot's refcount keeps the declaration
-+    // alive while bound.
-+    unsafe { &*decl_ptr }.inner().stream_mask()
-+}
-+
 +/// A draw from bound streams, as [`draw_system_memory_as_up`] takes it.
 +enum SystemMemoryDraw {
 +    Vertices {
@@ -312,11 +298,11 @@ index 34e499c..dd02f20 100644
  ///
  /// The bytes travel to the encoder inside the draw op, so they are copied
 diff --git a/windows/d3d9/src/vertex_buffer.rs b/windows/d3d9/src/vertex_buffer.rs
-index 51117fb..d02f4d7 100644
+index 62a2e2d..55d3799 100644
 --- a/windows/d3d9/src/vertex_buffer.rs
 +++ b/windows/d3d9/src/vertex_buffer.rs
 @@ -31,7 +31,7 @@ use mtld3d_core::{
- use mtld3d_shared::{InPtr, InPtrMut};
+ use mtld3d_shared::{InPtr, InPtrMut, OutPtr, ValueIn};
  use mtld3d_types::{
      D3DFMT_VERTEXDATA, D3DLOCK_DISCARD, D3DLOCK_KNOWN_BITS, D3DLOCK_NOOVERWRITE, D3DLOCK_READONLY,
 -    D3DRTYPE_VERTEXBUFFER, D3DVERTEXBUFFER_DESC, Guid, IDirect3DVertexBuffer9Vtbl,
@@ -324,10 +310,10 @@ index 51117fb..d02f4d7 100644
  };
  
  use super::{
-@@ -90,6 +90,18 @@ pub struct VertexBufferInner {
-     /// Accumulated across `Lock`s and flushed on `Unlock`. Unused for
-     /// `Direct`.
-     dirty: DirtyRange,
+@@ -96,6 +96,18 @@ pub struct VertexBufferInner {
+     /// changes, so a draw reads one byte of the buffer it already touches
+     /// rather than the device's configuration.
+     draw_time_upload: bool,
 +    /// `Staged` `D3DPOOL_SYSTEMMEM` only: `Unlock` left `dirty` for the next GPU read.
 +    ///
 +    /// Set by a lock that names no usable window (`SizeToLock == 0`,
@@ -343,7 +329,7 @@ index 51117fb..d02f4d7 100644
      /// Canonical CPU backing.
      ///
      /// For `Direct`, the GPU reads this directly and rename swaps it out
-@@ -244,6 +256,60 @@ impl VertexBufferInner {
+@@ -280,6 +292,60 @@ impl VertexBufferInner {
          self.map_mode
      }
  
@@ -360,7 +346,7 @@ index 51117fb..d02f4d7 100644
 +    #[must_use]
 +    pub fn system_memory_vertices(&self) -> Option<&[u8]> {
 +        if self.pool != D3DPOOL_SYSTEMMEM
-+            || self.locked
++            || self.lock_count != 0
 +            || !matches!(self.map_mode, BufferMapMode::Staged)
 +            || self.backing.is_released()
 +        {
@@ -372,9 +358,9 @@ index 51117fb..d02f4d7 100644
 +    /// Upload the range an `Unlock` left for the next GPU read, before a draw reads the device buffer.
 +    ///
 +    /// No-op unless [`Self::defer_to_draws`] is set and the buffer is not mapped
-+    /// (a mapped buffer is flushed by [`Self::flush_staged_if_mapped`]).
++    /// (a mapped buffer is flushed by [`Self::flush_staged_before_draw`]).
 +    pub fn upload_deferred(&mut self, dev: &mut DeviceInner) {
-+        if !self.defer_to_draws || self.locked {
++        if !self.defer_to_draws || self.lock_count != 0 {
 +            return;
 +        }
 +        let Some((min, max)) = self.dirty.span() else {
@@ -404,15 +390,15 @@ index 51117fb..d02f4d7 100644
      pub fn current_backing_ptr(&self) -> usize {
          self.backing.ptr()
      }
-@@ -317,6 +383,7 @@ impl Direct3DVertexBuffer9 {
-             private_data: PrivateDataStore::default(),
+@@ -361,6 +427,7 @@ impl Direct3DVertexBuffer9 {
              map_mode,
              dirty,
+             draw_time_upload: staged && info.draw_time_upload,
 +            defer_to_draws: false,
              backing,
              last_submit_seq: 0,
-             locked: false,
-@@ -716,6 +783,10 @@ extern "system" fn vb_lock(
+             lock_count: 0,
+@@ -764,6 +831,10 @@ extern "system" fn vb_lock(
                  (offset_to_lock, size_to_lock)
              };
              inner.dirty.conjoin(dirty_offset, dirty_size, inner.length);
@@ -423,9 +409,9 @@ index 51117fb..d02f4d7 100644
          }
      }
  
-@@ -849,6 +920,7 @@ extern "system" fn vb_unlock(this: *mut c_void) -> i32 {
+@@ -910,6 +981,7 @@ extern "system" fn vb_unlock(this: *mut c_void) -> i32 {
+         return D3D_OK;
      }
-     inner.locked = false;
      if matches!(inner.map_mode, BufferMapMode::Staged)
 +        && !inner.defer_to_draws
          && let Some((min, max)) = inner.dirty.span()

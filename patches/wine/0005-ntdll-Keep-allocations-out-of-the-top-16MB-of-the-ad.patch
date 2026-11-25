@@ -1,4 +1,4 @@
-From 20808f202b6e1419e75733fe1f4ae4635e6ad8b6 Mon Sep 17 00:00:00 2001
+From f8e80e66cde6616da1718e9cc99f4263c6e19e73 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 15:09:02 -0400
 Subject: [PATCH] ntdll: Keep allocations out of the top 16MB of the address
@@ -6,42 +6,20 @@ Subject: [PATCH] ntdll: Keep allocations out of the top 16MB of the address
 
 XNU's copyinstr() validates the full maximum string length, so execve()
 fails with EFAULT when argument or environment strings are close to the
-top of the address space. Wine's top-down area put thread stacks there,
-and exec_wineloader() passes environment strings from the stack, so
-creating child processes failed.
+top of the address space. exec_wineloader() passes environment strings
+from the stack, and a thread stack can be placed there: a top-down
+allocation that does not fit Wine's top-down range goes to the highest
+free address below the host's limit, and creating child processes then
+fails. Report the host's limit 16MB below the top.
 ---
- dlls/ntdll/unix/virtual.c | 14 ++++++++++++--
- 1 file changed, 12 insertions(+), 2 deletions(-)
+ dlls/ntdll/unix/virtual.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 98ed79dfa4..f6d1bb2a9d 100644
+index 1599a1754f7..1d4e01c3d2a 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -714,6 +714,10 @@ static void reserve_area( void *addr, void *end )
- }
- 
- 
-+#if defined(_WIN64) && defined(__APPLE__)
-+static void *get_host_addr_space_limit(void);
-+#endif
-+
- static void mmap_init( const struct preload_info *preload_info )
- {
- #ifndef _WIN64
-@@ -759,8 +763,12 @@ static void mmap_init( const struct preload_info *preload_info )
- #endif
-         reserve_area( user_space_limit, 0 );
- 
-+#else
-+#ifdef __APPLE__
-+    reserve_area( (void *)0x7ffff0000000, get_host_addr_space_limit() ); /* top-down area */
- #else
-     reserve_area( (void *)0x7ffff0000000, (void *)0x7ffffe000000 ); /* top-down area */
-+#endif
-     if (preload_info) return;
- #ifndef WINE_HIGH_USER_SHARED_DATA
-     reserve_area( (void *)0x000000010000, (void *)0x000068000000 );
-@@ -2778,8 +2786,10 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, size_t map_size, int fd,
+@@ -2519,8 +2519,10 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, size_t map_size, int fd,
  static void *get_host_addr_space_limit(void)
  {
  #ifdef __APPLE__
@@ -51,9 +29,9 @@ index 98ed79dfa4..f6d1bb2a9d 100644
 +     * copyinstr() validates the full maximum length, so exec fails with EFAULT when
 +     * argument or environment strings (e.g. on a thread stack) are near the top. */
 +    return (void *)(0x7ffffe000000 - 0x1000000);
- #else
-     unsigned int flags = MAP_PRIVATE | MAP_ANON;
+ #elif defined _WIN64
      UINT_PTR addr = (UINT_PTR)1 << 63;
+ 
 -- 
 2.54.0 (Apple Git-157)
 

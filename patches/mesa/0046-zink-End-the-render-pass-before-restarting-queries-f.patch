@@ -1,0 +1,52 @@
+From 3161349a84e335cbd09d78f2e2e95f102b1600f8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 2 Oct 2026 23:02:04 -0400
+Subject: [PATCH] zink: End the render pass before restarting queries for new
+ geometry state
+
+Generated-by: LLM
+---
+ src/gallium/drivers/zink/zink_query.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/src/gallium/drivers/zink/zink_query.c b/src/gallium/drivers/zink/zink_query.c
+index f3c395d7ee2..106c793ae53 100644
+--- a/src/gallium/drivers/zink/zink_query.c
++++ b/src/gallium/drivers/zink/zink_query.c
+@@ -1263,6 +1263,18 @@ zink_query_renderpass_suspend(struct zink_context *ctx)
+    suspend_queries(ctx, true);
+ }
+ 
++static bool
++have_queries_started_outside_rp(struct zink_context *ctx)
++{
++   set_foreach(&ctx->bs->active_queries, entry) {
++      struct zink_query *query = (void*)entry->key;
++      if (query->active && !query->suspended && !is_time_query(query) &&
++          !query->started_in_rp)
++         return true;
++   }
++   return false;
++}
++
+ void
+ zink_query_update_gs_states(struct zink_context *ctx)
+ {
+@@ -1286,11 +1298,13 @@ zink_query_update_gs_states(struct zink_context *ctx)
+       query = ctx->vertices_query;
+       struct zink_query_start *last_start = util_dynarray_top_ptr(&query->starts, struct zink_query_start);
+       assert(query->active);
+-      if (last_start->was_line_loop != ctx->was_line_loop) {
++      if (query->has_draws && last_start->was_line_loop != ctx->was_line_loop) {
+          suspendall = true;
+       }
+    }
+    if (suspendall) {
++     if (ctx->in_rp && have_queries_started_outside_rp(ctx))
++        zink_batch_no_rp(ctx);
+      zink_suspend_queries(ctx);
+      zink_resume_queries(ctx);
+    }
+-- 
+2.54.0 (Apple Git-157)
+

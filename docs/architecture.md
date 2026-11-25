@@ -52,7 +52,7 @@ restricted entitlement `com.apple.developer.cross-architecture-support` (or
 
 | Feature | How |
 |---|---|
-| Low 4GB | "Soft" `__PAGEZERO`: one hard page, the rest a PROT_NONE mapping that can be replaced |
+| Low 4GB | "Soft" `__PAGEZERO`: one hard page, the rest a PROT_NONE mapping that can be replaced. It reaches past 4GB, up to the executable, which ASLR slides up to 80 MB above 4GB (findings #75) |
 | 4K pages | `posix_spawnattr_set_4k_page_size_np()` (otherwise needs `com.apple.private.4k-pages`) |
 | x18 as TEB | `os_set_custom_x18_abi_enabled()` (also allowed by unrestricted `com.apple.security.custom-x18-abi-toggle`) |
 | `MAP_JIT` | Allowed |

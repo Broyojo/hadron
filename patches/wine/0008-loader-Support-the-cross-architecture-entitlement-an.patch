@@ -1,4 +1,4 @@
-From f3ea3c42537db5da97e5d9be009f0bd6546d9273 Mon Sep 17 00:00:00 2001
+From 5d19ae908d1c90a5840503aba60952b79bcb80ad Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 17:38:14 -0400
 Subject: [PATCH] loader: Support the cross-architecture entitlement and app
@@ -18,10 +18,10 @@ app bundle, so also find ntdll.so when the loader runs from
  1 file changed, 31 insertions(+)
 
 diff --git a/loader/main.c b/loader/main.c
-index f8b113f313..a3fd3526e4 100644
+index 71ba308ca86..cab06592772 100644
 --- a/loader/main.c
 +++ b/loader/main.c
-@@ -74,6 +74,28 @@ static void init_reserved_areas(void)
+@@ -70,6 +70,28 @@ static void init_reserved_areas(void)
      }
  }
  
@@ -50,7 +50,7 @@ index f8b113f313..a3fd3526e4 100644
  #else
  
  /* the preloader will set this variable */
-@@ -157,6 +179,15 @@ static void *try_dlopen( const char *argv0 )
+@@ -153,6 +175,15 @@ static void *try_dlopen( const char *argv0 )
  
      if ((p = remove_tail( dir, "/loader" )))
          path = build_path( p, "dlls/ntdll/ntdll.so" );

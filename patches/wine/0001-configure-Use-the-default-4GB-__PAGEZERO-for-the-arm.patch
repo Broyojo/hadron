@@ -1,4 +1,4 @@
-From 4973a75958744e913cae4b28c07becf116543bf7 Mon Sep 17 00:00:00 2001
+From cd577811a1d7dcfe2614a5cfe9c756f44fdd1614 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 10:05:08 -0400
 Subject: [PATCH] configure: Use the default 4GB __PAGEZERO for the arm64 macOS
@@ -11,10 +11,10 @@ arm64 macOS SIGKILLs executables whose __PAGEZERO is smaller than 4GB.
  2 files changed, 9 insertions(+), 2 deletions(-)
 
 diff --git a/configure b/configure
-index 4116b4aaca..3115e94b01 100755
+index e5f72d77301..114e9683e25 100755
 --- a/configure
 +++ b/configure
-@@ -12345,7 +12345,10 @@ case $host_os in
+@@ -12407,7 +12407,10 @@ case $host_os in
      SYSTEMCONFIGURATION_LIBS="-framework SystemConfiguration"
  
  
@@ -25,12 +25,12 @@ index 4116b4aaca..3115e94b01 100755
 +    esac
  
      case $HOST_ARCH in
-       i386) wine_use_preloader=yes ;;
+       x86_64)
 diff --git a/configure.ac b/configure.ac
-index 80bb8b33c6..31c941169f 100644
+index afcdd85a5d4..813eab2f336 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -981,7 +981,11 @@ case $host_os in
+@@ -988,7 +988,11 @@ case $host_os in
      AC_SUBST(SECURITY_LIBS,"-framework Security -framework CoreFoundation")
      AC_SUBST(SYSTEMCONFIGURATION_LIBS,"-framework SystemConfiguration")
  
@@ -42,7 +42,7 @@ index 80bb8b33c6..31c941169f 100644
 +    esac
  
      case $HOST_ARCH in
-       i386) wine_use_preloader=yes ;;
+       x86_64)
 -- 
 2.54.0 (Apple Git-157)
 

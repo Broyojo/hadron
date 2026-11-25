@@ -1,0 +1,236 @@
+From 796c6feb16d84b392da0682a6f51a25618817698 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Tue, 24 Nov 2026 20:59:15 -0500
+Subject: [PATCH] faudio: Report xWMA voices whose buffers decode to nothing.
+
+When the WMA decoder takes a whole buffer and gives no output, or a
+decoder call fails, decode_wma() zeroes the output and the voice plays
+silence, with nothing in the log at the default debug level. Say once
+per voice, as an error, what is needed to decode the buffer outside the
+program: the format passed to CreateSourceVoice, including its extra
+bytes, which FAudio does not keep; the media type FAudio gave the
+decoder, with its codec data and corrected bitrate; and the buffer's
+size, packets and first bytes.
+
+The check after the decode loop costs a comparison when there is
+output; nothing else runs unless decoding failed.
+---
+ libs/faudio/src/FAudio.c                      |  4 +-
+ libs/faudio/src/FAudio_internal.h             |  2 +-
+ .../faudio/src/FAudio_platform_win32_wmadec.c | 96 ++++++++++++++++++-
+ 3 files changed, 97 insertions(+), 5 deletions(-)
+
+diff --git a/libs/faudio/src/FAudio.c b/libs/faudio/src/FAudio.c
+index e5f79428ee7..295c8ca71eb 100644
+--- a/libs/faudio/src/FAudio.c
++++ b/libs/faudio/src/FAudio.c
+@@ -572,7 +572,7 @@ uint32_t FAudio_CreateSourceVoice(
+ 
+ 			fmtex->Format.nAvgBytesPerSec = fixup_wma_bitrate(audio, &fmtex->Format);
+ 
+-			if ((hr = FAudio_WMADEC_init(*ppSourceVoice, fmtex->SubFormat.Data1)))
++			if ((hr = FAudio_WMADEC_init(*ppSourceVoice, fmtex->SubFormat.Data1, pSourceFormat)))
+ 			{
+ 				audio->pFree(*ppSourceVoice);
+ 				return hr;
+@@ -592,7 +592,7 @@ uint32_t FAudio_CreateSourceVoice(
+ #ifdef HAVE_WMADEC
+ 		uint32_t hr;
+ 
+-		if ((hr = FAudio_WMADEC_init(*ppSourceVoice, FAUDIO_FORMAT_XMAUDIO2)))
++		if ((hr = FAudio_WMADEC_init(*ppSourceVoice, FAUDIO_FORMAT_XMAUDIO2, pSourceFormat)))
+ 		{
+ 			audio->pFree(*ppSourceVoice);
+ 			return hr;
+diff --git a/libs/faudio/src/FAudio_internal.h b/libs/faudio/src/FAudio_internal.h
+index 0bd70b4fa2c..da7be86b6fd 100644
+--- a/libs/faudio/src/FAudio_internal.h
++++ b/libs/faudio/src/FAudio_internal.h
+@@ -802,7 +802,7 @@ DECODE_FUNC(WMAERROR)
+ 
+ void decode_wma(FAudioVoice *voice, struct queued_buffer *buffer, float *dst, uint32_t sample_count);
+ #ifdef HAVE_WMADEC
+-uint32_t FAudio_WMADEC_init(FAudioSourceVoice *pSourceVoice, uint32_t type);
++uint32_t FAudio_WMADEC_init(FAudioSourceVoice *pSourceVoice, uint32_t type, const FAudioWaveFormatEx *pSourceFormat);
+ void FAudio_WMADEC_free(FAudioSourceVoice *voice);
+ void FAudio_WMADEC_end_buffer(FAudioSourceVoice *voice);
+ #endif /* HAVE_WMADEC */
+diff --git a/libs/faudio/src/FAudio_platform_win32_wmadec.c b/libs/faudio/src/FAudio_platform_win32_wmadec.c
+index 96b41567585..d9d0e2bc733 100644
+--- a/libs/faudio/src/FAudio_platform_win32_wmadec.c
++++ b/libs/faudio/src/FAudio_platform_win32_wmadec.c
+@@ -14,6 +14,10 @@
+ 
+ #include <initguid.h>
+ 
++#include "wine/debug.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(faudio);
++
+ DEFINE_GUID(CLSID_CWMADecMediaObject, 0x2eeb4adf, 0x4578, 0x4d10, 0xbc, 0xa7, 0xbb, 0x95, 0x5f, 0x56, 0x32, 0x0a);
+ 
+ DEFINE_MEDIATYPE_GUID(MFAudioFormat_XMAudio2, FAUDIO_FORMAT_XMAUDIO2);
+@@ -29,8 +33,85 @@ struct FAudioWMADEC
+ 	size_t input_pos;
+ 	size_t input_size;
+ 	bool eos;
++
++	/* What the game passed to CreateSourceVoice and what the decoder was
++	 * given, kept for report_failure() */
++	FAudioWaveFormatEx game_format;
++	uint8_t game_extra[32];
++	IMFMediaType *input_type;
++	bool failure_reported;
+ };
+ 
++static const char *debugstr_hex(const void *data, size_t size)
++{
++	const uint8_t *bytes = data;
++	char buf[2 * 32 + 1];
++	size_t i;
++
++	if (!size)
++		return "none";
++	size = min(size, 32);
++	for (i = 0; i < size; i++)
++		FAudio_snprintf(buf + 2 * i, 3, "%02x", bytes[i]);
++	buf[2 * size] = 0;
++	return wine_dbg_sprintf("%s", buf);
++}
++
++/* Called when a buffer gave no output at all, or a decoder call failed.
++ * Says once per voice what is needed to decode the buffer outside the game:
++ * the format the game declared, what the decoder was given, and the buffer. */
++static void report_failure(
++	FAudioVoice *voice,
++	struct queued_buffer *buffer,
++	const char *call,
++	HRESULT hr
++) {
++	struct FAudioWMADEC *impl = voice->src.wmadec;
++	const FAudioWaveFormatEx *fmt = &impl->game_format;
++	const FAudioBufferWMA *wma = &buffer->bufferWMA;
++	UINT32 channels = 0, rate = 0, bytes = 0, align = 0, bits = 0, size = 0;
++	BYTE codec_data[32];
++	IMFMediaType *type = impl->input_type;
++	GUID subtype = {0};
++
++	if (impl->failure_reported)
++		return;
++	impl->failure_reported = true;
++
++	if (call)
++		WINE_ERR("voice %p: %s failed with %#lx, %Iu of %u bytes pushed, %Iu bytes decoded.\n",
++			voice, call, hr, impl->input_pos, buffer->buffer.AudioBytes, impl->output_pos);
++	else
++		WINE_ERR("voice %p: no output at the end of the stream, %Iu of %u bytes pushed.\n",
++			voice, impl->input_pos, buffer->buffer.AudioBytes);
++
++	WINE_ERR("voice %p: the game's format: tag %#x, %u channels, %u Hz, %u bytes/s, block align %u, %u bits, cbSize %u, extra bytes %s.\n",
++		voice, fmt->wFormatTag, fmt->nChannels, fmt->nSamplesPerSec, fmt->nAvgBytesPerSec,
++		fmt->nBlockAlign, fmt->wBitsPerSample, fmt->cbSize,
++		fmt->cbSize <= sizeof(impl->game_extra) ? debugstr_hex(impl->game_extra, fmt->cbSize) : "(not kept)");
++
++	IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
++	IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
++	IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
++	IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &bytes);
++	IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &align);
++	IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_BITS_PER_SAMPLE, &bits);
++	if (FAILED(IMFMediaType_GetBlob(type, &MF_MT_USER_DATA, codec_data, sizeof(codec_data), &size)))
++		size = 0;
++	WINE_ERR("voice %p: given to decoder %p: %s, %u channels, %u Hz, %u bytes/s, block align %u, %u bits, codec data %s.\n",
++		voice, impl->decoder, wine_dbgstr_guid(&subtype), channels, rate, bytes, align, bits,
++		debugstr_hex(codec_data, size));
++
++	if (voice->src.format->wFormatTag == FAUDIO_FORMAT_EXTENSIBLE && wma->PacketCount)
++		WINE_ERR("voice %p: buffer %p: %u packets, decoded bytes %u after the first, %u in all, play %u+%u, loop %u+%u x%u, starts %s.\n",
++			voice, buffer->buffer.pAudioData, wma->PacketCount,
++			wma->pDecodedPacketCumulativeBytes[0],
++			wma->pDecodedPacketCumulativeBytes[wma->PacketCount - 1],
++			buffer->buffer.PlayBegin, buffer->buffer.PlayLength,
++			buffer->buffer.LoopBegin, buffer->buffer.LoopLength, buffer->buffer.LoopCount,
++			debugstr_hex(buffer->buffer.pAudioData, min(buffer->buffer.AudioBytes, 16)));
++}
++
+ static void send_eos(struct FAudioWMADEC *decoder)
+ {
+ 	HRESULT hr;
+@@ -159,6 +240,7 @@ void decode_wma(FAudioVoice *voice, struct queued_buffer *buffer, float *dst, ui
+ 	const FAudioWaveFormatExtensible *wfx = (FAudioWaveFormatExtensible *)voice->src.format;
+ 	size_t samples_pos, samples_size, copy_size = 0;
+ 	struct FAudioWMADEC *impl = voice->src.wmadec;
++	const char *call;
+ 	HRESULT hr;
+ 
+ 	LOG_FUNC_ENTER(voice->audio)
+@@ -210,10 +292,12 @@ void decode_wma(FAudioVoice *voice, struct queued_buffer *buffer, float *dst, ui
+ 
+ 	while (impl->output_pos < samples_pos + samples_size)
+ 	{
++		call = "ProcessOutput";
+ 		hr = FAudio_WMAMF_ProcessOutput(voice, &buffer->buffer);
+ 		if (FAILED(hr)) goto error;
+ 		if (hr == S_OK) continue;
+ 
++		call = "ProcessInput";
+ 		hr  = FAudio_WMAMF_ProcessInput(voice, &buffer->buffer);
+ 		if (FAILED(hr)) goto error;
+ 		if (hr == S_OK) continue;
+@@ -224,6 +308,9 @@ void decode_wma(FAudioVoice *voice, struct queued_buffer *buffer, float *dst, ui
+ 		send_eos(impl);
+ 	}
+ 
++	if (!impl->output_pos && impl->eos && impl->input_pos)
++		report_failure(voice, buffer, NULL, S_OK);
++
+ 	if (impl->output_pos > samples_pos)
+ 	{
+ 		copy_size = FAudio_min(impl->output_pos - samples_pos, samples_size);
+@@ -243,6 +330,7 @@ void decode_wma(FAudioVoice *voice, struct queued_buffer *buffer, float *dst, ui
+ 	return;
+ 
+ error:
++	report_failure(voice, buffer, call, hr);
+ 	FAudio_zero(dst, samples * voice->src.format->nChannels * sizeof(float));
+ 	LOG_FUNC_EXIT(voice->audio)
+ }
+@@ -275,7 +363,7 @@ static HRESULT create_wma_decoder(IMFTransform **out)
+ 	return hr;
+ }
+ 
+-uint32_t FAudio_WMADEC_init(FAudioSourceVoice *voice, uint32_t type)
++uint32_t FAudio_WMADEC_init(FAudioSourceVoice *voice, uint32_t type, const FAudioWaveFormatEx *game_format)
+ {
+ 	static const uint8_t fake_codec_data[16] = {0, 0, 0, 0, 31, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+ 	uint8_t fake_codec_data_wma3[18] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 224, 0, 0, 0};
+@@ -293,6 +381,9 @@ uint32_t FAudio_WMADEC_init(FAudioSourceVoice *voice, uint32_t type)
+ 
+ 	if (!(impl = voice->audio->pMalloc(sizeof(*impl)))) return -1;
+ 	FAudio_memset(impl, 0, sizeof(*impl));
++	impl->game_format = *game_format;
++	if (game_format->cbSize <= sizeof(impl->game_extra))
++		FAudio_memcpy(impl->game_extra, game_format + 1, game_format->cbSize);
+ 
+ 	hr = create_wma_decoder(&decoder);
+ 	if (FAILED(hr))
+@@ -442,7 +533,7 @@ uint32_t FAudio_WMADEC_init(FAudioSourceVoice *voice, uint32_t type)
+ 		0
+ 	);
+ 	FAudio_assert(!FAILED(hr) && "Failed set decoder input type!");
+-	IMFMediaType_Release(media_type);
++	impl->input_type = media_type;
+ 
+ 	i = 0;
+ 	while (SUCCEEDED(hr))
+@@ -598,6 +689,7 @@ void FAudio_WMADEC_free(FAudioSourceVoice *voice)
+ 	}
+ 
+ 	if (impl->output_sample) IMFSample_Release(impl->output_sample);
++	IMFMediaType_Release(impl->input_type);
+ 	IMFTransform_Release(impl->decoder);
+ 	voice->audio->pFree(impl->output_buf);
+ 	voice->audio->pFree(voice->src.wmadec);
+-- 
+2.54.0 (Apple Git-157)
+

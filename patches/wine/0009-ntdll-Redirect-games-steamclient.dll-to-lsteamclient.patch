@@ -1,4 +1,4 @@
-From 790d9657ddd26d896901c1b8a96147157080c18f Mon Sep 17 00:00:00 2001
+From bc219dbf59e9d88f99bbc36356131e6bbf7e788e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 18:34:23 -0400
 Subject: [PATCH] ntdll: Redirect games' steamclient.dll to lsteamclient.
@@ -17,10 +17,10 @@ Set HADRON_DISABLE_LSTEAMCLIENT=1 to disable.
  3 files changed, 215 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
-index b0b2392c50..d67b6efe3d 100644
+index d0c21459860..0ad6576c5a8 100644
 --- a/dlls/ntdll/loader.c
 +++ b/dlls/ntdll/loader.c
-@@ -1139,6 +1139,28 @@ void * WINAPI RtlFindExportedRoutineByName( HMODULE module, const char *name )
+@@ -1138,6 +1138,28 @@ void * WINAPI RtlFindExportedRoutineByName( HMODULE module, const char *name )
   * Import the dll specified by the given import descriptor.
   * The loader_section must be locked while calling this function.
   */
@@ -49,7 +49,7 @@ index b0b2392c50..d67b6efe3d 100644
  static BOOL import_dll( WINE_MODREF *wm, const IMAGE_IMPORT_DESCRIPTOR *descr, LPCWSTR load_path, WINE_MODREF **pwm )
  {
      HMODULE module = wm->ldr.DllBase;
-@@ -1170,6 +1192,16 @@ static BOOL import_dll( WINE_MODREF *wm, const IMAGE_IMPORT_DESCRIPTOR *descr, L
+@@ -1167,6 +1189,16 @@ static BOOL import_dll( WINE_MODREF *wm, const IMAGE_IMPORT_DESCRIPTOR *descr, L
          return TRUE;
      }
  
@@ -66,7 +66,7 @@ index b0b2392c50..d67b6efe3d 100644
      status = build_import_name( wm, buffer, name, len );
      if (!status) status = load_dll( load_path, buffer, 0, &wmImp, system );
  
-@@ -1799,7 +1831,8 @@ static NTSTATUS process_attach( LDR_DDAG_NODE *node, LPVOID lpReserved )
+@@ -1791,7 +1823,8 @@ static NTSTATUS process_attach( LDR_DDAG_NODE *node, LPVOID lpReserved )
      if (status == STATUS_SUCCESS)
      {
          call_ldr_notifications( LDR_DLL_NOTIFICATION_REASON_LOADED, &wm->ldr );
@@ -76,7 +76,7 @@ index b0b2392c50..d67b6efe3d 100644
          if (status == STATUS_SUCCESS)
          {
              wm->ldr.Flags |= LDR_PROCESS_ATTACHED;
-@@ -2264,6 +2297,75 @@ done:
+@@ -2249,6 +2282,75 @@ done:
   *
   * Build the module data for a mapped dll.
   */
@@ -152,7 +152,7 @@ index b0b2392c50..d67b6efe3d 100644
  static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, void **module,
                                const SECTION_IMAGE_INFORMATION *image_info, const struct file_id *id,
                                DWORD flags, BOOL system, BOOL redirected, WINE_MODREF **pwm )
-@@ -2296,6 +2398,8 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+@@ -2281,6 +2383,8 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
  
      update_load_config( *module );
  
@@ -162,10 +162,10 @@ index b0b2392c50..d67b6efe3d 100644
  
      if (!(flags & LDR_DONT_RESOLVE_REFS) &&
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index ebfb6af538..d50f8370f9 100644
+index dde4b58df36..086c03b006a 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
-@@ -1005,6 +1005,11 @@ static NTSTATUS unwind_builtin_dll( void *args )
+@@ -981,6 +981,11 @@ static NTSTATUS unwind_builtin_dll( void *args )
  #endif /* SO_DLLS_SUPPORTED */
  
  
@@ -177,7 +177,7 @@ index ebfb6af538..d50f8370f9 100644
  static const unixlib_entry_t unix_call_funcs[] =
  {
      load_so_dll,
-@@ -1015,6 +1020,7 @@ static const unixlib_entry_t unix_call_funcs[] =
+@@ -991,6 +996,7 @@ static const unixlib_entry_t unix_call_funcs[] =
      unixcall_wine_server_handle_to_fd,
      unixcall_wine_spawnvp,
      system_time_precise,
@@ -185,7 +185,7 @@ index ebfb6af538..d50f8370f9 100644
  };
  
  
-@@ -1033,6 +1039,7 @@ const unixlib_entry_t unix_call_wow64_funcs[] =
+@@ -1009,6 +1015,7 @@ const unixlib_entry_t unix_call_wow64_funcs[] =
      wow64_wine_server_handle_to_fd,
      wow64_wine_spawnvp,
      system_time_precise,
@@ -193,7 +193,7 @@ index ebfb6af538..d50f8370f9 100644
  };
  
  #endif  /* _WIN64 */
-@@ -1545,6 +1552,102 @@ static const void *get_module_data_dir( HMODULE module, ULONG dir, ULONG *size )
+@@ -1521,6 +1528,102 @@ static const void *get_module_data_dir( HMODULE module, ULONG dir, ULONG *size )
      return get_rva( module, data->VirtualAddress );
  }
  
@@ -297,7 +297,7 @@ index ebfb6af538..d50f8370f9 100644
   *           load_ntdll_functions
   */
 diff --git a/dlls/ntdll/unixlib.h b/dlls/ntdll/unixlib.h
-index 9cb444342f..a31650985e 100644
+index 9cb444342fe..a31650985e7 100644
 --- a/dlls/ntdll/unixlib.h
 +++ b/dlls/ntdll/unixlib.h
 @@ -76,6 +76,13 @@ enum ntdll_unix_funcs

@@ -1,0 +1,125 @@
+From 0df43dd881d1e8e81d29fe9d0bcd040342729950 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 25 Nov 2026 15:52:59 -0500
+Subject: [PATCH] ntdll: Stop dispatching when a frame unwinds to itself on
+ ARM64.
+
+Code without unwind information is unwound as a leaf function: the pc
+becomes the link register and the stack pointer stays. When the link
+register points into the same code, the next unwind is passed the
+return address minus 4, the check against an invalid leaf function in
+RtlVirtualUnwind2 does not match it, and the frame unwinds to the same
+pc and stack pointer again, forever. The dispatcher then spins instead
+of reporting the exception as unhandled.
+
+Fail virtual_unwind with STATUS_BAD_STACK when the unwind leaves pc,
+sp, fp and lr as they were, and treat that like an invalid frame: mark
+the stack invalid and stop, so that the exception ends up unhandled.
+---
+ dlls/ntdll/signal_arm64.c   | 18 +++++++++++++++++-
+ dlls/ntdll/signal_arm64ec.c | 18 +++++++++++++++++-
+ 2 files changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/ntdll/signal_arm64.c b/dlls/ntdll/signal_arm64.c
+index 996f1bb592..d865f4a005 100644
+--- a/dlls/ntdll/signal_arm64.c
++++ b/dlls/ntdll/signal_arm64.c
+@@ -112,7 +112,7 @@ __ASM_GLOBAL_FUNC( RtlCaptureContext,
+ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
+ {
+     DISPATCHER_CONTEXT_NONVOLREG_ARM64 *nonvol_regs;
+-    DWORD64 pc = context->Pc;
++    DWORD64 pc = context->Pc, sp = context->Sp, fp = context->Fp, lr = context->Lr;
+     int i;
+ 
+     dispatch->ScopeIndex = 0;
+@@ -133,6 +133,12 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
+         WARN( "exception data not found for pc %p, lr %p\n", (void *)pc, (void *)context->Lr );
+         return STATUS_INVALID_DISPOSITION;
+     }
++    /* a frame that unwinds to itself would be unwound again the same way forever */
++    if (context->Pc == dispatch->ControlPc && context->Sp == sp && context->Fp == fp && context->Lr == lr)
++    {
++        ERR( "frame at pc %p sp %p does not unwind\n", (void *)dispatch->ControlPc, (void *)sp );
++        return STATUS_BAD_STACK;
++    }
+     return STATUS_SUCCESS;
+ }
+ 
+@@ -234,6 +240,11 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
+     for (;;)
+     {
+         status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context );
++        if (status == STATUS_BAD_STACK)
++        {
++            rec->ExceptionFlags |= EXCEPTION_STACK_INVALID;
++            break;
++        }
+         if (status != STATUS_SUCCESS) return status;
+ 
+     unwind_done:
+@@ -508,6 +519,11 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
+     for (;;)
+     {
+         status = virtual_unwind( UNW_FLAG_UHANDLER, &dispatch, &new_context );
++        if (status == STATUS_BAD_STACK)
++        {
++            rec->ExceptionFlags |= EXCEPTION_STACK_INVALID;
++            break;
++        }
+         if (status != STATUS_SUCCESS) raise_status( status, rec );
+ 
+     unwind_done:
+diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
+index 7d226b3019..9544415225 100644
+--- a/dlls/ntdll/signal_arm64ec.c
++++ b/dlls/ntdll/signal_arm64ec.c
+@@ -1062,7 +1062,7 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT_ARM64EC *dispatch
+                                 ARM64EC_NT_CONTEXT *context )
+ {
+     DISPATCHER_CONTEXT_NONVOLREG_ARM64 *nonvol_regs;
+-    DWORD64 pc = context->Pc;
++    DWORD64 pc = context->Pc, sp = context->Sp, fp = context->Fp, lr = context->Lr;
+     int i;
+ 
+     dispatch->ScopeIndex = 0;
+@@ -1093,6 +1093,12 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT_ARM64EC *dispatch
+         WARN( "exception data not found for pc %p\n", (void *)pc );
+         return STATUS_INVALID_DISPOSITION;
+     }
++    /* a frame that unwinds to itself would be unwound again the same way forever */
++    if (context->Pc == dispatch->ControlPc && context->Sp == sp && context->Fp == fp && context->Lr == lr)
++    {
++        ERR( "frame at pc %p sp %p does not unwind\n", (void *)dispatch->ControlPc, (void *)sp );
++        return STATUS_BAD_STACK;
++    }
+     return STATUS_SUCCESS;
+ }
+ 
+@@ -1211,6 +1217,11 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
+     for (;;)
+     {
+         status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context );
++        if (status == STATUS_BAD_STACK)
++        {
++            rec->ExceptionFlags |= EXCEPTION_STACK_INVALID;
++            break;
++        }
+         if (status != STATUS_SUCCESS) return status;
+ 
+     unwind_done:
+@@ -1736,6 +1747,11 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
+     for (;;)
+     {
+         status = virtual_unwind( UNW_FLAG_UHANDLER, &dispatch, &new_context );
++        if (status == STATUS_BAD_STACK)
++        {
++            rec->ExceptionFlags |= EXCEPTION_STACK_INVALID;
++            break;
++        }
+         if (status != STATUS_SUCCESS) raise_status( status, rec );
+ 
+     unwind_done:
+-- 
+2.54.0 (Apple Git-157)
+

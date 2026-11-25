@@ -106,7 +106,7 @@ checked on M2 Pro and M4 instead of assumed. Build one with
   right, 24 wrong; 40 and 48 with a limit of 64 hang the GPU until the command buffer times out. The
   same pipeline dispatched directly, or with `dispatchThreadgroupsWithIndirectBuffer` (right for 16
   to 56 live floats, limits 16 to 128, groups of 8 to 64), is right, and so is one left at the
-  default limit. Why the driver dispatches its emulation passes as indirect threadgroups (0076)
+  default limit. Why the driver dispatches its emulation passes as indirect threadgroups (Mesa 0068)
 - `depth16-clear.m`: a render pass that clears a `Depth16Unorm` texture to n/65535 stores n - 1 for
   half of all n (32,895 of 65,536 values): Metal converts the clear value by truncating, also for the
   exact double n/65535. Metal documents no conversion rule, and Vulkan and OpenGL allow either
