@@ -1,4 +1,4 @@
-From 12f3c8770be19779603131798e00dd029734ca2f Mon Sep 17 00:00:00 2001
+From 8f18bbc67847ba5ec7b817249913f71110bd73b4 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 20 Oct 2026 02:01:40 -0400
 Subject: [PATCH] winemac.drv: Keep a cursor's size in points in Retina mode.
@@ -11,7 +11,7 @@ of the same cursor without Retina mode.
  1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index 606cd20383..c42327430d 100644
+index ccb00295317..6846d845818 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -1084,14 +1084,16 @@ - (void) setCursor

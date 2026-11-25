@@ -1,4 +1,4 @@
-From a211070246150d10197ccb291d99665d3f6988b0 Mon Sep 17 00:00:00 2001
+From 6f6124c884dd796d0d1b6088f4720853f3a3c8dc Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 23:05:32 -0400
 Subject: [PATCH] winemac.drv: Report a display mode set while the app is
@@ -26,7 +26,7 @@ mode below the menu bar. Activation then only realizes the mode.
  5 files changed, 79 insertions(+), 7 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.h b/dlls/winemac.drv/cocoa_app.h
-index 11325456ed..14539ec1be 100644
+index cf751255729..bad01ea0e53 100644
 --- a/dlls/winemac.drv/cocoa_app.h
 +++ b/dlls/winemac.drv/cocoa_app.h
 @@ -124,6 +124,9 @@ - (void) noteKey:(uint16_t)keyCode pressed:(BOOL)pressed;
@@ -40,7 +40,7 @@ index 11325456ed..14539ec1be 100644
      - (NSPoint) flippedMouseLocation:(NSPoint)point;
  
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index 4b0cfb3353..f151bf2eca 100644
+index 37f7c85d7c8..54c9673c087 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -920,6 +920,26 @@ - (BOOL) setMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplayID)displayID
@@ -70,7 +70,7 @@ index 4b0cfb3353..f151bf2eca 100644
      - (BOOL) areDisplaysCaptured
      {
          return ([originalDisplayModes count] > 0 || displaysCapturedForFullscreen);
-@@ -2450,6 +2470,25 @@ int macdrv_set_display_mode(CGDirectDisplayID displayID, CGDisplayModeRef displa
+@@ -2442,6 +2462,25 @@ int macdrv_set_display_mode(CGDirectDisplayID displayID, CGDisplayModeRef displa
      return ret;
  }
  
@@ -97,10 +97,10 @@ index 4b0cfb3353..f151bf2eca 100644
   *              macdrv_set_cursor
   *
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
-index 53020e7498..aaac375ca3 100644
+index 93524e8d631..e53e225c19d 100644
 --- a/dlls/winemac.drv/cocoa_window.m
 +++ b/dlls/winemac.drv/cocoa_window.m
-@@ -97,11 +97,17 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
+@@ -98,11 +98,17 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
  }
  
  
@@ -120,7 +120,7 @@ index 53020e7498..aaac375ca3 100644
      }
      return nil;
 diff --git a/dlls/winemac.drv/display.c b/dlls/winemac.drv/display.c
-index d045ff1749..68408ee848 100644
+index d045ff1749a..68408ee848d 100644
 --- a/dlls/winemac.drv/display.c
 +++ b/dlls/winemac.drv/display.c
 @@ -873,13 +873,24 @@ static DEVMODEW *display_get_modes(CGDirectDisplayID display_id, int *modes_coun
@@ -186,10 +186,10 @@ index d045ff1749..68408ee848 100644
  
              if (!(modes = display_get_modes(adapter->id, &mode_count))) break;
 diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
-index 7920ff4305..3038ac9325 100644
+index 6b5ffdfa6b1..78b2164795b 100644
 --- a/dlls/winemac.drv/macdrv_cocoa.h
 +++ b/dlls/winemac.drv/macdrv_cocoa.h
-@@ -263,6 +263,7 @@ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
+@@ -245,6 +245,7 @@ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
  };
  
  extern int macdrv_set_display_mode(CGDirectDisplayID id, CGDisplayModeRef display_mode);

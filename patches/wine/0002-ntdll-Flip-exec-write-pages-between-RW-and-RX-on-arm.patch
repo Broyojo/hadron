@@ -1,4 +1,4 @@
-From 28c5f5ef352d0a86db7a5ddaa6a3257d386ddeb2 Mon Sep 17 00:00:00 2001
+From dd8ace8e4f8a7f02798c91343569a7095711a0e2 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 10:11:15 -0400
 Subject: [PATCH] ntdll: Flip exec+write pages between RW and RX on arm64
@@ -14,10 +14,10 @@ natively, so they stay writable; only the emulator's JIT code flips.
  1 file changed, 42 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 64eed72621..07ebf670c0 100644
+index 84f2a39e53e..5cdc3f4d6d4 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -138,6 +138,7 @@ struct file_view
+@@ -129,6 +129,7 @@ struct file_view
  #define VPROT_GUARD      0x10
  #define VPROT_COMMITTED  0x20
  #define VPROT_WRITEWATCH 0x40
@@ -25,7 +25,7 @@ index 64eed72621..07ebf670c0 100644
  /* per-mapping protection flags */
  #define VPROT_ARM64EC          0x0100  /* view may contain ARM64EC code */
  #define VPROT_SYSTEM           0x0200  /* system view (underlying mmap not under our control) */
-@@ -256,6 +257,12 @@ static inline BOOL is_vprot_exec_write( BYTE vprot )
+@@ -278,6 +279,12 @@ static inline BOOL is_vprot_exec_write( BYTE vprot )
      return (vprot & VPROT_EXEC) && (vprot & (VPROT_WRITE | VPROT_WRITECOPY));
  }
  
@@ -35,10 +35,10 @@ index 64eed72621..07ebf670c0 100644
 +#define WX_EXCLUSIVE_HOST
 +#endif
 +
- /* address-space layout randomization */
- static inline BOOL use_aslr(void)
+ /* mmap() anonymous memory at a fixed address */
+ void *anon_mmap_fixed( void *start, size_t size, int prot, int flags )
  {
-@@ -1370,6 +1377,10 @@ static int get_unix_prot( BYTE vprot )
+@@ -1103,6 +1110,10 @@ static int get_unix_prot( BYTE vprot )
          if (vprot & VPROT_WRITECOPY) prot |= PROT_WRITE | PROT_READ;
          if (vprot & VPROT_EXEC) prot |= PROT_EXEC | PROT_READ;
          if (vprot & VPROT_WRITEWATCH) prot &= ~PROT_WRITE;
@@ -49,7 +49,7 @@ index 64eed72621..07ebf670c0 100644
      }
      if (!prot) prot = PROT_NONE;
      return prot;
-@@ -4707,6 +4718,33 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+@@ -4439,6 +4450,33 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
      }
  #endif
  
@@ -83,7 +83,7 @@ index 64eed72621..07ebf670c0 100644
      if (!is_inside_signal_stack( data, stack ) && (vprot & VPROT_GUARD))
      {
          struct thread_stack_info stack_info;
-@@ -4741,6 +4779,9 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+@@ -4473,6 +4511,9 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
                  ret = STATUS_SUCCESS;
          }
      }
@@ -93,7 +93,7 @@ index 64eed72621..07ebf670c0 100644
      mutex_unlock( &virtual_mutex );
      rec->ExceptionCode = ret;
      return ret;
-@@ -5770,7 +5811,7 @@ static unsigned int fill_basic_memory_info( const void *addr, MEMORY_BASIC_INFOR
+@@ -5515,7 +5556,7 @@ static unsigned int fill_basic_memory_info( const void *addr, MEMORY_BASIC_INFOR
          BYTE vprot;
  
          info->AllocationBase = alloc_base;

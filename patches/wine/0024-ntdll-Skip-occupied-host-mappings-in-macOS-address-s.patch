@@ -1,4 +1,4 @@
-From 4ae09ea931c30cfd3295ab7ffae5af30de5be7c7 Mon Sep 17 00:00:00 2001
+From bc09f2ba177de4268c850efe1e5552701e5bf012 Mon Sep 17 00:00:00 2001
 From: Hadron <dev@hadron.invalid>
 Date: Tue, 6 Oct 2026 21:30:22 -0400
 Subject: [PATCH] ntdll: Skip occupied host mappings in macOS address searches.
@@ -27,7 +27,7 @@ Co-Authored-By: Codex <noreply@openai.com>
  1 file changed, 51 insertions(+)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index c4dfc417e6..1b2c7db6af 100644
+index c6442204759..dc102d90845 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -70,6 +70,7 @@
@@ -38,7 +38,7 @@ index c4dfc417e6..1b2c7db6af 100644
  #undef host_page_size
  #endif
  
-@@ -1571,6 +1572,52 @@ static struct wine_rb_entry *find_view_inside_range( void **base_ptr, void **end
+@@ -1301,6 +1302,52 @@ static struct wine_rb_entry *find_view_inside_range( void **base_ptr, void **end
  }
  
  
@@ -91,7 +91,7 @@ index c4dfc417e6..1b2c7db6af 100644
  /***********************************************************************
   *           try_map_free_area
   *
-@@ -1594,7 +1641,11 @@ static void* try_map_free_area( void *base, void *end, ptrdiff_t step,
+@@ -1324,7 +1371,11 @@ static void* try_map_free_area( void *base, void *end, ptrdiff_t step,
              (step < 0 && (char *)start - (char *)base < -step) ||
              step == 0)
              break;

@@ -1,4 +1,4 @@
-From 99616d1abb4aa9aeba773102d61ee5feecf53d27 Mon Sep 17 00:00:00 2001
+From f90768faa3f9a036b4b37f8e7eb30281db9581c2 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 11 Oct 2026 00:52:46 -0400
 Subject: [PATCH] winemac.drv: Give the mouse and the keyboard to Steam's
@@ -32,7 +32,7 @@ wait for an event to be reset.
  6 files changed, 143 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/winemac.drv/dllmain.c b/dlls/winemac.drv/dllmain.c
-index bbd528d53b..01cf9213b2 100644
+index bbd528d53b9..01cf9213b23 100644
 --- a/dlls/winemac.drv/dllmain.c
 +++ b/dlls/winemac.drv/dllmain.c
 @@ -369,6 +369,35 @@ cleanup:
@@ -80,10 +80,10 @@ index bbd528d53b..01cf9213b2 100644
  }
  
 diff --git a/dlls/winemac.drv/event.c b/dlls/winemac.drv/event.c
-index f7288b8d1b..a31693764f 100644
+index d374b511b6e..2202a7cd08e 100644
 --- a/dlls/winemac.drv/event.c
 +++ b/dlls/winemac.drv/event.c
-@@ -367,6 +367,29 @@ static void macdrv_query_event(HWND hwnd, const macdrv_event *event)
+@@ -298,6 +298,29 @@ static void macdrv_query_event(HWND hwnd, const macdrv_event *event)
  /***********************************************************************
   *              macdrv_handle_event
   */
@@ -113,7 +113,7 @@ index f7288b8d1b..a31693764f 100644
  void macdrv_handle_event(const macdrv_event *event)
  {
      HWND hwnd = macdrv_get_window_hwnd(event->window);
-@@ -376,6 +399,8 @@ void macdrv_handle_event(const macdrv_event *event)
+@@ -307,6 +330,8 @@ void macdrv_handle_event(const macdrv_event *event)
      TRACE("%s for hwnd/window %p/%p\n", dbgstr_event(event->type), hwnd,
            event->window);
  
@@ -123,10 +123,10 @@ index f7288b8d1b..a31693764f 100644
      thread_data->current_event = event;
  
 diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
-index c37b2b993d..67aa1af66c 100644
+index 3c6f8583e4e..2b26bf4d3ef 100644
 --- a/dlls/winemac.drv/macdrv.h
 +++ b/dlls/winemac.drv/macdrv.h
-@@ -283,6 +283,8 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+@@ -287,6 +287,8 @@ extern void macdrv_ime_set_text(HWND hwnd, CFStringRef text, bool complete,
  extern void macdrv_mouse_button(HWND hwnd, const macdrv_event *event);
  extern void macdrv_mouse_moved(HWND hwnd, const macdrv_event *event);
  extern void macdrv_mouse_scroll(HWND hwnd, const macdrv_event *event);
@@ -136,10 +136,10 @@ index c37b2b993d..67aa1af66c 100644
  
  extern void macdrv_compute_keyboard_layout(struct macdrv_thread_data *thread_data);
 diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
-index ffe93357c7..a647bc8147 100644
+index 1552daa2dc9..d789d7338c7 100644
 --- a/dlls/winemac.drv/macdrv_main.c
 +++ b/dlls/winemac.drv/macdrv_main.c
-@@ -607,10 +607,19 @@ static NTSTATUS macdrv_quit_result(void *arg)
+@@ -608,10 +608,19 @@ static NTSTATUS macdrv_quit_result(void *arg)
  }
  
  
@@ -159,7 +159,7 @@ index ffe93357c7..a647bc8147 100644
  };
  
  C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
-@@ -637,6 +646,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+@@ -638,6 +647,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
  {
      wow64_init,
      macdrv_quit_result,
@@ -168,7 +168,7 @@ index ffe93357c7..a647bc8147 100644
  
  C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
 diff --git a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
-index 5963edc12d..8c3c2f6ba7 100644
+index 5963edc12da..8c3c2f6ba71 100644
 --- a/dlls/winemac.drv/mouse.c
 +++ b/dlls/winemac.drv/mouse.c
 @@ -31,6 +31,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(cursor);
@@ -278,7 +278,7 @@ index 5963edc12d..8c3c2f6ba7 100644
          TRACE("warped to %d,%d\n", x, y);
      else
 diff --git a/dlls/winemac.drv/unixlib.h b/dlls/winemac.drv/unixlib.h
-index dc22da02d2..f1a7494d29 100644
+index dc22da02d20..f1a7494d292 100644
 --- a/dlls/winemac.drv/unixlib.h
 +++ b/dlls/winemac.drv/unixlib.h
 @@ -23,6 +23,7 @@

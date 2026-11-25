@@ -1,4 +1,4 @@
-From 295a8b8e1b1f93c144c19ae046c3e5102adc4b26 Mon Sep 17 00:00:00 2001
+From 1f25769cb639590d55428a57a6f2284de775b463 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Mon, 16 Nov 2026 19:42:00 -0500
 Subject: [PATCH] win32u: Map a present rect's edges as the window's for its
@@ -19,7 +19,7 @@ Map the present rect's edges the way the window's are.
  1 file changed, 10 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/win32u/window.c b/dlls/win32u/window.c
-index 8ddc40fb17..b0dc8096bc 100644
+index 4f0610c2d6a..836f0981048 100644
 --- a/dlls/win32u/window.c
 +++ b/dlls/win32u/window.c
 @@ -342,8 +342,16 @@ static RECT get_client_surface_rects( HWND toplevel, HWND hwnd, RECT *monitor_re

@@ -1,4 +1,4 @@
-From 7e190f713902e65e3ad0b77711146175050dc38b Mon Sep 17 00:00:00 2001
+From c7a465ecf8cb1923a720a3cfed394e6c7e4b0d55 Mon Sep 17 00:00:00 2001
 From: Ivan Karpan <github@ivankarpan.com>
 Date: Sun, 11 Oct 2026 17:56:50 +0100
 Subject: [PATCH] winemac.drv: Preserve minimization during inactive level
@@ -26,7 +26,7 @@ Co-Authored-By: Codex <noreply@openai.com>
  3 files changed, 36 insertions(+), 17 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index 4dafa80651..c64d67702f 100644
+index 7e70d353663..822d770b949 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -638,23 +638,28 @@ - (void) adjustWindowLevels:(BOOL)active
@@ -74,7 +74,7 @@ index 4dafa80651..c64d67702f 100644
              }
  
 diff --git a/dlls/winemac.drv/cocoa_window.h b/dlls/winemac.drv/cocoa_window.h
-index 4d573c98b8..af7e16a0e3 100644
+index a5ee46de665..7ee5e580e89 100644
 --- a/dlls/winemac.drv/cocoa_window.h
 +++ b/dlls/winemac.drv/cocoa_window.h
 @@ -35,6 +35,7 @@ @interface WineWindow : NSPanel <NSWindowDelegate>
@@ -94,18 +94,18 @@ index 4d573c98b8..af7e16a0e3 100644
  @property (readonly, nonatomic) BOOL preventsAppActivation;
  @property (readonly, nonatomic) BOOL floating;
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
-index aaac375ca3..111cceac00 100644
+index e53e225c19d..2ea3550035b 100644
 --- a/dlls/winemac.drv/cocoa_window.m
 +++ b/dlls/winemac.drv/cocoa_window.m
-@@ -933,6 +933,7 @@ @implementation WineWindow
+@@ -868,6 +868,7 @@ @implementation WineWindow
  
      @synthesize disabled, noForeground, preventsAppActivation, floating, fullscreen, fakingClose, closing, latentParentWindow, hwnd, queue;
      @synthesize drawnSinceShown;
 +    @synthesize minimizeAwaitingStart;
      @synthesize shapeChangedSinceLastDraw;
      @synthesize usePerPixelAlpha;
-     @synthesize himc, commandDone;
-@@ -1098,6 +1099,12 @@ - (void) adjustFullScreenBehavior:(NSWindowCollectionBehavior)behavior
+     @synthesize ime_update, commandDone;
+@@ -1033,6 +1034,12 @@ - (void) adjustFullScreenBehavior:(NSWindowCollectionBehavior)behavior
          }
      }
  
@@ -118,7 +118,7 @@ index aaac375ca3..111cceac00 100644
      - (void) setWindowFeatures:(const struct macdrv_window_features*)wf
      {
          static const NSUInteger usedStyles = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
-@@ -1258,6 +1265,8 @@ - (void) setMacDrvState:(const struct macdrv_window_state*)state
+@@ -1193,6 +1200,8 @@ - (void) setMacDrvState:(const struct macdrv_window_state*)state
          {
              macdrv_event_mask discard = event_mask_for_type(WINDOW_DID_UNMINIMIZE);
  
@@ -127,7 +127,7 @@ index aaac375ca3..111cceac00 100644
              pendingMinimize = FALSE;
              if (state->minimized && ![self isMiniaturized])
              {
-@@ -1281,7 +1290,7 @@ - (void) setMacDrvState:(const struct macdrv_window_state*)state
+@@ -1216,7 +1225,7 @@ - (void) setMacDrvState:(const struct macdrv_window_state*)state
                      else
                      {
                          [self setStyleMask:([self styleMask] | NSWindowStyleMaskMiniaturizable)];
@@ -136,7 +136,7 @@ index aaac375ca3..111cceac00 100644
                          discard |= event_mask_for_type(WINDOW_BROUGHT_FORWARD) |
                                     event_mask_for_type(WINDOW_GOT_FOCUS) |
                                     event_mask_for_type(WINDOW_LOST_FOCUS);
-@@ -1749,7 +1758,7 @@ - (void) orderBelow:(WineWindow*)prev orAbove:(WineWindow*)next activate:(BOOL)a
+@@ -1684,7 +1693,7 @@ - (void) orderBelow:(WineWindow*)prev orAbove:(WineWindow*)next activate:(BOOL)a
              if (pendingMinimize)
              {
                  [self setStyleMask:([self styleMask] | NSWindowStyleMaskMiniaturizable)];
@@ -145,7 +145,7 @@ index aaac375ca3..111cceac00 100644
                  pendingMinimize = FALSE;
              }
  
-@@ -2749,6 +2758,7 @@ - (void)windowDidDeminiaturize:(NSNotification *)notification
+@@ -2678,6 +2687,7 @@ - (void)windowDidDeminiaturize:(NSNotification *)notification
      {
          WineApplicationController* controller = [WineApplicationController sharedController];
  
@@ -153,15 +153,15 @@ index aaac375ca3..111cceac00 100644
          if (!ignore_windowDeminiaturize)
              [self postDidUnminimizeEvent];
          ignore_windowDeminiaturize = FALSE;
-@@ -2820,6 +2830,7 @@ - (void)windowDidMiniaturize:(NSNotification *)notification
+@@ -2749,6 +2759,7 @@ - (void)windowDidMiniaturize:(NSNotification *)notification
      {
-         macdrv_event* event;
+         WineApplicationController* controller = [WineApplicationController sharedController];
  
 +        minimizeAwaitingStart = FALSE;
          if (fullscreen && [self isOnActiveSpace])
-             [[WineApplicationController sharedController] updateFullscreenWindows];
+             [controller updateFullscreenWindows];
  
-@@ -2940,6 +2951,7 @@ - (void) windowWillExitFullScreen:(NSNotification*)notification
+@@ -2867,6 +2878,7 @@ - (void) windowWillExitFullScreen:(NSNotification*)notification
  
      - (void)windowWillMiniaturize:(NSNotification *)notification
      {
@@ -170,5 +170,5 @@ index aaac375ca3..111cceac00 100644
          [self grabDockIconSnapshotFromWindow:nil force:NO];
      }
 -- 
-2.56.0
+2.54.0 (Apple Git-157)
 

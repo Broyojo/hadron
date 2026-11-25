@@ -1,4 +1,4 @@
-From 30f30373350b75e2c814c4bdfa5fe1261c9c0644 Mon Sep 17 00:00:00 2001
+From ebc1633630e7f91745028f8bffcbf9527fbcab42 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Fri, 2 Oct 2026 14:07:06 -0400
 Subject: [PATCH] winemac.drv: Add an OpenGL driver on EGL.
@@ -17,10 +17,10 @@ on top of a Vulkan driver for Metal presents to, such as Mesa's Zink.
  create mode 100644 dlls/winemac.drv/egl.c
 
 diff --git a/dlls/winemac.drv/Makefile.in b/dlls/winemac.drv/Makefile.in
-index 943a9b5f7b..065de38c1d 100644
+index 7efe2991ef7..085544913a9 100644
 --- a/dlls/winemac.drv/Makefile.in
 +++ b/dlls/winemac.drv/Makefile.in
-@@ -28,6 +28,7 @@ SOURCES = \
+@@ -30,6 +30,7 @@ SOURCES = \
  	cocoa_window.m \
  	display.c \
  	dllmain.c \
@@ -30,7 +30,7 @@ index 943a9b5f7b..065de38c1d 100644
  	image.c \
 diff --git a/dlls/winemac.drv/egl.c b/dlls/winemac.drv/egl.c
 new file mode 100644
-index 0000000000..d9d63121a2
+index 00000000000..d9d63121a22
 --- /dev/null
 +++ b/dlls/winemac.drv/egl.c
 @@ -0,0 +1,130 @@
@@ -165,10 +165,10 @@ index 0000000000..d9d63121a2
 +    return STATUS_SUCCESS;
 +}
 diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
-index 6322d52a8b..c37b2b993d 100644
+index ffd83fdc863..3c6f8583e4e 100644
 --- a/dlls/winemac.drv/macdrv.h
 +++ b/dlls/winemac.drv/macdrv.h
-@@ -298,6 +298,8 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+@@ -303,6 +303,8 @@ extern void macdrv_ime_set_text(HWND hwnd, CFStringRef text, bool complete,
  extern void macdrv_lost_pasteboard_ownership(HWND hwnd);
  
  extern UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs);
@@ -178,10 +178,10 @@ index 6322d52a8b..c37b2b993d 100644
  
  extern CGImageRef create_cgimage_from_icon_bitmaps(HDC hdc, HANDLE icon, HBITMAP hbmColor,
 diff --git a/dlls/winemac.drv/opengl.c b/dlls/winemac.drv/opengl.c
-index 956dc41c40..b78ce40891 100644
+index 9292dcbd72d..594b537e878 100644
 --- a/dlls/winemac.drv/opengl.c
 +++ b/dlls/winemac.drv/opengl.c
-@@ -2229,6 +2229,7 @@ UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, co
+@@ -2086,6 +2086,7 @@ UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, co
          ERR("version mismatch, opengl32 wants %u but macdrv has %u\n", version, WINE_OPENGL_DRIVER_VERSION);
          return STATUS_INVALID_PARAMETER;
      }

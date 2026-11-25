@@ -1,4 +1,4 @@
-From 43128926d3a11e3a1ab4b7922fb4fff989629b5a Mon Sep 17 00:00:00 2001
+From 052cd71106f312502c2798312f0b500b47b1ea4c Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Mon, 26 Oct 2026 15:09:46 -0400
 Subject: [PATCH] winemac.drv: Report raw mouse movement in points.
@@ -18,7 +18,7 @@ which games that put the cursor back after each move do every frame.
  5 files changed, 63 insertions(+), 11 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.h b/dlls/winemac.drv/cocoa_app.h
-index 14539ec1be..be69d04cc0 100644
+index bad01ea0e53..8a2b394f90e 100644
 --- a/dlls/winemac.drv/cocoa_app.h
 +++ b/dlls/winemac.drv/cocoa_app.h
 @@ -69,6 +69,9 @@ @interface WineApplicationController : NSObject <NSApplicationDelegate>
@@ -32,7 +32,7 @@ index 14539ec1be..be69d04cc0 100644
  
      NSTimeInterval lastScrollTime;
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index c42327430d..f3a23ce5d2 100644
+index 6846d845818..28ea39ebda0 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -1278,6 +1278,10 @@ - (BOOL) setCursorPosition:(CGPoint)pos
@@ -117,7 +117,7 @@ index c42327430d..f3a23ce5d2 100644
          [self updateCursor:FALSE];
      }
 diff --git a/dlls/winemac.drv/cocoa_event.m b/dlls/winemac.drv/cocoa_event.m
-index 3389271a8f..6a62077e1f 100644
+index 581449a2da7..e5da86f1242 100644
 --- a/dlls/winemac.drv/cocoa_event.m
 +++ b/dlls/winemac.drv/cocoa_event.m
 @@ -229,6 +229,8 @@ - (void) postEventObject:(MacDrvEvent*)event
@@ -130,10 +130,10 @@ index 3389271a8f..6a62077e1f 100644
              lastEvent->event->mouse_moved.time_ms = event->event->mouse_moved.time_ms;
          }
 diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
-index 8f2e9664eb..0c5523654d 100644
+index 7ecdc8101f7..25efd102040 100644
 --- a/dlls/winemac.drv/macdrv_cocoa.h
 +++ b/dlls/winemac.drv/macdrv_cocoa.h
-@@ -367,6 +367,8 @@ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
+@@ -337,6 +337,8 @@ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
          struct {
              int             x;
              int             y;
@@ -143,7 +143,7 @@ index 8f2e9664eb..0c5523654d 100644
              unsigned long   time_ms;
          }                                           mouse_moved;
 diff --git a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
-index 8c3c2f6ba7..0c9ba0393b 100644
+index 8c3c2f6ba71..0c9ba0393b6 100644
 --- a/dlls/winemac.drv/mouse.c
 +++ b/dlls/winemac.drv/mouse.c
 @@ -131,7 +131,7 @@ static const CFStringRef cocoa_cursor_names[] =

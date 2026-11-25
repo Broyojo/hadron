@@ -1,4 +1,4 @@
-From 342cb56a59826c8f3896163e8261a6f188897b98 Mon Sep 17 00:00:00 2001
+From d286a1453b602f82e71211e4084156b9e01860b9 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 21 Oct 2026 09:22:23 -0400
 Subject: [PATCH] ntdll: Return FALSE from RtlIsEcCode for addresses above the
@@ -17,10 +17,10 @@ host's limit, and return FALSE for addresses above it.
  2 files changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
-index beea4ecabb..45e847a105 100644
+index 29e509c7d8d..7d226b30196 100644
 --- a/dlls/ntdll/signal_arm64ec.c
 +++ b/dlls/ntdll/signal_arm64ec.c
-@@ -1394,6 +1394,9 @@ BOOLEAN WINAPI RtlIsEcCode( ULONG_PTR ptr )
+@@ -1447,6 +1447,9 @@ BOOLEAN WINAPI RtlIsEcCode( ULONG_PTR ptr )
  {
      const UINT64 *map = (const UINT64 *)NtCurrentTeb()->Peb->EcCodeBitMap;
      ULONG_PTR page = ptr / page_size;
@@ -31,10 +31,10 @@ index beea4ecabb..45e847a105 100644
  }
  
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 4451a28174..8e0497e0ca 100644
+index d530b864d3d..9eec25b5fad 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3197,7 +3197,9 @@ BOOL is_emulated_code( ULONG_PTR ptr )
+@@ -2914,7 +2914,9 @@ BOOL is_emulated_code( ULONG_PTR ptr )
  static void alloc_arm64ec_map(void)
  {
      unsigned int status;

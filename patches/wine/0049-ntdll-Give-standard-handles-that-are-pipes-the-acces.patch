@@ -1,4 +1,4 @@
-From f44bddeb91ee7ce5bf2eb4574a6ee101e8e8b9fa Mon Sep 17 00:00:00 2001
+From 5d47df49947773fe839f629f680c25d44e691694 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Mon, 23 Nov 2026 11:16:03 -0500
 Subject: [PATCH] ntdll: Give standard handles that are pipes the access of
@@ -15,10 +15,10 @@ with ERROR_ACCESS_DENIED.
  1 file changed, 21 insertions(+), 4 deletions(-)
 
 diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
-index bd888b9928..d080fa643d 100644
+index 78de98f150f..aea362fa7d4 100644
 --- a/dlls/ntdll/unix/env.c
 +++ b/dlls/ntdll/unix/env.c
-@@ -1334,6 +1334,23 @@ static void add_registry_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
+@@ -1335,6 +1335,23 @@ static void add_registry_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
  }
  
  
@@ -42,7 +42,7 @@ index bd888b9928..d080fa643d 100644
  /*************************************************************************
   *		get_initial_console
   *
-@@ -1343,9 +1360,9 @@ static void get_initial_console( RTL_USER_PROCESS_PARAMETERS *params )
+@@ -1344,9 +1361,9 @@ static void get_initial_console( RTL_USER_PROCESS_PARAMETERS *params )
  {
      int output_fd = -1;
  
@@ -55,7 +55,7 @@ index bd888b9928..d080fa643d 100644
  
      if (main_image_info.SubSystemType != IMAGE_SUBSYSTEM_WINDOWS_CUI)
          return;
-@@ -1587,7 +1604,7 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
+@@ -1588,7 +1605,7 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
      ps_attr->Attributes[1].Attribute    = PS_ATTRIBUTE_MACHINE_TYPE;
      ps_attr->Attributes[1].Value        = native_machine;
  

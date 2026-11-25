@@ -1,7 +1,7 @@
-From 0b10f16242940de563c133a410610fcdb3f01496 Mon Sep 17 00:00:00 2001
+From bada47d3938c8667ac9da7de41af15b5e054bf4f Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 15 Oct 2026 14:11:29 -0400
-Subject: [PATCH 32/33] winemac.drv: Name a built-in display "Built-in" in its
+Subject: [PATCH] winemac.drv: Name a built-in display "Built-in" in its
  generated EDID.
 
 A display whose EDID cannot be read, as the built-in panel of an Apple
@@ -13,10 +13,10 @@ instead; the descriptor holds 13 characters.
  1 file changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_display.m b/dlls/winemac.drv/cocoa_display.m
-index 647a863ff1..015f2b356e 100644
+index bbc47e09aba..83d655fc28d 100644
 --- a/dlls/winemac.drv/cocoa_display.m
 +++ b/dlls/winemac.drv/cocoa_display.m
-@@ -857,10 +857,16 @@ static CFDataRef generate_edid(CGDirectDisplayID display_id, uint32_t vendor_num
+@@ -849,10 +849,16 @@ static CFDataRef generate_edid(CGDirectDisplayID display_id, uint32_t vendor_num
          timings++;
      }
  

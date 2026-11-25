@@ -1,4 +1,4 @@
-From 7c3465fa9f9045b71b8d8a54363558edd3e8cdbc Mon Sep 17 00:00:00 2001
+From 7b0fbfd7562d9feb981ce103ba0847e56c10c59b Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Mon, 23 Nov 2026 11:24:02 -0500
 Subject: [PATCH] configure: Give the arm64 macOS loader's main thread stack
@@ -26,10 +26,10 @@ Foundation run loop.
  3 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/configure b/configure
-index 3115e94b01..966a204aa8 100755
+index 114e9683e25..67dc3c8d229 100755
 --- a/configure
 +++ b/configure
-@@ -12346,7 +12346,7 @@ case $host_os in
+@@ -12408,7 +12408,7 @@ case $host_os in
  
  
      case $HOST_ARCH in
@@ -39,10 +39,10 @@ index 3115e94b01..966a204aa8 100755
      esac
  
 diff --git a/configure.ac b/configure.ac
-index 31c941169f..d512284f98 100644
+index 813eab2f336..fc9a8db6639 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -982,8 +982,10 @@ case $host_os in
+@@ -989,8 +989,10 @@ case $host_os in
      AC_SUBST(SYSTEMCONFIGURATION_LIBS,"-framework SystemConfiguration")
  
      case $HOST_ARCH in
@@ -56,10 +56,10 @@ index 31c941169f..d512284f98 100644
      esac
  
 diff --git a/loader/main.c b/loader/main.c
-index adbb635de4..b1ddff658a 100644
+index 9460aeac9dc..60e3edb459f 100644
 --- a/loader/main.c
 +++ b/loader/main.c
-@@ -272,6 +272,10 @@ static void set_runtime_defaults( const char *exe, char *argv[] )
+@@ -268,6 +268,10 @@ static void set_runtime_defaults( const char *exe, char *argv[] )
   * before libc runs. Here nothing can run that early, and libmalloc maps its metadata at a random
   * 2MB-aligned address before main(), at times inside a range above 4GB such as Hogwarts
   * Legacy's 0x140000000-0x15bcc2000, and the image then fails with STATUS_CONFLICTING_ADDRESSES.

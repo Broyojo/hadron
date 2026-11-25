@@ -1,4 +1,4 @@
-From f2162b62724abea6b4e8185ab97d80d55bce2db1 Mon Sep 17 00:00:00 2001
+From b3f2bca3893d560398666f13e1612555a206f0d8 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 10:45:15 -0400
 Subject: [PATCH] winemac.drv: Capture only the display whose mode changes.
@@ -13,7 +13,7 @@ changed, and release it when its mode is restored or the change fails.
  1 file changed, 15 insertions(+), 6 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index f151bf2eca..34d550d943 100644
+index 54c9673c087..9cb12c0d092 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -809,6 +809,13 @@ - (NSArray*)modesMatchingMode:(CGDisplayModeRef)mode forDisplay:(CGDirectDisplay

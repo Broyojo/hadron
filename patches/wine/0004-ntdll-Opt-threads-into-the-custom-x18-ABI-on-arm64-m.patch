@@ -1,4 +1,4 @@
-From ae889050cfe71ac5e095cfa3678851b0006ec03f Mon Sep 17 00:00:00 2001
+From 7d7b7db96a38d3d2f1b9842c0ae7b438bcbdabc6 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 14:49:43 -0400
 Subject: [PATCH] ntdll: Opt threads into the custom x18 ABI on arm64 macOS.
@@ -14,7 +14,7 @@ com.apple.security.custom-x18-abi-toggle entitlement on the loader.
  3 files changed, 35 insertions(+)
 
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index fa9138d2bf..0ea41af7b6 100644
+index c80226f06bb..ca757a977e5 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -1768,6 +1768,7 @@ void server_init_process_done(void)
@@ -25,7 +25,7 @@ index fa9138d2bf..0ea41af7b6 100644
      signal_start_thread( main_image_info.TransferAddress, peb, data->teb );
  }
  
-@@ -1802,6 +1803,7 @@ void server_init_thread( struct thread_data *data )
+@@ -1803,6 +1804,7 @@ void server_init_thread( struct thread_data *data )
      if (data->teb)
      {
          init_teb_data( data );
@@ -34,7 +34,7 @@ index fa9138d2bf..0ea41af7b6 100644
      }
      else if (data->start)
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index 576f76bd7e..e8f18db6f7 100644
+index 02b6d57ec10..9914a45b935 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -27,6 +27,8 @@
@@ -46,7 +46,7 @@ index 576f76bd7e..e8f18db6f7 100644
  #include <pthread.h>
  #include <signal.h>
  #include <stdlib.h>
-@@ -1677,6 +1679,32 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
+@@ -1691,6 +1693,32 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
  }
  
  
@@ -80,10 +80,10 @@ index 576f76bd7e..e8f18db6f7 100644
   *           signal_start_thread
   */
 diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
-index 9b6401ee37..30130f93ba 100644
+index 829db1e3e22..14a7b795000 100644
 --- a/dlls/ntdll/unix/unix_private.h
 +++ b/dlls/ntdll/unix/unix_private.h
-@@ -355,6 +355,11 @@ extern void signal_free_thread( TEB *teb );
+@@ -356,6 +356,11 @@ extern void signal_free_thread( TEB *teb );
  extern void signal_disable_syscall_dispatch(void);
  extern void signal_init_process( TEB *teb );
  extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg, TEB *teb );

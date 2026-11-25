@@ -1,8 +1,7 @@
-From d8ae0863bdeb4ea2ba3682fdd8b05ae122e31f1d Mon Sep 17 00:00:00 2001
+From d802a4bdf5e7978b830964069841d2718c16ce95 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 15 Oct 2026 14:11:30 -0400
-Subject: [PATCH 33/33] win32u: Emulate display mode changes by default on
- macOS.
+Subject: [PATCH] win32u: Emulate display mode changes by default on macOS.
 
 A real mode change on macOS captures the display, can make macOS
 rearrange the displays, gives a Retina display a scaled mode whose
@@ -17,7 +16,7 @@ off.
  1 file changed, 6 insertions(+)
 
 diff --git a/dlls/win32u/sysparams.c b/dlls/win32u/sysparams.c
-index 6ed5b77232..434494aa59 100644
+index c9cc892ae97..5282e029455 100644
 --- a/dlls/win32u/sysparams.c
 +++ b/dlls/win32u/sysparams.c
 @@ -165,7 +165,13 @@ static INT64 last_query_display_time;
@@ -32,8 +31,8 @@ index 6ed5b77232..434494aa59 100644
  BOOL emulate_modeset = FALSE;
 +#endif
  BOOL decorated_mode = TRUE;
+ BOOL use_egl = TRUE;
  UINT64 thunk_lock_callback = 0;
- 
 -- 
 2.54.0 (Apple Git-157)
 

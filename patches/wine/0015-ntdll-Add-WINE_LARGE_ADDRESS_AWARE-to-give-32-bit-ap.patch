@@ -1,4 +1,4 @@
-From 73d300596e84c037fbaea637604b7df89cd00633 Mon Sep 17 00:00:00 2001
+From 6bb7112422161f5441ae777968cd51a353f7377e Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 08:59:10 -0400
 Subject: [PATCH] ntdll: Add WINE_LARGE_ADDRESS_AWARE to give 32-bit
@@ -14,10 +14,10 @@ it: Ultimate Custom Night crashed in mtld3d with 79MB left.
  1 file changed, 13 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 7ad666faa2..c4dfc417e6 100644
+index 9cb4064673c..c6442204759 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -4254,6 +4254,18 @@ static struct thread_data *init_thread_data( void *ptr )
+@@ -3930,6 +3930,18 @@ static struct thread_data *init_thread_data( void *ptr )
      return data;
  }
  
@@ -36,15 +36,15 @@ index 7ad666faa2..c4dfc417e6 100644
  /* enable use of a large address space when allowed by the application */
  static void set_large_address_space(void)
  {
-@@ -4276,7 +4288,7 @@ static void set_large_address_space(void)
-             if (use_aslr()) free_reserved_memory( 0, (char *)0x7ffe0000 );
- #endif
-         }
--        else if (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)
-+        else if (is_large_address_aware())
+@@ -3947,7 +3959,7 @@ static void set_large_address_space(void)
+ 
+     if (is_win64)
+     {
+-        if (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)
++        if (is_large_address_aware())
          {
              user_space_wow_limit = limit_4g - 1;
-             /* reserve space for top-down allocations; some apps break if the entire high 2G is available */
+             /* block a bit of top memory: some apps break if the entire high 2G is available */
 -- 
 2.54.0 (Apple Git-157)
 
