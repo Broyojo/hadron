@@ -1,4 +1,4 @@
-From a45a89cff2dbf1032c0c0789a8ac2db61eb92144 Mon Sep 17 00:00:00 2001
+From c40e39bd202ac14d23baa24e0483471d09baa93f Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 12:04:22 -0400
 Subject: [PATCH] dxgi: Present with display sync the way Windows does
@@ -17,7 +17,7 @@ titles that offer no vsync setting.
  3 files changed, 38 insertions(+)
 
 diff --git a/src/d3d11/d3d11_swapchain.cpp b/src/d3d11/d3d11_swapchain.cpp
-index d182587..2235dfd 100644
+index 53559c8..7a5b1fd 100644
 --- a/src/d3d11/d3d11_swapchain.cpp
 +++ b/src/d3d11/d3d11_swapchain.cpp
 @@ -178,6 +178,10 @@ public:
@@ -31,7 +31,7 @@ index d182587..2235dfd 100644
      hud.initialize(GetVersionDescriptionText(device_->GetDirectXVersion(), device_->GetFeatureLevel()));
  
      backbuffer_desc_ = D3D11_TEXTURE2D_DESC1 {
-@@ -765,6 +769,8 @@ public:
+@@ -766,6 +770,8 @@ public:
        return hr;
      }
  
@@ -40,7 +40,7 @@ index d182587..2235dfd 100644
      double vsync_duration =
          std::max(SyncInterval * 1.0 /
                       (preferred_max_frame_rate ? preferred_max_frame_rate
-@@ -1087,6 +1093,27 @@ private:
+@@ -1088,6 +1094,27 @@ private:
  
    bool handle_alt_tab_;
  

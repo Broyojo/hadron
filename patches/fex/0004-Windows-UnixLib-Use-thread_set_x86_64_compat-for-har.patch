@@ -1,4 +1,4 @@
-From b6ce903170b4dc0d58f772cded3248d106545a61 Mon Sep 17 00:00:00 2001
+From 402bc4d6e25569e08fafe88afee0cb0e407a0214 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 19:03:51 -0400
 Subject: [PATCH] Windows/UnixLib: Use thread_set_x86_64_compat for hardware
@@ -12,7 +12,7 @@ JIT relies on hardware ordering instead of emulating it.
  1 file changed, 21 insertions(+)
 
 diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
-index 7e59d1dea..c6b2e7dc5 100644
+index d607399624..8d0955c9e8 100644
 --- a/Source/Windows/UnixLib/FEXUnixLib.cpp
 +++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
 @@ -1,5 +1,7 @@
@@ -33,7 +33,7 @@ index 7e59d1dea..c6b2e7dc5 100644
  #include <unistd.h>
  
  #include "FEXUnixLib.h"
-@@ -58,6 +63,21 @@ static int prctl(int, ...) {
+@@ -62,6 +67,21 @@ static int prctl(int, ...) {
  }
  #endif
  
@@ -55,7 +55,7 @@ index 7e59d1dea..c6b2e7dc5 100644
  static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
    auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
    if (Args->Enable) {
-@@ -71,6 +91,7 @@ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
+@@ -75,6 +95,7 @@ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
    prctl(PR_SET_MEM_MODEL, PR_SET_MEM_MODEL_DEFAULT, 0, 0, 0);
    return STATUS_SUCCESS;
  }

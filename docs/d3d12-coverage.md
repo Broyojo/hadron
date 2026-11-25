@@ -90,4 +90,8 @@ vkd3d-proton also lists vendor extensions (AMD, NVIDIA, Valve) and Windows-only 
 - vkd3d-proton's own tiled resource tests: `test_update_tile_mappings` and its remap variants,
   `test_texture_feedback_instructions`, `test_sparse_default_mapping`, three checks of
   `test_execute_indirect_state`.
+- vkd3d-proton 3.1's new tests that fail on KosmicKrisp (findings #72):
+  `test_custom_border_color_limits_compute`, `test_structured_buffer_addressing_wrap`,
+  `test_conservative_ssbo_vectorization_{dxbc,dxil}_heap_desc`, `test_fp16_rounding_behavior_legacy`,
+  `test_query_heap_cpu_resolve_timestamp`.
 - A full Vulkan CTS run has not been done; only the groups for each feature and regression samples.
