@@ -40,6 +40,8 @@ When the window says **Ready to play**, you are done. Hadron does not need to st
 Steam, and install and play Windows games from your library as usual. The setup shows in Steam
 under **Settings → Compatibility** as Steam Play.
 
+![Hadron's window when setup is done: "Ready to play", with Open Steam, Repair, Save a report and Remove from Steam](/images/hadron-ready.png)
+
 From a terminal, `hadron setup` does the same as the button.
 
 ## The `hadron` command
