@@ -90,6 +90,9 @@ the map of the stack, [CONTRIBUTING.md](CONTRIBUTING.md) the rules for patches a
   says how each game fares; [docs/roadmap.md](docs/roadmap.md) is the order of work. Read the
   entry before starting on something, and add one when you learn something the next person
   would otherwise have to find again.
+- **What users read.** [docs/guide](docs/guide) is the user guide published at
+  docs.hadrondb.com (`site/` builds it: `pnpm install && pnpm build` there). A change to what a
+  player sees, sets or runs (a setting, a command, a message, a path) updates its page too.
 
 ## Upstream rules that bind an agent
 
