@@ -1,4 +1,4 @@
-From fbaa5326a192a689d5ebaa1583f3288df5eaaf29 Mon Sep 17 00:00:00 2001
+From 25d1a7c16311525044447a043f5c9d51421eca4c Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 18:24:21 -0400
 Subject: [PATCH] Windows: Use 64K guard regions for the call-ret stack.
@@ -14,7 +14,7 @@ allocation granularity so guards always cover whole host pages.
  1 file changed, 10 insertions(+), 5 deletions(-)
 
 diff --git a/Source/Windows/Common/CallRetStack.h b/Source/Windows/Common/CallRetStack.h
-index 215591b39..c7c1fb01e 100644
+index 215591b39f..c7c1fb01ed 100644
 --- a/Source/Windows/Common/CallRetStack.h
 +++ b/Source/Windows/Common/CallRetStack.h
 @@ -7,6 +7,11 @@
