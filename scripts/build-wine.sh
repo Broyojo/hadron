@@ -47,6 +47,10 @@ egl_state="no Zink"
 # DirectShow decoders (winegstreamer) are built on.
 [[ -f "$ROOT/dist/gstreamer/lib/pkgconfig/gstreamer-1.0.pc" ]] && egl_state+=", own GStreamer"
 [[ "$(cat .hadron-egl 2>/dev/null)" == "$egl_state" ]] || reconfigure=1
+# And when a patch changed configure itself. Left to make, configure would run again without the
+# PKG_CONFIG_PATH below: it then found Homebrew's FFmpeg in place of Hadron's and no GStreamer, so
+# winedmo linked a library users don't have and winegstreamer was left out of the build.
+[[ "$WINE_SRC/configure" -nt config.status ]] && reconfigure=1
 
 if [[ ! -f Makefile || -n $reconfigure ]]; then
     log "configuring wine ($variant)"
