@@ -7,3 +7,6 @@
 /dist-dev/
 /games/
 /comments_PLEASE_GITIGNORE.md
+/site/node_modules/
+/site/.vitepress/dist/
+/site/.vitepress/cache/

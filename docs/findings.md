@@ -168,7 +168,7 @@ each upload still cost a page-aligned staging allocation (16 KiB for ~100 bytes)
 those filled the 32-bit address space (`page boxes 2416 MiB`) until mtld3d panicked. Watch
 `vbib_gpu_copy_bytes_total` and the address-space warnings after any change to upload paths.
 
-**D3DX's `DebugSetMute` lookup (mtld3d 0002).** The statically linked D3DX library looks up
+**D3DX's `DebugSetMute` lookup (mtld3d 0002; upstream since 0.15, #69).** The statically linked D3DX library looks up
 `DebugSetMute` in `d3d9d.dll`/`d3d9.dll` before its calls and caches only a found pointer.
 mtld3d didn't export it, so every D3DX call did `GetModuleHandle` twice, `LoadLibrary` and
 `GetProcAddress`: ~40% of the game thread, found by mapping samples through FEX's block map
@@ -766,6 +766,9 @@ the first suspect: its detection of self-modifying code (`SMCChecks`, `mtrack` b
 not see those writes here. Not verified. The next experiment is the same `jjs` test with
 `FEX_SMCCHECKS=full`, and with `FEX_DISKCACHE=0`; `scripts/wine-run` passes only `FEX_DISKCACHE`
 on, so run `dist/bin/wine` with its environment by hand.
+
+FEX-2611.1 (#67) keeps a guest load whose value is unused, which C1's null checks rely on: the
+likeliest cause so far. Repeat the `jjs` test, and the game's own `java.exe`, on it first.
 
 ## Wine: native host mappings stall thread creation on macOS (fixed, #28)
 
@@ -1433,7 +1436,7 @@ The Paradox Launcher's GPU process died creating a compute pipeline whose receiv
 0xbaadf00dbaadf00d, Wine's fill for uninitialized heap memory. `ClearUAV`'s constructor compiles
 its pipelines through `ArgumentEncodingContext::device_`, which was declared, and so initialized,
 after it. Upstream DXMT fixed the order in fb4515681d (2026-09-30), after our pin; DXMT patch
-0003 is that commit, to drop when the pin moves past it. Found by Lennard Zehner (#80).
+0003 was that commit until the pin moved past it (#68). Found by Lennard Zehner (#80).
 
 ## Writable shared sections on 16 KB pages (fixed, #43)
 
@@ -2073,6 +2076,105 @@ virtual visible rect's, in `get_surface_rect`). Whether such a window reaches th
 fullscreen at all is unchecked. In the GDI-only test the window's last pixel row is off-colour at the screen's
 shape, before and after: win32u's scaled surface, not the letterbox.
 
+## FEX moved to FEX-2611.1 (#67)
+
+FEX moved from `0df84d384` (2026-09-28) to the FEX-2611.1 release (`4f9c1f1e3`, 2026-11-11),
+which is FEX-2611 with the CPUID crash fix (FEX 0006 before) and the forced-assert fix
+(`cf2f831ad`: a FEX assert now ends the process with 0x42 instead of faulting on). One upstream
+commit from after the release is on top: `bfad5d692`, without which 2611 decodes RDPKRU and
+WRPKRU as SERIALIZE. Hadron's five patches rebased with two conflicts, both where upstream's new
+`CheckSupportsTPIDRRO_CPU` unix call sits in the same places as ours (its `PR_GET_TPIDRRO_CPU`
+define, the function enum, `__wine_unix_call_funcs`); ours follow it.
+
+What it changes for Hadron, checked with a test program in x86-64 and i386 against the old
+build (same prefix setup, `FEX_DISKCACHE=1`):
+
+- **HotSpot's null checks.** `4e1ad46b1` keeps a guest load whose value is unused. HotSpot's C1
+  checks for null with `cmp reg, [obj]` whose flags the next instruction overwrites, and relies
+  on the access violation. The old build dropped the load and no exception came; the new one
+  raises it. This may be #27: not yet tried with a JRE.
+- **SERIALIZE** is now reported (CPUID 7 EDX bit 14) and runs; RDPKRU and WRPKRU still raise
+  illegal instruction, as before.
+- **CLFLUSH** now becomes `DC CIVAC` on Wine (`7d0cf9b16` turned an inverted check around); it
+  ran without a fault on macOS, as did CLFLUSHOPT.
+- **TPIDRRO.** FEX now asks the unix side whether `TPIDRRO_EL0` holds the CPU number, to offer
+  RDTSCP and RDPID. Hadron's `prctl` stub (FEX 0001) answers no, so both stay hidden, as before.
+- **Disk cache** format 28 to 44: each game's cache is rebuilt once.
+- **Unwind information.** `ef006bdb1` builds the DLLs with `-fno-asynchronous-unwind-tables`
+  (a clash with `preserve_all` under MinGW). `libwow64fex.dll` keeps 2304 of 4015
+  `RUNTIME_FUNCTION`s (`llvm-readobj --unwind`; `llvm-objdump --unwind-info` reads only x86-64).
+  The entry points in `Source/Windows` keep theirs (`BTCpuSimulate`, `ProcessInit`,
+  `ResetToConsistentState`, the memory notifications); FEXCore's internals lose them (the JIT,
+  `ExitFunctionLink`, `InvalidateRange`, `HandleUnalignedAccess`). Wine's unwinder takes such a
+  function for a leaf, so a backtrace through it, or an exception raised inside it, unwinds
+  wrongly. Guest exceptions are not affected: they are raised from the context FEX rebuilds. Keep
+  it in mind when reading a FEX crash, as in #53.
+- **Build.** FEX's Windows `FEXOfflineCompiler` now links FEX's unix-call code through the
+  TPIDRRO check, and with it FEX 0005's `AllocateJIT`, whose `VirtualAlloc2` only the DLLs'
+  own Windows API layer provides: the link failed. `AllocateJIT` now calls
+  `NtAllocateVirtualMemoryEx` itself, with the same address requirement for WoW64.
+
+Found along the way, the same in both builds: an integer division by zero raises no exception
+under FEX (`div` by a zero register returns), where Windows raises
+`EXCEPTION_INT_DIVIDE_BY_ZERO`. Open.
+
+## Subnautica hung loading a world: FEX's x87 fallbacks returned with RBX overwritten (fixed, #79)
+
+On the 0.4.0 test build Subnautica showed its menu, and loading a save stopped for good at
+"loading scene: Essentials", one core busy (#77, on the `subnautica-hang` branch). Run by hand
+from a copy of its prefix with `WINEDEBUG=+seh FEX_SILENTLOG=0`, the main thread's last exception
+was an execute fault at `0x6500000054`, which FEX passed through: the pc was in neither its JIT nor
+its dispatcher. The native registers (logged by a debugging build of FEX) put the jump in the
+dispatcher's ABI handler for the F80 fallbacks, `blr x13` with `x13` loaded from
+`Pointers.FallbackHandlerPointers`: entries 18, 19, 42 and 43 of that table held pairs of small
+integers, the same every run, in the shape of Subnautica's `Int3` bounds. The guest had stored them
+there. At the moment the table changed, the guest's RBX held the `CpuStateFrame` pointer, and the
+code before it was Mono's `Math.Cos`: `fld qword [rsp-8]; fcos; fstp qword [rsp-8]`.
+
+The cause is in the compiler. FEX-2611 enables `preserve_all` for MinGW builds with clang 22.1 or
+newer (`c76fccf25`, with `ef006bdb1` turning asynchronous unwind tables off for it), so its ABI
+handlers keep the guest's callee-saved registers live across a fallback call. Clang 23.1.2 (our
+llvm-mingw) places a spill slot over the save slot of a callee-saved register in these functions,
+in the ARM64EC and the AArch64 builds alike, with or without unwind tables:
+
+```
+stp  x27, x30, [sp, #16]   // save RBX
+...
+str  x8, [sp, #16]         // spill the frame pointer over it
+...
+ldp  x27, x30, [sp, #16]   // "restore" RBX
+```
+
+`tests/win/x87-registers.c` runs each x87 instruction with a known value in every register: under
+FEX-2611.1 FSIN, FCOS, FPTAN, F2XM1 and FPATAN return with RBX replaced by the frame pointer, FYL2X
+and FYL2XP1 with R12; FSQRT, FPREM, FSCALE and the rest keep everything. 0.3.3's FEX (`0df84d384`
+with its queue) passes it all. Any program that uses x87 transcendentals is exposed: Subnautica's
+next store through RBX wrote its cell bounds over FEX's thread state, and the next F80 fallback
+jumped to them. In the AArch64 (WoW64) build the overlapped save slot is x28's in most of these
+handlers, which holds the same frame pointer there, but x19's in FYL2X; no 32-bit program was tried.
+
+FEX 0007 treats `preserve_all` as unavailable under MinGW again, as before 2611, which also brings
+the asynchronous unwind tables back (`libwow64fex.dll` has 4033 `RUNTIME_FUNCTION`s again, against
+2304, see #67). The ABI handlers then spill and fill around fallback calls as they did in 0.3.3; the
+cost is a few more stores per x87 transcendental, to be measured if a game spends its time there.
+The change was written by an agent, and FEX takes no AI-written code, so it stays downstream; the
+compiler bug is worth reporting to LLVM with the reduced handler.
+
+Why it hung instead of crashing is Wine's: the AV at the bad address went to the SEH handlers, and
+the ARM64EC dispatcher unwound a frame without unwind data as a leaf, `Pc = Lr` with the stack
+pointer kept, which it then unwound to itself again forever (#77 has the sample). Wine 0055 makes
+`virtual_unwind` fail a frame whose pc, sp, fp and lr come out unchanged, and the dispatchers treat
+that like an invalid frame: the stack is marked invalid and the exception goes unhandled, so the
+program ends with its code. Raising `STATUS_INVALID_DISPOSITION` instead, as for a frame without
+unwind data, recursed through `KiUserExceptionDispatcher`'s frame back to the same one until the
+stack overflowed. `tests/win/unwind-no-progress.c` hangs without the patch, as ARM64EC and as ARM64,
+and its child ends with `0xc0000005` with it. Subnautica on FEX-2611.1 with Wine 0055 quits when the
+load reaches the bad jump instead of hanging.
+
+With FEX 0007 Subnautica loads a save in about 19 seconds ("LOADING FINISHED", `'Root' took
+18.89 seconds`) and keeps its heartbeats going in the world. `tests/win/jit-unwind.c` (including
+the null check that now faults, #67), `mono-host.c` with Subnautica's Mono, `hello` (x86-64 and
+i386), `is-ec-code` and `thread-allocation` pass.
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
 Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play
@@ -2169,3 +2271,131 @@ blocks. `FilePipeLocalInformation` (`GetNamedPipeInfo`, the instance count of
 `GetNamedPipeHandleState`) is still unanswered on these handles: its quotas and free space are not
 known for a Unix pipe, and a made-up value would mislead programs that wait for write space. Riot
 Client itself was not started with the fix.
+## vkd3d-proton moved to 3.1 (#72, issue #125)
+
+vkd3d-proton is pinned to the v3.1 tag (2026-10-28) instead of v3.0.1. Patches 0005 and 0006 were
+upstream commits picked onto 3.0.1 (5505762a, 49a1e2c7) and are in 3.1, so they are dropped. The
+four of Hadron's own apply unchanged, except for one line of context in 0003 (`swapchain.c`, a
+`WARN` that 3.1 casts to `int`); upstream's swapchain rework in 3.1 does not touch the latency
+handle code 0003 changes.
+
+What 3.1 asks of the driver and the toolchain, and what Hadron has: maintenance5 and maintenance6
+are required now (KosmicKrisp has both); `VK_KHR_shader_untyped_pointers` is enabled when present,
+for NVAPI's fp16 atomics only (KosmicKrisp has it); the DLLs link `version` and `pathcch`, which
+llvm-mingw has. `scripts/build-vulkan.sh` builds 3.1 with no change. 3.1 also has a cross file for
+ARM64EC (c1e0926d); Hadron still builds x86_64 PE, and an ARM64EC vkd3d-proton, run natively
+rather than under FEX, is the step `build-vulkan.sh` already names for later.
+
+Checked in a scratch prefix set up as `scripts/play` sets up a D3D12 game (vkd3d-proton's DLLs in
+`system32`, DXVK's DXGI as `dxgi_dxvk.dll`, KosmicKrisp with `MESA_KK_EXPERIMENTAL=dgc,xfb,sparse`),
+with the shader caches off. `tools/d3d12probe.c` reports the same capabilities on both builds
+(feature level 12_0, shader model 6.6) and `tests/win/d3d12bigview.c` reads back what it wrote on
+both. vkd3d-proton's own suite (`-Denable_tests=true`, stress tests left out, a test that aborts or
+prints nothing for 180 s is excluded and the run goes on):
+
+| Build | Tests | Pass | Fail | Abort or hang |
+|---|---|---|---|---|
+| 3.0.1 with its tests | 532 | 485 | 40 | 7 |
+| 3.0.1, 3.1's tests | 578 | 510 | 56 | 12 |
+| 3.1, 3.1's tests | 578 | 525 | 47 | 6 |
+
+On the same tests no test does worse on 3.1. It passes 15 that fail or abort on 3.0.1 (among them
+`test_renderpass_rendering`, `test_tight_resource_alignment`, `test_write_buffer_immediate`,
+`test_resource_retain_workaround`); `test_resolve_image_exhaustive_descriptors` hung on 3.0.1 and
+finishes on 3.1, with the same wrong values. The remap variants of `test_update_tile_mappings` fail a
+different number of checks on every run (798 to 980), on both builds. The six aborts left on 3.1
+abort on 3.0.1 too: `test_texture_feedback_instructions_{sm51,dxil}`, `test_sparse_default_mapping` (an
+assertion in KosmicKrisp's MSL backend), `test_fence_wait_robustness_shared`,
+`test_large_texel_buffer_view`, `test_large_buffer_descriptors`. Of the tests new in 3.1, these fail
+on both builds, so on the driver: `test_custom_border_color_limits_compute` (zeros from some
+border colour index on), `test_structured_buffer_addressing_wrap`,
+`test_conservative_ssbo_vectorization_{dxbc,dxil}_heap_desc` (vectors read one element early),
+`test_fp16_rounding_behavior_legacy` (one round-toward-zero case), and
+`test_query_heap_cpu_resolve_timestamp`, which aborts on 3.0.1 and on 3.1 finds the timestamps
+not monotonic.
+
+Not tested yet: a game. Teardown, the D3D12 game installed here, and Jurassic World Evolution 2
+(the big structured view of #36) are the ones to run before this ships.
+## mtld3d 0.15.5: a windowed resize stopped the picture for good (fixed, #69, issue #177)
+
+Portal 2 changing its windowed resolution, and Call of Duty: World at War picking its native one,
+left the window black with the sound still playing. A `sample` of the game showed mtld3d's submit
+thread stopped in Wine's `segv_handler`, called from `encode_pass` (`command.rs:2748`) retaining a
+pass's colour texture. Upstream's #919 (fixed in `4aa8014`, #985, mtld3d 0.15): a windowed device
+that binds its back buffer or implicit depth surface by hand and then gets a `WM_SIZE` has them
+destroyed and recreated by mtld3d's auto-resize, while the saved bindings keep the old handles, and
+the next `Present` puts them back into the frame. The fault is on mtld3d's own Unix thread, so no
+frame is submitted again and nothing is logged at the default level.
+
+`tests/win/d3d9resize.c` does what those games do: a windowed device with an automatic depth
+surface, `GetBackBuffer` + `SetRenderTarget` and `GetDepthStencilSurface` +
+`SetDepthStencilSurface`, then `SetWindowPos` to three other sizes, presenting 60 frames at each
+and reading the back buffer's middle pixel back after each. On the old pin (2070771 with Hadron's
+patches, the 0.3.3 build) it hangs in the first `Present` after the first resize, 32- and 64-bit
+alike, and a sample shows the issue's stack (`execute_submit` `encoder.rs:9125` → `encode_pass`
+`command.rs:2748` → `segv_handler`). On 0.15.5 all four sizes pass and read back their colour.
+
+The pin moved to upstream's v0.15.5 (553d758), 2026-11-17:
+
+- Patch 0001 (system-memory vertex buffers, #18) is rebased onto upstream's `buffer.drawTimeUpload`
+  (55d7097): its pre-draw flush is now `flush_bound_buffers_before_draw` /
+  `flush_staged_before_draw`, and the deferred upload of a system-memory buffer runs after it.
+- 0002 (`DebugSetMute`, #18) is dropped: upstream exports it at Windows' ordinal 35 since
+  `665dcd7`; the new `d3d9.dll`s (i386 and ARM64X) export it.
+- 0003 (display sync, #20) rebased with one conflict, in its tests' imports. `a4c67eb` moved
+  mtld3d's pure layer helpers (pacing, drawable sizes) out of `macdrv` into `metal/layer.rs`, but
+  `configure_metal_layer`, the refresh pass and `clear_covered_window_layers` stay in
+  `metal/macdrv.rs`, where this patch and the next still apply.
+- #136's patch 0004 (present rect on entering and leaving fullscreen, cover test against the view's
+  bounds) applies unchanged; upstream sets no present rect. The queue is renumbered 0001 to 0003.
+- The unix crate is now a library (`crate-type = ["rlib"]`, for a native d3d9 upstream is
+  building), so `build-mtld3d.sh` links `mtld3d.so` with `cargo rustc --crate-type cdylib` and the
+  install name upstream's `make unix-arm64` gives it. Rust is pinned at 1.99.1, the minimum the
+  crates name (`rust-version = "1.99"`). mtld3d's host unit tests pass (2,741); its e2e legs need
+  upstream's own Wine build and were not run.
+
+Measured 2026-11-23 on the built-in 3024×1964 display, Retina mode on, through a copy of the
+letterbox build's runtime (Wine 0050–0052) with each mtld3d, new scratch prefixes, capturing only
+the test's window (`tests/mac/window-id.swift` for its CGWindowID, `screencapture -x -o -l`, then
+`tests/mac/picture-bounds.swift`):
+
+| Test | 2070771 (0.3.3) | 0.15.5 |
+|---|---|---|
+| d3d9fs 1280×720 | `CreateDevice` makes it 3024×1964 (the mode list has only the screen's shape); whole window | 1280×720 set; picture rows 132–1832 (1701), 132 black rows above, 131 below, as wined3d's in #66 |
+| d3d9fs 1024×768 | 1024×768 set, no present rect: a 512×384-point window at the top left, under the menu bar | picture columns 203–2820 (2618), 203 black columns each side, as wined3d's |
+| d3d9resize, 32- and 64-bit | hangs after the first resize (above) | 4 sizes, every read-back right |
+| d3d9ex (`Direct3DCreate9Ex`, `CreateDeviceEx`, `PresentEx`, `ResetEx`, `CheckDeviceState`, a refused `D3DPOOL_MANAGED`), 32- and 64-bit | `Direct3DCreate9Ex` fails, `D3DERR_NOTAVAILABLE` | passes, read-backs right |
+| d3d9tri windowed, `IMMEDIATE`, 4 s | 59 fps 32-bit, 108 fps 64-bit | 120 fps both (the panel's rate: a windowed device syncs to it, 0003) |
+
+In one of two 1024×768 runs on 0.15.5, mtld3d logged "app deactivated, fullscreen window left in
+place: registry display mode 3024x1964 restored" a second in, with nothing in the test asking for it;
+the window then covered the screen in dark grey (30, 30, 30) with no picture until the device was
+released. The other run, and the 1280×720 one, stayed active. Where a fullscreen game should go when
+it loses focus is #178's question (Windows minimizes it); this run did not settle it.
+
+Not tested here: games (FNaF fullscreen at 16:9 and its focus loss #178 and office edges #135,
+Portal 2's resolution change, Ultimate Custom Night, ROAM for #88), 0004's `Reset` that keeps
+fullscreen, an external display.
+## DXMT moved to upstream main; its geometry shaders drop strips restarted at odd positions (open, #68)
+
+The DXMT pin moved from e86484e to upstream main, 25ea28f (2026-11-23), 163 commits. Eleven of
+the thirteen patches were upstream commits and are gone; Hadron's own two (display sync, and
+handing other devices' swapchains to DXVK's DXGI) apply unchanged. About 120 of the commits are
+DXIL and Direct3D 12 work, built only with `enable_d3d12`, which stays off. The risk is a
+refactor of the DXBC converter (`IOHelper`, 4b255b7, and `VertexPuller`, 5c80192, the code that
+fetches vertex attributes in the shader). Two tests compare it with the old build, both run as
+x86_64 and as i686 programs: `tests/win/d3d11vfmt.c` reads back what 43 vertex formats, a
+per-instance step rate, a start instance and a base vertex give, and `tests/win/d3d11gs.c` draws
+points and an indexed strip through geometry shaders. Both printed the same numbers with either
+build, and nothing under Metal API validation. `d3d11tri`, DXMT's own cube and Blinn-Phong
+tests and `d3d11fs` (exclusive fullscreen at 1280×720) looked and reported the same, at the
+display's 120 Hz.
+
+Both builds share two gaps the tests found. A strip restarted by a cut index through a geometry
+shader: DXMT's geometry stage numbers a strip's triangles by their position in the index buffer
+(`dxbc_converter_gs.cpp`, whose comment says restarts "can be broken"), so a triangle after a cut
+at an odd position is wound the wrong way and culled (it is drawn with culling off), and
+`SV_PrimitiveID` after a cut counts positions, not primitives (5 instead of 2 in the test).
+Without a geometry shader the strip is right. And `CreateInputLayout` refuses
+`R10G10B10A2_UINT`, a format Direct3D 11 requires for vertex buffers: it has no attribute format
+in `dxmt_format.cpp`, though the vertex puller could fetch it. Neither has been seen in a game.

@@ -1,4 +1,4 @@
-From 2d00dd11a32ca7de081eb79579cb402677760085 Mon Sep 17 00:00:00 2001
+From 371c16696ffe59a3f278acba53485bb1bc7efaef Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Sun, 11 Oct 2026 22:45:40 -0400
 Subject: [PATCH] vkd3d: Add VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES for swapchains
@@ -24,7 +24,7 @@ the application reads back is the one it set. Unset, nothing changes.
  1 file changed, 23 insertions(+), 3 deletions(-)
 
 diff --git a/libs/vkd3d/swapchain.c b/libs/vkd3d/swapchain.c
-index 8dd2cc10..f905f733 100644
+index e53970a9..70455331 100644
 --- a/libs/vkd3d/swapchain.c
 +++ b/libs/vkd3d/swapchain.c
 @@ -170,6 +170,7 @@ struct dxgi_vk_swap_chain
@@ -35,7 +35,7 @@ index 8dd2cc10..f905f733 100644
      UINT frame_latency_internal;
      VkSurfaceKHR vk_surface;
  
-@@ -924,6 +925,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetGammaControl(IDXGIVkSwapC
+@@ -921,6 +922,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetGammaControl(IDXGIVkSwapC
  static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetFrameLatency(IDXGIVkSwapChain2 *iface, UINT MaxLatency)
  {
      struct dxgi_vk_swap_chain *chain = impl_from_IDXGIVkSwapChain(iface);
@@ -43,7 +43,7 @@ index 8dd2cc10..f905f733 100644
      TRACE("iface %p, MaxLatency %u.\n", iface, MaxLatency);
  
      if (!MaxLatency || MaxLatency > DXGI_MAX_SWAP_CHAIN_BUFFERS)
-@@ -943,8 +945,10 @@ static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetFrameLatency(IDXGIVkSwapC
+@@ -940,8 +942,10 @@ static HRESULT STDMETHODCALLTYPE dxgi_vk_swap_chain_SetFrameLatency(IDXGIVkSwapC
      /* Only increasing the latency is handled here; apparently it is
       * the application's responsibility to reduce the semaphore value
       * in case the latency gets reduced. */
@@ -56,7 +56,7 @@ index 8dd2cc10..f905f733 100644
  
      chain->frame_latency = MaxLatency;
      return S_OK;
-@@ -1576,8 +1580,24 @@ static HRESULT dxgi_vk_swap_chain_init_sync_objects(struct dxgi_vk_swap_chain *c
+@@ -1573,8 +1577,24 @@ static HRESULT dxgi_vk_swap_chain_init_sync_objects(struct dxgi_vk_swap_chain *c
      {
          INFO("Enabling frame latency handles.\n");
          chain->frame_latency = 1;
@@ -81,7 +81,7 @@ index 8dd2cc10..f905f733 100644
 +        if (FAILED(hr = vkd3d_native_sync_handle_create(max(chain->frame_latency, chain->frame_latency_min),
                  VKD3D_NATIVE_SYNC_HANDLE_TYPE_SEMAPHORE, &chain->frame_latency_event)))
          {
-             WARN("Failed to create frame latency semaphore, hr %#x.\n", hr);
+             WARN("Failed to create frame latency semaphore, hr %#x.\n", (int)hr);
 -- 
 2.54.0 (Apple Git-157)
 
