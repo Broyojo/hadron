@@ -29,12 +29,12 @@
 #                                                before mtld3d was installed
 #   $DIST/lib/hadron/d3d9/mtld3d.conf, LICENSE
 #
-# Toolchain: rustup stable (1.98+) with the i686/aarch64/arm64ec windows-msvc targets
-# (added automatically), Homebrew lld-link >= 23 (ARM64X link), llvm-mingw (ARM64/ARM64EC
-# CRT), and the MSVC CRT + Windows SDK headers/import libs for the i686 link, splatted by
-# `xwin` into toolchains/xwin. Downloading those means accepting Microsoft's license for
-# them, so the first run needs MTLD3D_ACCEPT_MSVC_LICENSE=1 (nothing from them is
-# redistributed beyond what the linker puts into the DLLs).
+# Toolchain: rustup's Rust $RUST (mtld3d's crates name their minimum) with the
+# i686/aarch64/arm64ec windows-msvc targets (added automatically), Homebrew lld-link >= 23
+# (ARM64X link), llvm-mingw (ARM64/ARM64EC CRT), and the MSVC CRT + Windows SDK headers/import
+# libs for the i686 link, splatted by `xwin` into toolchains/xwin. Downloading those means
+# accepting Microsoft's license for them, so the first run needs MTLD3D_ACCEPT_MSVC_LICENSE=1
+# (nothing from them is redistributed beyond what the linker puts into the DLLs).
 #
 # Usage: scripts/build-mtld3d.sh [--dev] [--no-install]
 #   MTLD3D_PROFILE=release for the upstream debug-assertion profile (default production).
@@ -55,7 +55,9 @@ MINGW="$ROOT/toolchains/llvm-mingw"
 XWIN="$ROOT/toolchains/xwin"
 XWIN_TOOL="$ROOT/toolchains/xwin-tool/bin/xwin"
 LLD_LINK="$BREW/opt/lld/bin/lld-link"
-RUST=stable
+# A fixed version rather than `stable`, so that a build doesn't depend on when rustup last updated;
+# raise it when mtld3d's crates ask for a newer one (0.15 needs 1.99).
+RUST=1.99.1
 PROFILE="${MTLD3D_PROFILE:-production}"
 if [[ $variant == dev ]]; then
     WINE_BUILD="$BUILD/wine-dev" PREFIX="$ROOT/dist-dev" OUT="$BUILD/mtld3d-dev"
@@ -166,8 +168,11 @@ arm64x_link mtld3d "$MTLD3D_SRC/windows/shim/mtld3d.def"
 arm64x_link d3d9 "$MTLD3D_SRC/windows/d3d9/d3d9.def"
 
 log "building mtld3d.so for aarch64-apple-darwin ($PROFILE)"
+# The unix crate is a library (upstream builds a native d3d9 from it too); mtld3d.so is that
+# library linked as a dylib, named as upstream's `make unix-arm64` names it.
 cd "$MTLD3D_SRC/unix"
-CARGO_TARGET_DIR="$OUT/unix" cargo +$RUST build --profile "$PROFILE" --target aarch64-apple-darwin
+CARGO_TARGET_DIR="$OUT/unix" cargo +$RUST rustc --profile "$PROFILE" --target aarch64-apple-darwin \
+    -p mtld3d-unix --crate-type cdylib -- -C link-arg=-Wl,-install_name,@rpath/mtld3d.so
 OUT_unix="$OUT/unix/aarch64-apple-darwin/$PROFILE"
 cp -c "$OUT_unix/libmtld3d_unix.dylib" "$OUT_unix/mtld3d.so"
 
