@@ -767,6 +767,9 @@ not see those writes here. Not verified. The next experiment is the same `jjs` t
 `FEX_SMCCHECKS=full`, and with `FEX_DISKCACHE=0`; `scripts/wine-run` passes only `FEX_DISKCACHE`
 on, so run `dist/bin/wine` with its environment by hand.
 
+FEX-2611.1 (#67) keeps a guest load whose value is unused, which C1's null checks rely on: the
+likeliest cause so far. Repeat the `jjs` test, and the game's own `java.exe`, on it first.
+
 ## Wine: native host mappings stall thread creation on macOS (fixed, #28)
 
 Astroneer froze for 2.7–2.9 seconds on mission completion on an Apple M5 Max with
@@ -2073,6 +2076,47 @@ virtual visible rect's, in `get_surface_rect`). Whether such a window reaches th
 fullscreen at all is unchecked. In the GDI-only test the window's last pixel row is off-colour at the screen's
 shape, before and after: win32u's scaled surface, not the letterbox.
 
+## FEX moved to FEX-2611.1 (#67)
+
+FEX moved from `0df84d384` (2026-09-28) to the FEX-2611.1 release (`4f9c1f1e3`, 2026-11-11),
+which is FEX-2611 with the CPUID crash fix (FEX 0006 before) and the forced-assert fix
+(`cf2f831ad`: a FEX assert now ends the process with 0x42 instead of faulting on). One upstream
+commit from after the release is on top: `bfad5d692`, without which 2611 decodes RDPKRU and
+WRPKRU as SERIALIZE. Hadron's five patches rebased with two conflicts, both where upstream's new
+`CheckSupportsTPIDRRO_CPU` unix call sits in the same places as ours (its `PR_GET_TPIDRRO_CPU`
+define, the function enum, `__wine_unix_call_funcs`); ours follow it.
+
+What it changes for Hadron, checked with a test program in x86-64 and i386 against the old
+build (same prefix setup, `FEX_DISKCACHE=1`):
+
+- **HotSpot's null checks.** `4e1ad46b1` keeps a guest load whose value is unused. HotSpot's C1
+  checks for null with `cmp reg, [obj]` whose flags the next instruction overwrites, and relies
+  on the access violation. The old build dropped the load and no exception came; the new one
+  raises it. This may be #27: not yet tried with a JRE.
+- **SERIALIZE** is now reported (CPUID 7 EDX bit 14) and runs; RDPKRU and WRPKRU still raise
+  illegal instruction, as before.
+- **CLFLUSH** now becomes `DC CIVAC` on Wine (`7d0cf9b16` turned an inverted check around); it
+  ran without a fault on macOS, as did CLFLUSHOPT.
+- **TPIDRRO.** FEX now asks the unix side whether `TPIDRRO_EL0` holds the CPU number, to offer
+  RDTSCP and RDPID. Hadron's `prctl` stub (FEX 0001) answers no, so both stay hidden, as before.
+- **Disk cache** format 28 to 44: each game's cache is rebuilt once.
+- **Unwind information.** `ef006bdb1` builds the DLLs with `-fno-asynchronous-unwind-tables`
+  (a clash with `preserve_all` under MinGW). `libwow64fex.dll` keeps 2304 of 4015
+  `RUNTIME_FUNCTION`s (`llvm-readobj --unwind`; `llvm-objdump --unwind-info` reads only x86-64).
+  The entry points in `Source/Windows` keep theirs (`BTCpuSimulate`, `ProcessInit`,
+  `ResetToConsistentState`, the memory notifications); FEXCore's internals lose them (the JIT,
+  `ExitFunctionLink`, `InvalidateRange`, `HandleUnalignedAccess`). Wine's unwinder takes such a
+  function for a leaf, so a backtrace through it, or an exception raised inside it, unwinds
+  wrongly. Guest exceptions are not affected: they are raised from the context FEX rebuilds. Keep
+  it in mind when reading a FEX crash, as in #53.
+- **Build.** FEX's Windows `FEXOfflineCompiler` now links FEX's unix-call code through the
+  TPIDRRO check, and with it FEX 0005's `AllocateJIT`, whose `VirtualAlloc2` only the DLLs'
+  own Windows API layer provides: the link failed. `AllocateJIT` now calls
+  `NtAllocateVirtualMemoryEx` itself, with the same address requirement for WoW64.
+
+Found along the way, the same in both builds: an integer division by zero raises no exception
+under FEX (`div` by a zero register returns), where Windows raises
+`EXCEPTION_INT_DIVIDE_BY_ZERO`. Open.
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
 Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play
