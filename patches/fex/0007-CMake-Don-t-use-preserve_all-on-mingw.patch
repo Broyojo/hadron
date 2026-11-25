@@ -1,0 +1,49 @@
+From 66ccd067f2d3fea3bf36f89404c45eb8a63eb53c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 25 Nov 2026 15:51:15 -0500
+Subject: [PATCH] CMake: Don't use preserve_all on mingw
+
+Clang 23.1 still miscompiles preserve_all functions for Windows on Arm.
+The frame lowering can place a spill slot over the save slot of a
+callee-saved register, so the function returns with that register
+holding the spilled value. In the ARM64EC build, the F80 handlers for
+FSIN, FCOS, FPTAN, F2XM1 and FPATAN save x27 (RBX) at [sp, #16] and
+then spill the CpuStateFrame pointer to the same slot; FYL2X does the
+same to x19 (R12). The guest gets the frame pointer back in RBX or R12,
+and its next store through that register overwrites FEX's thread state.
+
+Treat preserve_all as unavailable on mingw again, as before the clang
+version check, which also brings the asynchronous unwind tables back.
+---
+ CMakeLists.txt | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 89765883ff..cfc8d9754d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -255,16 +255,15 @@ check_cxx_source_compiles(
+ unset(CMAKE_REQUIRED_FLAGS)
+ if (HAS_CLANG_PRESERVE_ALL)
+   message(STATUS "Clang version ${CMAKE_CXX_COMPILER_VERSION}")
+-  set(CLANG_MINIMUM_VERSION 22.1)
+-  if (MINGW AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS ${CLANG_MINIMUM_VERSION})
++  if (MINGW)
++    # Clang 23.1 still miscompiles preserve_all functions for Windows on Arm: the frame lowering can
++    # place a spill slot over the save slot of a callee-saved register, so the function returns with
++    # that register holding the spilled value. The x87 fallbacks (FSIN, FCOS, FPTAN, F2XM1, FPATAN,
++    # FYL2X) returned with the guest's RBX or R12 replaced by the CpuStateFrame pointer.
+     message(STATUS "Ignoring broken clang::preserve_all support")
+     set(HAS_CLANG_PRESERVE_ALL FALSE)
+   else()
+     message(STATUS "Has clang::preserve_all")
+-    if (MINGW)
+-      message(STATUS "Disabling asynchronous-unwind-tables due to bug with preserve_all and mingw")
+-      add_compile_options(-fno-asynchronous-unwind-tables)
+-    endif()
+   endif()
+ endif()
+ 
+-- 
+2.54.0 (Apple Git-157)
+
