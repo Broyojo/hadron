@@ -1436,7 +1436,7 @@ The Paradox Launcher's GPU process died creating a compute pipeline whose receiv
 0xbaadf00dbaadf00d, Wine's fill for uninitialized heap memory. `ClearUAV`'s constructor compiles
 its pipelines through `ArgumentEncodingContext::device_`, which was declared, and so initialized,
 after it. Upstream DXMT fixed the order in fb4515681d (2026-09-30), after our pin; DXMT patch
-0003 is that commit, to drop when the pin moves past it. Found by Lennard Zehner (#80).
+0003 was that commit until the pin moved past it (#68). Found by Lennard Zehner (#80).
 
 ## Writable shared sections on 16 KB pages (fixed, #43)
 
@@ -2229,3 +2229,27 @@ in the test; whether that is the game's hitch was not measured.
 Seen while testing: about one run in four of the test hung at process exit, after `MFShutdown`,
 with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
 `TerminateProcess`. Not looked into.
+
+## DXMT moved to upstream main; its geometry shaders drop strips restarted at odd positions (open, #68)
+
+The DXMT pin moved from e86484e to upstream main, 25ea28f (2026-11-23), 163 commits. Eleven of
+the thirteen patches were upstream commits and are gone; Hadron's own two (display sync, and
+handing other devices' swapchains to DXVK's DXGI) apply unchanged. About 120 of the commits are
+DXIL and Direct3D 12 work, built only with `enable_d3d12`, which stays off. The risk is a
+refactor of the DXBC converter (`IOHelper`, 4b255b7, and `VertexPuller`, 5c80192, the code that
+fetches vertex attributes in the shader). Two tests compare it with the old build, both run as
+x86_64 and as i686 programs: `tests/win/d3d11vfmt.c` reads back what 43 vertex formats, a
+per-instance step rate, a start instance and a base vertex give, and `tests/win/d3d11gs.c` draws
+points and an indexed strip through geometry shaders. Both printed the same numbers with either
+build, and nothing under Metal API validation. `d3d11tri`, DXMT's own cube and Blinn-Phong
+tests and `d3d11fs` (exclusive fullscreen at 1280×720) looked and reported the same, at the
+display's 120 Hz.
+
+Both builds share two gaps the tests found. A strip restarted by a cut index through a geometry
+shader: DXMT's geometry stage numbers a strip's triangles by their position in the index buffer
+(`dxbc_converter_gs.cpp`, whose comment says restarts "can be broken"), so a triangle after a cut
+at an odd position is wound the wrong way and culled (it is drawn with culling off), and
+`SV_PrimitiveID` after a cut counts positions, not primitives (5 instead of 2 in the test).
+Without a geometry shader the strip is right. And `CreateInputLayout` refuses
+`R10G10B10A2_UINT`, a format Direct3D 11 requires for vertex buffers: it has no attribute format
+in `dxmt_format.cpp`, though the vertex puller could fetch it. Neither has been seen in a game.
