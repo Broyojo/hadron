@@ -1,4 +1,4 @@
-From 844701bf7a0319ead157c0a1e7a86d9f999f3471 Mon Sep 17 00:00:00 2001
+From b1d61fc738678806a3ad9480bc7b1a80ec6e3c2f Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 18:58:19 -0400
 Subject: [PATCH] FEXCore: Use 64K guard regions for JIT buffers.
@@ -19,10 +19,10 @@ host pages.
  6 files changed, 16 insertions(+), 13 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-index ef7e33299..4d084df4a 100644
+index 435afed5ef..640bb6d696 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-@@ -913,14 +913,16 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -889,14 +889,16 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
    CodeData.EntryPoints.clear();
  
    // Fairly excessive buffer range to make sure we don't overflow
@@ -43,7 +43,7 @@ index ef7e33299..4d084df4a 100644
    SetBuffer(TempCodeBuffer, UsableBufferRange);
  
 diff --git a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
-index 69e410c1f..bdcfd22a8 100644
+index 69e410c1f7..bdcfd22a85 100644
 --- a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
 +++ b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
 @@ -405,7 +405,7 @@ private:
@@ -67,7 +67,7 @@ index 69e410c1f..bdcfd22a8 100644
        LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
      }
 diff --git a/FEXCore/include/FEXCore/Utils/TypeDefines.h b/FEXCore/include/FEXCore/Utils/TypeDefines.h
-index ec03ac6cd..9162f9d86 100644
+index ec03ac6cd3..9162f9d862 100644
 --- a/FEXCore/include/FEXCore/Utils/TypeDefines.h
 +++ b/FEXCore/include/FEXCore/Utils/TypeDefines.h
 @@ -7,6 +7,10 @@ namespace FEXCore::Utils {
@@ -82,10 +82,10 @@ index ec03ac6cd..9162f9d86 100644
  constexpr size_t FEX_PAGE_MASK = ~(FEX_PAGE_SIZE - 1);
  } // namespace FEXCore::Utils
 diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
-index 6d6c899f7..724821768 100644
+index b4c7b24b37..8c4d8be5c0 100644
 --- a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
 +++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
-@@ -578,7 +578,7 @@ bool SignalDelegator::HandleFrontendSIGSEGV(FEXCore::Core::InternalThreadState*
+@@ -592,7 +592,7 @@ bool SignalDelegator::HandleFrontendSIGSEGV(FEXCore::Core::InternalThreadState*
  #ifdef ARCHITECTURE_arm64
    if (Signal == SIGSEGV && SigInfo.si_code == SEGV_ACCERR && Thread->JITGuardPage &&
        SigInfo.si_addr >= reinterpret_cast<void*>(Thread->JITGuardPage) &&
@@ -95,7 +95,7 @@ index 6d6c899f7..724821768 100644
                                                      ArchHelpers::Context::GetArmGPRs(UContext), ArchHelpers::Context::GetArmFPRs(UContext),
                                                      ArchHelpers::Context::GetArmPc(UContext));
 diff --git a/Source/Windows/Common/CallRetStack.h b/Source/Windows/Common/CallRetStack.h
-index c7c1fb01e..ece1b5e05 100644
+index c7c1fb01ed..ece1b5e053 100644
 --- a/Source/Windows/Common/CallRetStack.h
 +++ b/Source/Windows/Common/CallRetStack.h
 @@ -7,10 +7,7 @@
@@ -111,7 +111,7 @@ index c7c1fb01e..ece1b5e05 100644
  struct CallRetStackInfo {
    uint64_t AllocationBase;
 diff --git a/Source/Windows/Common/JITGuardPage.h b/Source/Windows/Common/JITGuardPage.h
-index 007d49892..36c4d35dd 100644
+index 007d498925..36c4d35dd0 100644
 --- a/Source/Windows/Common/JITGuardPage.h
 +++ b/Source/Windows/Common/JITGuardPage.h
 @@ -5,13 +5,13 @@

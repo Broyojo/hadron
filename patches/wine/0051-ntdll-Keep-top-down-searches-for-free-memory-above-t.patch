@@ -1,0 +1,31 @@
+From b4b7bf0e827e8f0ca52d0edb08ffb5be59cee7d8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 23 Nov 2026 12:47:23 -0500
+Subject: [PATCH] ntdll: Keep top-down searches for free memory above the lower
+ limit.
+
+alloc_free_area() searched each free area from the top of the range
+down to the area's own start, which for the lowest one may be below the
+lower limit: a top-down request bounded below, such as VirtualAlloc2()
+with a LowestStartingAddress, got memory below that address when the
+space above it was taken by the host. Start the search no lower than
+the limit, as the bottom-up search does.
+---
+ dlls/ntdll/unix/virtual.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 9eec25b5fad..9a774baea73 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -1453,6 +1453,7 @@ static void *alloc_free_area( void *limit_low, void *limit_high, size_t size, in
+         {
+             if (mem_area_state( area ) != AREA_FREE) continue;
+             start = ROUND_ADDR( (char *)mem_area_base( area ) + align_mask, align_mask );
++            if (start < limit_low) start = limit_low;
+             if (start >= end || (char *)end - (char *)start < size) continue;
+             if ((ptr = map_free_area( start, end, size, top_down, unix_prot, align_mask ))) return ptr;
+         }
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,4 +1,4 @@
-From 2408724ab2531823aa618285ec92a97bda1c4c39 Mon Sep 17 00:00:00 2001
+From 2542fb956efdca873f8714d1a53db022ff550277 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 1 Oct 2026 13:09:10 -0400
 Subject: [PATCH] ntdll: Report the ARM64 ID registers on macOS.
@@ -22,10 +22,10 @@ Claude-Session: https://claude.ai/code/session_01KCKKoKPBaWBVBojHFrLgQ9
  1 file changed, 84 insertions(+)
 
 diff --git a/dlls/ntdll/unix/system.c b/dlls/ntdll/unix/system.c
-index aaae9a2fd8..bac2d5d132 100644
+index 83084b8929b..135282fa3c7 100644
 --- a/dlls/ntdll/unix/system.c
 +++ b/dlls/ntdll/unix/system.c
-@@ -2101,6 +2101,90 @@ static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs
+@@ -2121,6 +2121,90 @@ static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs
      return regidx;
  }
  

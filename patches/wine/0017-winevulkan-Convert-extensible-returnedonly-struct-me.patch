@@ -1,4 +1,4 @@
-From a91d789e893c694f08e651d901c69b92cb8c0cd2 Mon Sep 17 00:00:00 2001
+From 0f4e72e76653488e3fb9f94f958bb7a2110675de Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 14:16:21 -0400
 Subject: [PATCH] winevulkan: Convert extensible returnedonly struct members on
@@ -16,7 +16,7 @@ exposing maintenance7, such as Mesa's KosmicKrisp.
  2 files changed, 14 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
-index 4b10dc5686..8d3f4926c0 100755
+index 71a921ae835..f57005f18ba 100755
 --- a/dlls/winevulkan/make_vulkan
 +++ b/dlls/winevulkan/make_vulkan
 @@ -1437,9 +1437,13 @@ class VkMember(VkVariable):
@@ -47,10 +47,10 @@ index 4b10dc5686..8d3f4926c0 100755
          f.write("#endif\n")
  
 diff --git a/dlls/winevulkan/vulkan_thunks.c b/dlls/winevulkan/vulkan_thunks.c
-index 065d57566f..d0bf52a1f7 100644
+index 5703953894c..650e4b273bd 100644
 --- a/dlls/winevulkan/vulkan_thunks.c
 +++ b/dlls/winevulkan/vulkan_thunks.c
-@@ -11131,8 +11131,10 @@ static uint64_t wine_vk_unwrap_handle(uint32_t type, uint64_t handle)
+@@ -11140,8 +11140,10 @@ static uint64_t wine_vk_unwrap_handle(uint32_t type, uint64_t handle)
      }
  }
  
@@ -61,7 +61,7 @@ index 065d57566f..d0bf52a1f7 100644
  static void convert_VkPhysicalDeviceProperties2_host_to_win64(const VkPhysicalDeviceProperties2 *in, VkPhysicalDeviceProperties2 *out);
  #endif
  static void convert_VkAcquireNextImageInfoKHR_win32_to_unwrapped_host(const VkAcquireNextImageInfoKHR32 *in, VkAcquireNextImageInfoKHR *out)
-@@ -40373,8 +40375,10 @@ static void convert_VkPhysicalDeviceLayeredApiPropertiesKHR_win64_to_host(struct
+@@ -40382,8 +40384,10 @@ static void convert_VkPhysicalDeviceLayeredApiPropertiesKHR_win64_to_host(struct
          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LAYERED_API_VULKAN_PROPERTIES_KHR:
          {
              VkPhysicalDeviceLayeredApiVulkanPropertiesKHR *out_ext = conversion_context_alloc(ctx, sizeof(*out_ext));
@@ -72,7 +72,7 @@ index 065d57566f..d0bf52a1f7 100644
              out_header->pNext = (void *)out_ext;
              out_header = (void *)out_ext;
              break;
-@@ -43182,8 +43186,10 @@ static void convert_VkPhysicalDeviceLayeredApiPropertiesKHR_win32_to_host(struct
+@@ -43211,8 +43215,10 @@ static void convert_VkPhysicalDeviceLayeredApiPropertiesKHR_win32_to_host(struct
          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LAYERED_API_VULKAN_PROPERTIES_KHR:
          {
              VkPhysicalDeviceLayeredApiVulkanPropertiesKHR *out_ext = conversion_context_alloc(ctx, sizeof(*out_ext));

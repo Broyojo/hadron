@@ -1,4 +1,4 @@
-From d86e5d15fe8fef6b03889dbcac73d46b015d92cc Mon Sep 17 00:00:00 2001
+From c1cdd24842a0202660adc590fbf898b75d19a32d Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Wed, 30 Sep 2026 15:58:08 -0400
 Subject: [PATCH] winemac.drv: Scroll like a native Mac application.
@@ -22,7 +22,7 @@ so a launcher can give smooth scrolling to applications that handle it.
  3 files changed, 48 insertions(+), 15 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
-index 34d550d943..4dafa80651 100644
+index 9cb12c0d092..7e70d353663 100644
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
 @@ -1678,10 +1678,18 @@ - (void) handleScrollWheel:(NSEvent*)theEvent
@@ -104,10 +104,10 @@ index 34d550d943..4dafa80651 100644
                  if (use_precise_scrolling)
                  {
 diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
-index 3038ac9325..8f2e9664eb 100644
+index 78b2164795b..7ecdc8101f7 100644
 --- a/dlls/winemac.drv/macdrv_cocoa.h
 +++ b/dlls/winemac.drv/macdrv_cocoa.h
-@@ -131,6 +131,8 @@
+@@ -113,6 +113,8 @@
  extern bool use_confinement_cursor_clipping;
  extern bool cursor_clipping_locks_windows;
  extern bool use_precise_scrolling;
@@ -117,7 +117,7 @@ index 3038ac9325..8f2e9664eb 100644
  extern CFDictionaryRef localized_strings;
  extern bool retina_enabled;  /* Whether Retina mode is enabled via registry setting. */
 diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
-index b50068bc50..ffe93357c7 100644
+index cc3d3b3fc8d..1552daa2dc9 100644
 --- a/dlls/winemac.drv/macdrv_main.c
 +++ b/dlls/winemac.drv/macdrv_main.c
 @@ -49,7 +49,11 @@ bool allow_software_rendering = false;

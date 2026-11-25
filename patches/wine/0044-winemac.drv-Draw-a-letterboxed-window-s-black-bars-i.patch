@@ -1,0 +1,229 @@
+From 391f457c28fdb9cd2b705a019670c15d7fc600d8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 16 Nov 2026 19:29:20 -0500
+Subject: [PATCH] winemac.drv: Draw a letterboxed window's black bars in its
+ own coordinates.
+
+A fullscreen window at a display mode of another shape than the screen's,
+1280x720 on a 3024x1964 panel, covers the whole screen, and win32u maps the
+mode to the window's rect within it, 3024x1701 pixels 132 rows down. Black
+bars are to cover the rest, but they were placed with the window rect as
+it is on the desktop, in pixels, while the bars are in the window's points:
+in Retina mode they came out twice as far from the edge as they should,
+and on any display but the one at the desktop's origin they were off by
+its position. They were also upside down, as a shape layer's path does
+not follow the flipped geometry it copied from the content view. The
+1280x720 picture lost its bottom 133 rows under a bar 264 rows tall, and
+the top strip had none.
+
+Give the bars the window rect relative to the window, converted to points,
+and make them plain black layers placed with the content view's own
+conversion to its layer, replaced without implicit animations.
+
+The bars were also never taken down. Whether a window is fullscreen is
+kept in a one-bit field, which was given swp_flags & WINE_SWP_FULLSCREEN,
+the flags' top bit, and so always held 0: leaving fullscreen did not look
+like a change. With the bars upside down the one left behind was below a
+window back from fullscreen; with them the right way up it covered the
+window's top. Store the flag as a boolean.
+---
+ dlls/winemac.drv/cocoa_window.h |  2 +-
+ dlls/winemac.drv/cocoa_window.m | 93 +++++++++++++++++++--------------
+ dlls/winemac.drv/window.c       | 14 ++++-
+ 3 files changed, 66 insertions(+), 43 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_window.h b/dlls/winemac.drv/cocoa_window.h
+index 7ee5e580e89..2418aaf9c62 100644
+--- a/dlls/winemac.drv/cocoa_window.h
++++ b/dlls/winemac.drv/cocoa_window.h
+@@ -81,7 +81,7 @@ @interface WineWindow : NSPanel <NSWindowDelegate>
+     BOOL ignore_windowResize;
+     BOOL fakingClose;
+ 
+-    CAShapeLayer* contentViewMaskLayer;
++    NSMutableArray<CALayer*>* contentViewMaskLayers;
+ }
+ 
+ @property (retain, readonly, nonatomic) WineEventQueue* queue;
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 2ea3550035b..76dd41408ad 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -295,7 +295,7 @@ @interface WineWindow ()
+ 
+ @property (readonly, copy, nonatomic) NSArray* childWineWindows;
+ 
+-@property (retain, nonatomic) CAShapeLayer* contentViewMaskLayer;
++@property (retain, nonatomic) NSMutableArray<CALayer*>* contentViewMaskLayers;
+ 
+     - (void) setShape:(CGPathRef)newShape;
+ 
+@@ -872,7 +872,7 @@ @implementation WineWindow
+     @synthesize shapeChangedSinceLastDraw;
+     @synthesize usePerPixelAlpha;
+     @synthesize ime_update, commandDone;
+-    @synthesize contentViewMaskLayer;
++    @synthesize contentViewMaskLayers;
+ 
+     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
+                                  windowFrame:(NSRect)window_frame
+@@ -959,7 +959,7 @@ - (void) dealloc
+         [queue release];
+         [latentChildWindows release];
+         [latentParentWindow release];
+-        [contentViewMaskLayer release];
++        [contentViewMaskLayers release];
+         [super dealloc];
+     }
+ 
+@@ -2510,49 +2510,58 @@ - (void) setRetinaMode:(BOOL)mode
+ 
+     - (void) setMask:(CGRect)rect
+     {
+-        /* Draw black bars to cover every part of the window except for 'rect'.
+-         * Intended for use on a window covering the full screen.
++        /* Show the window's picture only in 'rect', in the content view's
++         * coordinates: a fullscreen window at a display mode of another shape
++         * than the screen's covers the whole screen, and win32u maps the mode
++         * to 'rect' within it. Black bars cover the rest, above everything
++         * the window shows, as a display shows a scaled mode on Windows.
+          */
+-        if (self.contentViewMaskLayer)
+-        {
+-            [self.contentViewMaskLayer removeFromSuperlayer];
+-            self.contentViewMaskLayer = nil;
+-        }
++        WineContentView *view = [self contentView];
++        CGRect bounds = NSRectToCGRect([view bounds]), bars[4];
++        int count = 0;
+ 
+-        if (CGRectIsEmpty(rect))
+-            return;
++        rect = CGRectIntersection(rect, bounds);
+ 
+-        CAShapeLayer *shapeLayer = [CAShapeLayer layer];
+-        shapeLayer.bounds = self.contentView.layer.bounds;
+-        shapeLayer.position = self.contentView.layer.position;
+-        shapeLayer.geometryFlipped = self.contentView.layer.geometryFlipped;
+-        shapeLayer.anchorPoint = self.contentView.layer.anchorPoint;
+-        shapeLayer.fillColor = CGColorGetConstantColor(kCGColorBlack);
++        /* Replace the bars at once, without Core Animation's implicit fades. */
++        [CATransaction begin];
++        [CATransaction setDisableActions:YES];
+ 
+-        CGMutablePathRef path = CGPathCreateMutable();
+-        /* left/right */
+-        if (rect.origin.x > 0.0)
+-            CGPathAddRect(path, NULL, CGRectMake(0, 0, rect.origin.x, shapeLayer.bounds.size.height));
+-        if (rect.origin.x + rect.size.width < shapeLayer.bounds.size.width)
+-            CGPathAddRect(path, NULL, CGRectMake(rect.origin.x + rect.size.width,
+-                                                 0,
+-                                                 shapeLayer.bounds.size.width - (rect.origin.x + rect.size.width),
+-                                                 shapeLayer.bounds.size.height));
++        for (CALayer *bar in self.contentViewMaskLayers)
++            [bar removeFromSuperlayer];
++        self.contentViewMaskLayers = nil;
+ 
+-        /* top/bottom */
+-        if (rect.origin.y > 0.0)
+-            CGPathAddRect(path, NULL, CGRectMake(0, 0, shapeLayer.bounds.size.width, rect.origin.y));
+-        if (rect.origin.y + rect.size.height < shapeLayer.bounds.size.height)
+-            CGPathAddRect(path, NULL, CGRectMake(0,
+-                                                 rect.origin.y + rect.size.height,
+-                                                 shapeLayer.bounds.size.width,
+-                                                 shapeLayer.bounds.size.height - (rect.origin.y + rect.size.height)));
++        /* The view is flipped: y grows downward from its top. */
++        if (!CGRectIsEmpty(rect))
++        {
++            if (CGRectGetMinY(rect) > CGRectGetMinY(bounds))
++                bars[count++] = CGRectMake(bounds.origin.x, bounds.origin.y, bounds.size.width,
++                                           CGRectGetMinY(rect) - CGRectGetMinY(bounds));
++            if (CGRectGetMaxY(rect) < CGRectGetMaxY(bounds))
++                bars[count++] = CGRectMake(bounds.origin.x, CGRectGetMaxY(rect), bounds.size.width,
++                                           CGRectGetMaxY(bounds) - CGRectGetMaxY(rect));
++            if (CGRectGetMinX(rect) > CGRectGetMinX(bounds))
++                bars[count++] = CGRectMake(bounds.origin.x, rect.origin.y,
++                                           CGRectGetMinX(rect) - CGRectGetMinX(bounds), rect.size.height);
++            if (CGRectGetMaxX(rect) < CGRectGetMaxX(bounds))
++                bars[count++] = CGRectMake(CGRectGetMaxX(rect), rect.origin.y,
++                                           CGRectGetMaxX(bounds) - CGRectGetMaxX(rect), rect.size.height);
++        }
+ 
+-        shapeLayer.path = path;
+-        CGPathRelease(path);
++        if (count)
++            self.contentViewMaskLayers = [NSMutableArray arrayWithCapacity:count];
++        for (int i = 0; i < count; i++)
++        {
++            /* Plain layers placed by frame, converted from the view's
++               coordinates, which the view's flipped layer keeps; a shape
++               layer's path, which the mask used, is drawn the other way up. */
++            CALayer *bar = [CALayer layer];
++            bar.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
++            bar.frame = NSRectToCGRect([view convertRectToLayer:NSRectFromCGRect(bars[i])]);
++            [view.layer addSublayer:bar];
++            [self.contentViewMaskLayers addObject:bar];
++        }
+ 
+-        [self.contentView.layer addSublayer:shapeLayer];
+-        self.contentViewMaskLayer = shapeLayer;
++        [CATransaction commit];
+     }
+ 
+ 
+@@ -3369,13 +3378,17 @@ void macdrv_window_use_per_pixel_alpha(WineWindow *window, bool use_per_pixel_al
+ 
+ /***********************************************************************
+  *              macdrv_set_window_mask
++ *
++ * Show a window's picture only in a rect, relative to the window's top-left
++ * corner in Win32 coordinates, and black elsewhere. An empty rect shows all
++ * of it.
+  */
+ void macdrv_set_window_mask(WineWindow *window, CGRect rect)
+ {
+ @autoreleasepool
+ {
+     OnMainThread(^{
+-        [window setMask:rect];
++        [window setMask:cgrect_mac_from_win(rect)];
+     });
+ }
+ }
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index 8fb033079e8..ca0acffa3fe 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -1657,7 +1657,7 @@ BOOL macdrv_GetWindowStyleMasks(HWND hwnd, UINT style, UINT ex_style, UINT *styl
+ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT swp_flags,
+                              const struct window_rects *new_rects, struct window_surface *surface)
+ {
+-    BOOL fullscreen = swp_flags & WINE_SWP_FULLSCREEN;
++    BOOL fullscreen = !!(swp_flags & WINE_SWP_FULLSCREEN);
+     struct macdrv_thread_data *thread_data;
+     struct macdrv_win_data *data;
+     unsigned int new_style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
+@@ -1706,9 +1706,19 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
+         }
+     }
+ 
++    /* A fullscreen window at a display mode of another shape than the screen's
++     * covers the whole screen (its visible rect), and win32u maps the mode to
++     * its window rect within it, where the window surface and client surfaces
++     * go. The rest is black, as a display shows a scaled mode on Windows. */
+     if (fullscreen || fullscreen != data->fullscreen)
+     {
+-        CGRect rect = (fullscreen && !EqualRect(&data->rects.window, &data->rects.visible)) ? cgrect_from_rect(data->rects.window) : CGRectZero;
++        CGRect rect = CGRectZero;
++        if (fullscreen && !EqualRect(&data->rects.window, &data->rects.visible))
++        {
++            RECT window = data->rects.window;
++            OffsetRect(&window, -data->rects.visible.left, -data->rects.visible.top);
++            rect = cgrect_from_rect(window);
++        }
+         macdrv_set_window_mask(data->cocoa_window, rect);
+         data->fullscreen = fullscreen;
+     }
+-- 
+2.54.0 (Apple Git-157)
+

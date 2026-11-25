@@ -1,4 +1,4 @@
-From 47b648c88affefc05dc7c534b81ff38fb4dc766b Mon Sep 17 00:00:00 2001
+From 70e889a78c6b5de965f91a0a3109ce49176da3aa Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Tue, 29 Sep 2026 21:27:54 -0400
 Subject: [PATCH] Windows: Use per-thread W^X JIT code buffers on macOS.
@@ -26,19 +26,19 @@ and VirtualAllocJIT allocates RWX memory as before.
  FEXCore/Source/Utils/Allocator.cpp            |  7 +++
  FEXCore/Source/Utils/ArchHelpers/Arm64.cpp    |  3 ++
  .../include/FEXCore/Utils/AllocatorHooks.h    | 52 +++++++++++++++++++
- Source/Windows/Common/Allocator.cpp           | 19 +++++++
+ Source/Windows/Common/Allocator.cpp           | 38 ++++++++++++++
  Source/Windows/Common/Allocator.h             |  3 ++
  Source/Windows/Common/FEXUnixLib.cpp          | 15 ++++++
  Source/Windows/Common/FEXUnixLib.h            |  7 +++
  Source/Windows/UnixLib/FEXUnixLib.cpp         | 24 +++++++++
  Source/Windows/UnixLib/FEXUnixLib.h           |  7 +++
- 13 files changed, 161 insertions(+), 4 deletions(-)
+ 13 files changed, 180 insertions(+), 4 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
-index a9de6c722..1c7a60c06 100644
+index 87a110c845..a05c9556cb 100644
 --- a/FEXCore/Source/Interface/Core/CodeCache.cpp
 +++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
-@@ -364,7 +364,12 @@ bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const Execut
+@@ -354,7 +354,12 @@ bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const Execut
    // Dump the host code (relocated for position-independent serialization)
    std::span CodeBufferData(reinterpret_cast<std::byte*>(CodeBuffer->GetBufferBase()),
                             reinterpret_cast<std::byte*>(CodeBuffer->GetBufferBase()) + CodeBuffer->AllocatedSpaceUsed());
@@ -52,7 +52,7 @@ index a9de6c722..1c7a60c06 100644
      LOGMAN_THROW_A_FMT(false, "Failed to apply code relocations");
      return false;
    }
-@@ -447,7 +452,10 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
+@@ -437,7 +442,10 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
    NewRelocations.erase(std::remove_if(NewRelocations.begin(), NewRelocations.end(), [](const CPU::Relocation& Reloc) {
      return Reloc.Header.Type != CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL && Reloc.Header.Type != CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE;
    }));
@@ -65,7 +65,7 @@ index a9de6c722..1c7a60c06 100644
    if (NewCodeBuffer->AllocatedSpaceUsed() <= CodeBufferRangeRef.size()) {
      // Reference compilation produced fewer bytes than our cache, so validation is going to fail.
 diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-index 4d084df4a..ff17db5fc 100644
+index 640bb6d696..fb51b14516 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 @@ -25,6 +25,7 @@ $end_info$
@@ -76,7 +76,7 @@ index 4d084df4a..ff17db5fc 100644
  #include <FEXCore/Utils/CompilerDefs.h>
  #include <FEXCore/Utils/EnumUtils.h>
  #include <FEXCore/Utils/LogManager.h>
-@@ -532,6 +533,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
+@@ -506,6 +507,7 @@ void Arm64JITCore::Op_Unhandled(const IR::IROp_Header* IROp, IR::Ref Node) {
    }
  }
  
@@ -84,7 +84,7 @@ index 4d084df4a..ff17db5fc 100644
  static void DirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record, bool Call) {
    uintptr_t JumpThunkStartAddress = reinterpret_cast<uintptr_t>(Record) - 0x10;
    uintptr_t CallerAddress = JumpThunkStartAddress + Record->CallerOffset;
-@@ -605,6 +607,9 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+@@ -579,6 +581,9 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
    // Lock here is necessary to prevent simultaneous linking and delinking
    auto lk = Thread->LookupCache->AcquireWriteLock();
  
@@ -94,7 +94,7 @@ index 4d084df4a..ff17db5fc 100644
    // For non-calls, this would extend into the block's code, however that's fine as an out-of-range adr would never
    // be generated avoiding any false positives.
    uintptr_t KnownCallMarkerAddr = CallerAddress - 0x8;
-@@ -1162,6 +1167,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -1138,6 +1143,7 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
      CodeData.HostCodeOffset = CodeData.BlockBegin - CurrentCodeBuffer->GetBufferBase();
  
      // Copy over CodeBuffer contents
@@ -102,7 +102,7 @@ index 4d084df4a..ff17db5fc 100644
      memcpy(AllocatedInfo.BufferAllocationOffset, TempCodeBuffer, CodeData.Size);
    }
  
-@@ -1207,7 +1213,10 @@ CPUBackend::CompiledCode Arm64JITCore::LoadCachedCode(std::span<const uint8_t> H
+@@ -1183,7 +1189,10 @@ CPUBackend::CompiledCode Arm64JITCore::LoadCachedCode(std::span<const uint8_t> H
    auto AllocatedInfo = AllocateCodeBufferInSharedCache(HostBytes.size());
  
    uint8_t* Dest = AllocatedInfo.BufferAllocationOffset;
@@ -115,7 +115,7 @@ index 4d084df4a..ff17db5fc 100644
  
    CPUBackend::CompiledCode Result;
 diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
-index 391d48560..5c22b3ced 100644
+index 391d48560d..5c22b3ced6 100644
 --- a/FEXCore/Source/Interface/Core/LookupCache.h
 +++ b/FEXCore/Source/Interface/Core/LookupCache.h
 @@ -1,6 +1,7 @@
@@ -136,7 +136,7 @@ index 391d48560..5c22b3ced 100644
      auto lower = CodePages.lower_bound(Start >> 12);
      auto upper = CodePages.upper_bound((Start + Length - 1) >> 12);
 diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
-index eee502364..4d1ecdd2d 100644
+index eee5023649..4d1ecdd2df 100644
 --- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
 +++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
 @@ -18,7 +18,7 @@ static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
@@ -149,10 +149,10 @@ index eee502364..4d1ecdd2d 100644
  
    // Protect the last page of the allocated buffer to trigger SIGSEGV on write access
 diff --git a/FEXCore/Source/Utils/Allocator.cpp b/FEXCore/Source/Utils/Allocator.cpp
-index 3a779abaf..0d83e83cd 100644
+index 519622326e..66c9d9b468 100644
 --- a/FEXCore/Source/Utils/Allocator.cpp
 +++ b/FEXCore/Source/Utils/Allocator.cpp
-@@ -313,6 +313,13 @@ void VirtualTHPNOP(const void* Ptr, size_t Size, THPControl Control) {}
+@@ -393,6 +393,13 @@ void VirtualTHPNOP(const void* Ptr, size_t Size, THPControl Control) {}
  
  VirtualNamePtr VirtualName {VirtualNameNOP};
  VirtualTHPPtr VirtualTHPControl {VirtualTHPNOP};
@@ -167,7 +167,7 @@ index 3a779abaf..0d83e83cd 100644
  void SetupHooks(size_t PageSize, HookPtrs Ptrs) {
    VirtualName = Ptrs.VirtualName;
 diff --git a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
-index 01e5bb22e..939a58712 100644
+index 01e5bb22e9..939a587123 100644
 --- a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
 +++ b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
 @@ -2,6 +2,7 @@
@@ -188,7 +188,7 @@ index 01e5bb22e..939a58712 100644
  
    if ((Instr & LDAXR_MASK) == LDAR_INST ||  // LDAR*
 diff --git a/FEXCore/include/FEXCore/Utils/AllocatorHooks.h b/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
-index c4cadf40a..7bb11bca2 100644
+index c4cadf40aa..7bb11bca26 100644
 --- a/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
 +++ b/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
 @@ -46,6 +46,15 @@ FEX_DEFAULT_VISIBILITY void SetupHooks(size_t PageSize, HookPtrs Ptrs);
@@ -265,10 +265,10 @@ index c4cadf40a..7bb11bca2 100644
    FEXCore::Allocator::munmap(Ptr, Size);
  }
 diff --git a/Source/Windows/Common/Allocator.cpp b/Source/Windows/Common/Allocator.cpp
-index d535bdef7..391a0de77 100644
+index d535bdef7d..4783bb4078 100644
 --- a/Source/Windows/Common/Allocator.cpp
 +++ b/Source/Windows/Common/Allocator.cpp
-@@ -26,4 +26,23 @@ void SetupHooks(HMODULE ntdll) {
+@@ -26,4 +26,42 @@ void SetupHooks(HMODULE ntdll) {
    GetSystemInfo(&system_info);
    FEXCore::Allocator::SetupHooks(system_info.dwPageSize, Ptrs);
  }
@@ -278,14 +278,33 @@ index d535bdef7..391a0de77 100644
 +// flipping page protections on faults. Every write must be inside a FEXCore::Allocator::ScopedJITWrite.
 +constexpr ULONG MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT = 0x80000000;
 +
++// Calls ntdll directly: CommonWindows is also linked into FEXOfflineCompiler, an ordinary executable
++// without the modules' VirtualAlloc2, and kernel32 doesn't export it.
 +static void* AllocateJIT(size_t Size) {
-+  MEM_EXTENDED_PARAMETER Parameter {};
-+  Parameter.Type = MemExtendedParameterAttributeFlags;
-+  Parameter.ULong64 = MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT;
++  MEM_EXTENDED_PARAMETER Parameters[2] {};
++  ULONG Count = 1;
++  Parameters[0].Type = MemExtendedParameterAttributeFlags;
++  Parameters[0].ULong64 = MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT;
 +#ifdef ARCHITECTURE_arm64ec
-+  Parameter.ULong64 |= MEM_EXTENDED_PARAMETER_EC_CODE;
++  Parameters[0].ULong64 |= MEM_EXTENDED_PARAMETER_EC_CODE;
++#else
++  // Keep the code above the emulated 32-bit address space, as the WOW64 module's VirtualAlloc2 does.
++  SYSTEM_BASIC_INFORMATION Info;
++  MEM_ADDRESS_REQUIREMENTS Requirements {};
++  if (!NtQuerySystemInformation(SystemEmulationBasicInformation, &Info, sizeof(Info), nullptr)) {
++    Requirements.LowestStartingAddress = reinterpret_cast<void*>(Info.HighestUserAddress & ~(Info.AllocationGranularity - 1));
++    Parameters[1].Type = MemExtendedParameterAddressRequirements;
++    Parameters[1].Pointer = &Requirements;
++    Count = 2;
++  }
 +#endif
-+  return ::VirtualAlloc2(nullptr, nullptr, Size, MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN, PAGE_EXECUTE_READWRITE, &Parameter, 1);
++  void* Ptr = nullptr;
++  SIZE_T AllocSize = Size;
++  if (NtAllocateVirtualMemoryEx(NtCurrentProcess(), &Ptr, &AllocSize, MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN, PAGE_EXECUTE_READWRITE,
++                                Parameters, Count)) {
++    return nullptr;
++  }
++  return Ptr;
 +}
 +
 +void EnableJITWriteProtect() {
@@ -293,7 +312,7 @@ index d535bdef7..391a0de77 100644
 +}
  } // namespace FEX::Windows::Allocator
 diff --git a/Source/Windows/Common/Allocator.h b/Source/Windows/Common/Allocator.h
-index 082ebd1cf..2ee2b9ec5 100644
+index 082ebd1cf9..2ee2b9ec55 100644
 --- a/Source/Windows/Common/Allocator.h
 +++ b/Source/Windows/Common/Allocator.h
 @@ -4,4 +4,7 @@
@@ -305,7 +324,7 @@ index 082ebd1cf..2ee2b9ec5 100644
 +void EnableJITWriteProtect();
  }
 diff --git a/Source/Windows/Common/FEXUnixLib.cpp b/Source/Windows/Common/FEXUnixLib.cpp
-index e37807fda..d59f1782f 100644
+index 061431ae96..07bf3b53ad 100644
 --- a/Source/Windows/Common/FEXUnixLib.cpp
 +++ b/Source/Windows/Common/FEXUnixLib.cpp
 @@ -8,6 +8,7 @@
@@ -345,7 +364,7 @@ index e37807fda..d59f1782f 100644
    if (!Available()) {
      return;
 diff --git a/Source/Windows/Common/FEXUnixLib.h b/Source/Windows/Common/FEXUnixLib.h
-index c62a763a8..8a2b2faf6 100644
+index 22ea6b153a..463e4c1db3 100644
 --- a/Source/Windows/Common/FEXUnixLib.h
 +++ b/Source/Windows/Common/FEXUnixLib.h
 @@ -38,6 +38,13 @@ bool TryEnableHardwareTSO();
@@ -363,7 +382,7 @@ index c62a763a8..8a2b2faf6 100644
  
  struct SHMSlotResult {
 diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
-index c6b2e7dc5..632e98a6d 100644
+index 8d0955c9e8..5c92a06a1f 100644
 --- a/Source/Windows/UnixLib/FEXUnixLib.cpp
 +++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
 @@ -12,6 +12,7 @@
@@ -374,10 +393,10 @@ index c6b2e7dc5..632e98a6d 100644
  #endif
  #include <unistd.h>
  
-@@ -215,6 +216,27 @@ static NTSTATUS FEXUnixLib_GetPIDHandler(void* _Args) {
-   Args->Result = ::getpid();
+@@ -226,6 +227,27 @@ static NTSTATUS FEXUnixLib_CheckSupportsTPIDRRO_CPUHandler(void* _Args) {
    return STATUS_SUCCESS;
  }
+ 
 +#ifdef __APPLE__
 +// Wine backs FEX's code buffers with MAP_JIT memory on macOS (MEM_EXTENDED_PARAMETER_WINE_UNIX_JIT),
 +// which is writable or executable per thread. FEX switches the calling thread around code writes.
@@ -402,32 +421,32 @@ index c6b2e7dc5..632e98a6d 100644
  extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
    FEXUnixLib_SetHardwareTSOControlHandler,
    FEXUnixLib_SetKernelUnalignedAtomicControlHandler,
-@@ -224,6 +246,8 @@ extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
-   FEXUnixLib_DeleteSHMStatsFileHandler,
+@@ -236,6 +258,8 @@ extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
    FEXUnixLib_MapFileHandler,
    FEXUnixLib_GetPIDHandler,
+   FEXUnixLib_CheckSupportsTPIDRRO_CPUHandler,
 +  FEXUnixLib_JITWriteProtectSupportedHandler,
 +  FEXUnixLib_JITWriteProtectHandler,
  };
  
  static_assert(sizeof(__wine_unix_call_funcs) / sizeof(__wine_unix_call_funcs[0]) == ToUnderlying(FEXUnixLibFunctions::MAX));
 diff --git a/Source/Windows/UnixLib/FEXUnixLib.h b/Source/Windows/UnixLib/FEXUnixLib.h
-index ed7f18ce6..20e242f4a 100644
+index e24502fe77..cd5b6199e0 100644
 --- a/Source/Windows/UnixLib/FEXUnixLib.h
 +++ b/Source/Windows/UnixLib/FEXUnixLib.h
-@@ -12,6 +12,8 @@ enum class FEXUnixLibFunctions : uint32_t {
-   DeleteSHMStatsFile,
+@@ -13,6 +13,8 @@ enum class FEXUnixLibFunctions : uint32_t {
    MapFile,
    GetPID,
+   CheckSupportsTPIDRRO_CPU,
 +  JITWriteProtectSupported,
 +  JITWriteProtect,
    MAX,
  };
  
-@@ -65,3 +67,8 @@ struct FEXUnixLib_GetPID {
+@@ -71,3 +73,8 @@ struct FEXUnixLib_CheckSupportsTPIDRRO_CPU {
    uint32_t Result;
  };
- static_assert(sizeof(FEXUnixLib_GetPID) == 4);
+ static_assert(sizeof(FEXUnixLib_CheckSupportsTPIDRRO_CPU) == 4);
 +
 +struct FEXUnixLib_JITWriteProtect {
 +  bool Protect;

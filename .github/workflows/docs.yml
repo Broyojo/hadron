@@ -1,0 +1,70 @@
+# Build the user guide (docs/guide, with the VitePress setup in site/) and publish it to GitHub
+# Pages at docs.hadrondb.com. Pull requests that touch it are built, not published.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/guide/**
+      - site/**
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - docs/guide/**
+      - site/**
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # configure-pages reads the Pages settings; it never turns Pages on.
+      pages: read
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # VitePress dates each page from its last commit.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: site/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - run: pnpm install --frozen-lockfile
+      # Fails on a dead link between pages.
+      - run: pnpm build
+      - if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v6
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/.vitepress/dist
+
+  deploy:
+    name: Deploy
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    # One deployment at a time; a newer push does not cancel one that is under way.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write  # deploy-pages proves to Pages that this workflow is the one deploying
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

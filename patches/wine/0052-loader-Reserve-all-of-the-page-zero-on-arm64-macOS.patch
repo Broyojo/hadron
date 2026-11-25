@@ -1,0 +1,95 @@
+From 1d9e4e1e1c0caf03a735a4f12ac9b6719777033c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Tue, 24 Nov 2026 21:00:45 -0500
+Subject: [PATCH] loader: Reserve all of the page zero on arm64 macOS.
+
+With the cross-architecture entitlement the kernel maps the __PAGEZERO,
+apart from its first page, as a replaceable PROT_NONE region. That region
+does not end at 4GB: it reaches up to the loader's image, which the
+kernel slides by a random amount, up to about 80MB, above 4GB. The loader
+replaced only the part below 4GB, and the rest stayed mapped, so nothing
+could be mapped just above 4GB. An x64 executable based at 4GB without
+relocations, such as the infinst.exe of DirectX's redistributable,
+failed with STATUS_CONFLICTING_ADDRESSES after the loader had started
+again 32 times: the range it needs was in the page zero at every start.
+
+Make all of the region, rounded down to 64KB, the low reserved area, and
+leave that part of an executable's range out of the check for whether to
+start again.
+---
+ loader/main.c | 37 ++++++++++++++++++++++++++++---------
+ 1 file changed, 28 insertions(+), 9 deletions(-)
+
+diff --git a/loader/main.c b/loader/main.c
+index 60e3edb459f..848a800769e 100644
+--- a/loader/main.c
++++ b/loader/main.c
+@@ -77,18 +77,37 @@ static void init_reserved_areas(void)
+ /* arm64 macOS normally refuses mappings below 4GB. With the cross-architecture entitlement
+  * the kernel keeps only one hard page of the 4GB __PAGEZERO and maps the rest as a
+  * replaceable PROT_NONE region, which nothing else can have claimed before main() runs.
+- * Turn it into Wine's low reserved area. Without the entitlement the mapping fails and
+- * Wine runs without low memory. */
+-static const struct wine_preload_info low_reserve[] =
++ * The region does not end at 4GB but at the loader's image, which the kernel slides by a
++ * random amount, up to about 80MB, above 4GB. Turn all of it into Wine's low reserved area,
++ * so that an executable based at 4GB, as some are (DirectX's x64 infinst.exe), can be mapped
++ * there. Without the entitlement the mapping fails and Wine runs without low memory. */
++static struct wine_preload_info low_reserve[] =
+ {
+-    { (void *)0x10000, 0x100000000 - 0x10000 },  /* 64KB - 4GB */
+-    { 0, 0 }                                      /* end of list */
++    { (void *)0x10000, 0 },  /* 64KB - the loader's image, set by init_reserved_areas */
++    { 0, 0 }                 /* end of list */
+ };
+ 
+ const __attribute((visibility("default"))) struct wine_preload_info *wine_main_preload_info = NULL;
+ 
++/* the end of the replaceable part of the page zero, rounded down to 64KB; 4GB without it */
++static char *page_zero_end(void)
++{
++    mach_vm_address_t addr = 0x10000;
++    mach_vm_size_t size = 0;
++    vm_region_basic_info_data_64_t info;
++    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
++    mach_port_t object;
++
++    if (mach_vm_region( mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
++                        (vm_region_info_t)&info, &count, &object ) != KERN_SUCCESS ||
++        addr > 0x10000 || addr + size <= 0x100000000ULL)
++        return (char *)0x100000000ULL;
++    return (char *)((addr + size) & ~0xffffULL);
++}
++
+ static void init_reserved_areas(void)
+ {
++    low_reserve[0].size = page_zero_end() - (char *)low_reserve[0].addr;
+     if (mmap( low_reserve[0].addr, low_reserve[0].size, PROT_NONE,
+               MAP_FIXED | MAP_NORESERVE | MAP_PRIVATE | MAP_ANON, -1, 0 ) == low_reserve[0].addr)
+         wine_main_preload_info = low_reserve;
+@@ -279,7 +298,7 @@ static void reexec_while_reserve_taken( const char *exe, char *argv[] )
+ {
+     static const char attempt_var[] = "WINEHADRONRESERVEATTEMPT";
+     const char *str = getenv( "WINEPRELOADRESERVE" ), *attempt_str;
+-    unsigned long long start, end;
++    unsigned long long start, end, reserve_end = (unsigned long long)page_zero_end();
+     mach_vm_address_t addr;
+     mach_vm_size_t size = 0;
+     vm_region_basic_info_data_64_t info;
+@@ -292,10 +311,10 @@ static void reexec_while_reserve_taken( const char *exe, char *argv[] )
+     start = strtoull( str, &p, 16 );
+     if (*p != '-') return;
+     end = strtoull( p + 1, NULL, 16 );
+-    /* below 4GB the loader's own low reserve keeps the range free */
+-    if (end <= start || start < 0x100000000ULL) return;
++    /* the loader's own low reserve keeps its part of the range free */
++    if (end <= start || end <= reserve_end) return;
+ 
+-    addr = start;
++    addr = start > reserve_end ? start : reserve_end;
+     if (mach_vm_region( mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
+                         (vm_region_info_t)&info, &count, &object ) != KERN_SUCCESS || addr >= end)
+     {
+-- 
+2.54.0 (Apple Git-157)
+
