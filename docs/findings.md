@@ -294,7 +294,7 @@ vkd3d-proton's own test suite (`tests/d3d12.exe`, built with `-Denable_tests=tru
 through Wine and maps the remaining driver work. First findings: `SampleLevel` at LOD exactly 0.5/1.5
 picks the lower mip (D3D rounds up; Vulkan allows either), one depth-compare sampling case is wrong, and
 creating a pipeline statistics query pool asserted (KosmicKrisp supported only occlusion and timestamp
-queries; D3D12 requires pipeline statistics; added in patch 0019, below).
+queries; D3D12 requires pipeline statistics; added in patch 0013, below).
 
 Teardown's voxels are drawn GPU-driven: ExecuteIndirect with per-object root CBV, vertex and index
 buffers. vkd3d-proton implements that with VK_EXT_device_generated_commands, which KosmicKrisp lacked,
@@ -324,11 +324,12 @@ a build that can't create D3D devices. `HADRON_D3D12=vkd3d` now only selects vkd
 and `config/games.conf` sets it for Teardown. steam-run applies per-game settings from that file and
 from the user's ~/Library/Application Support/Hadron/games.conf; launch options win over both.
 
-Geometry shaders: Mesa patches 0004-0009 carry the pending upstream KosmicKrisp geometry shader
-merge request (!44786, by its author, one conflict resolved against DGC), which implements them with
+Geometry shaders: Mesa patches 0004-0009 carried the then pending upstream KosmicKrisp geometry shader
+merge request (!44786, by its author, one conflict resolved against DGC; merged since, and out of the
+queue with #74), which implements them with
 poly as compute passes before the draw. vkd3d-proton's geometry shader, layered rendering, topology
 mismatch and PS layer tests pass (527 checks; test_primitive_id_read_tess_geom has one failure).
-Patch 0010 lists the geometry stage for DGC: with geometryShader on, vkd3d-proton turns DGC off
+Patch 0004 lists the geometry stage for DGC: with geometryShader on, vkd3d-proton turns DGC off
 unless every graphics stage is supported, which briefly made Teardown's voxels vanish again.
 
 Vulkan CTS 1.4.6.2 (built in build/vk-gl-cts, run natively against KosmicKrisp): dEQP-VK.geometry.*
@@ -337,11 +338,11 @@ bugs with tessellation or a geometry shader:
 
 - The geometry heap was reset at every render pass split, but DGC unrolls every sequence's indices into
   it before drawing; a later sequence's vertex shader outputs overwrote earlier-unrolled indices. The
-  heap now lives for the whole draw command (Mesa patch 0012). Plain multi-draws that unroll had the same
+  heap now lives for the whole draw command (Mesa patch 0006). Plain multi-draws that unroll had the same
   latent bug.
 - Indirect tessellation dispatched its VS and TCS grids, written in threads, as threadgroup counts of 64,
   so surplus threads wrote other instances' vertex slots (an intermittent race) and past the allocation.
-  They now use exact-thread dispatch (patch 0013); this affects all indirect tessellation draws.
+  They now use exact-thread dispatch (patch 0007); this affects all indirect tessellation draws.
 
 dEQP-VK.dgc.ext, geometry and tessellation together: 1100 pass, 0 fail. Excluded: the DGC *_lib variants,
 which build pipeline libraries on a device without VK_EXT_graphics_pipeline_library (a CTS bug; KK then
@@ -349,7 +350,7 @@ dereferences the missing input assembly state), and
 dEQP-VK.tessellation.geometry_interaction.limits.output_required_max_geometry, which hangs the GPU on the
 driver as it was before these changes too. Open.
 
-Transform feedback (Mesa patch 0014, `MESA_KK_EXPERIMENTAL=xfb`, on by default in `scripts/play`) is
+Transform feedback (Mesa patch 0008, `MESA_KK_EXPERIMENTAL=xfb`, on by default in `scripts/play`) is
 built on poly's geometry shader emulation, which already wrote transform feedback from the GS
 rasterization pass; KosmicKrisp threw away the two helper shaders it needs. The pre-GS pass (one
 thread per draw) clamps each stream's primitive count to the bound buffers and advances the offsets and
@@ -366,7 +367,7 @@ rest need more than 4 streams or buffers, or transformFeedbackDraw), and vkd3d-p
 output tests pass on an unmodified vkd3d-proton. With single-texel alignment and transform feedback,
 D3D12CreateDevice no longer needs relaxed checks.
 
-Sparse resources (Mesa patches 0015-0017, `MESA_KK_EXPERIMENTAL=sparse`, on in `scripts/play`) use
+Sparse resources (Mesa patches 0009-0011, `MESA_KK_EXPERIMENTAL=sparse`, on in `scripts/play`) use
 Metal 4's placement sparse resources: buffers and textures created without memory whose 64 KB pages
 `MTL4CommandQueue updateBufferMappings`/`updateTextureMappings` map onto placement heaps, which is
 vkQueueBindSparse almost one to one, and 64 KB is D3D12's tile size. Device memory heaps of 64 KB or
@@ -383,7 +384,7 @@ split off in nir_to_msl). Findings on the way, each checked with standalone Meta
 - a texel-buffer view of a sparse buffer works once its descriptor carries the sparse page size;
 - mapping updates need a resource-state barrier before later work; a small command buffer after each
   sparse bind provides it (without it, reads saw pages after they were unmapped).
-Two gaps took a residency map kept by the driver (patch 0024). MSL's texture_buffer has no sparse_read,
+Two gaps took a residency map kept by the driver (patch 0018). MSL's texture_buffer has no sparse_read,
 and Metal does not discard a shader write to an unmapped buffer page: the value reads back at that
 address until the command buffer ends (`tools/metal-probes/strict-write.m`), where Vulkan's
 residencyNonResidentStrict wants the write discarded. KosmicKrisp keeps one byte per 64 KB page of
@@ -411,7 +412,7 @@ test_sparse_default_mapping end without a result, test_update_tile_mappings_rema
 D3D12 feature level 12_0 needs tiled resources tier 2, which needs min/max sampler filtering. Metal
 takes a sampler reductionMode on every GPU but only honours it from Apple family 10 (M5): on M2 Pro
 (family 8) and M4 (family 9, tested on another Mac) every mode returns the weighted average, through
-both the Metal 3 and Metal 4 paths, and MSL has no shader-side reduction. Patch 0018 emulates it below
+both the Metal 3 and Metal 4 paths, and MSL has no shader-side reduction. Patch 0012 emulates it below
 family 10: the sampler descriptor carries the reduction and filter modes, and each filtered sample
 branches on them; the emulated path reads the 2x2 (2x2x2 for 3D) footprint at texel centres, where
 linear filtering returns texels exactly and the sampler's address modes still apply, at one or two
@@ -427,16 +428,16 @@ checked against the code, the specification and a test before changing anything.
 (the code already did it, an earlier NIR pass had lowered the case away, or the specification allows
 the behaviour: totals in the first multiview query, primitive restart not affecting primitive counts).
 Nine were real: DGC draws of strips with primitive restart into a geometry shader joined the strips
-(`tools/dgc-test` case 3; patch 0020); the min/max emulation ignored the sampler's LOD clamp for
+(`tools/dgc-test` case 3; patch 0014); the min/max emulation ignored the sampler's LOD clamp for
 explicit LODs, skipped nearest filtering with linear mip filtering and sparse sampling, stayed off when
 the extension was enabled without the Vulkan 1.2 feature bit, and computed a LOD for every sample
-before looking at the sampler's mode (`tools/minmax-test`; patch 0022); sparse image queries offered
-multisampling (0023); a statistics pipeline that failed to build was silently skipped (0021); and the
-two sparse gaps above (0024). Its review of that fix made three more claims, all real: an
+before looking at the sampler's mode (`tools/minmax-test`; patch 0016); sparse image queries offered
+multisampling (0017); a statistics pipeline that failed to build was silently skipped (0015); and the
+two sparse gaps above (0018). Its review of that fix made three more claims, all real: an
 out-of-range texel index read past the residency map, a store straddling two pages was checked only at
 its start, and stores through device addresses were not guarded.
 
-Pipeline statistics queries (patch 0019) are counted by KosmicKrisp itself: Metal exposes only the
+Pipeline statistics queries (patch 0013) are counted by KosmicKrisp itself: Metal exposes only the
 timestamp counter set on Apple GPUs (checked on M2 Pro and M4; statistic counter heaps are refused).
 Direct draws and dispatches are counted on the CPU; indirect, predicated and DGC draws are summed by
 one parallel kernel per render pass, run when the pass ends so no pass is split; tessellation and
@@ -490,12 +491,12 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
 64-bit atomics, because the driver lacked four Vulkan features. Metal offers none of them directly;
 `tools/metal-probes` has the measurements behind each implementation.
 
-- *Compute shader derivatives* (Mesa 0026). Metal takes no derivatives in compute kernels, and
+- *Compute shader derivatives* (Mesa 0020). Metal takes no derivatives in compute kernels, and
   implicit sampling there uses LOD 0. But threads 4n..4n+3 of a threadgroup form a quad for every
   local size tried, which is Vulkan's linear derivative group. Derivatives become differences of
   `quad_broadcast` values, implicit sampling passes them as gradients, and LOD queries are computed
   from them with the sampler's clamp and mip filter. Quad groups shuffle the local invocation ids.
-- *Denormal modes for 32-bit floats* (Mesa 0027). Apple GPUs flush 32-bit denormals to zero as
+- *Denormal modes for 32-bit floats* (Mesa 0021). Apple GPUs flush 32-bit denormals to zero as
   operands and as results, in every math mode; 16-bit denormals are kept. Flush-to-zero is therefore
   native, except for operations that only move bits (min, max, negate, abs), which get an explicit
   flush. Preserve is emulated for shaders that ask for it: each operation keeps the native result
@@ -503,7 +504,7 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
   rounding. vkd3d-proton only requests preserve when a DXIL shader does (`-denorm preserve`), so
   ordinary shaders are unaffected. `tools/denorm-test` compares 24 operations on 65,536 inputs bit
   for bit with the CPU.
-- *64-bit atomics* on buffers, shared memory and images (Mesa 0028, 0029). Metal has 64-bit atomic
+- *64-bit atomics* on buffers, shared memory and images (Mesa 0022, 0023). Metal has 64-bit atomic
   `min` and `max` only, without a result, on buffers and on RG32Uint textures. Those stay native,
   which is what Nanite's visibility buffer uses. Every other operation is a read-modify-write under
   a lock from a device table of 4,096 32-bit atomics. What had to be found out
@@ -516,7 +517,7 @@ operations and 64-bit atomics on typed resources. vkd3d-proton reported 6.0 on K
     and fragment shaders first let lanes take turns (only the lane whose turn it is spins). That
     stalled in the memory model tests, with threads giving up on locks nobody held, whenever the
     kernel was dispatched three or more times in a command buffer with Metal 4 barriers between;
-    any small change to the kernel hid it (`tools/metal-probes/turn-lock-stall.m`, Mesa 0079). The
+    any small change to the kernel hid it (`tools/metal-probes/turn-lock-stall.m`, Mesa 0071). The
     cause is not established.
   - Plain loads, stores and texture reads are not coherent across threads, even under the lock.
     They are with `atomic_thread_fence` at device scope before the read, between the read and the
@@ -549,8 +550,8 @@ The first launch on this driver passed Unreal's check ("shader model 6.6 ... ato
 reserved texture, and Metal's shader compiler dying.
 
 **Reserved textures with UAV access.** `CreateReservedResource` failed for a 16384x768x2 `R32_UINT`
-texture: sparse residency with storage usage, which Mesa 0016 had reported unsupported. Mesa 0030
-and 0032 allow it. Writable sparse textures only get Metal's sparse tier 1, and on macOS 27.0.1 its
+texture: sparse residency with storage usage, which Mesa 0010 had reported unsupported. Mesa 0024
+and 0026 allow it. Writable sparse textures only get Metal's sparse tier 1, and on macOS 27.0.1 its
 residency queries can't be used:
 
 - A view's first mip level is ignored: `sparse_read` through a view of levels 1-2 reports the
@@ -579,7 +580,7 @@ first and the rest after.
 **Metal's compiler running out of memory.** `MTLCompilerService` aborted with a failed allocation,
 and every library being compiled at that moment failed with `XPC_ERROR_CONNECTION_INTERRUPTED`;
 Unreal treats a failed pipeline as fatal. Two causes, both in the shape of the generated MSL, which
-declares every temporary at the top of the function (Mesa 0031):
+declares every temporary at the top of the function (Mesa 0025):
 
 - The declarations were zero-initialised, which made LLVM's mem2reg and SROA see two stores per
   temporary. Dropping the initialiser took one shader from 25 s and 2.5 GB to 5 s and 0.6 GB.
@@ -587,7 +588,7 @@ declares every temporary at the top of the function (Mesa 0031):
   shader with 97,000 temporaries and 19,000 selects needed 2.6 GB just to parse. Three
   `#pragma clang diagnostic ignored` lines turn the analysis off: 160 MB.
 
-The driver now saves any MSL that Metal refuses to compile (Mesa 0033, `MESA_KK_FAILED_MSL_DIR`;
+The driver now saves any MSL that Metal refuses to compile (Mesa 0027, `MESA_KK_FAILED_MSL_DIR`;
 `scripts/play` points it at `build/logs/failed-msl`), which is how the second cause was found.
 
 **Where it stands (2026-10-01, paused).** With those fixes a launch initialises the engine in about
@@ -601,9 +602,9 @@ driver. Instruction counts for one such shader, pass by pass:
 |---|---|---|
 | SPIR-V to NIR | 6,600 | 55 |
 | compute derivatives, texture lowering | 7,700 | 107 |
-| sparse buffer store guard (Mesa 0024) | 16,100 | 214 |
+| sparse buffer store guard (Mesa 0018) | 16,100 | 214 |
 | explicit I/O | 21,500 | 214 |
-| sampler min/max emulation (Mesa 0018) | 48,800 | 1,558 |
+| sampler min/max emulation (Mesa 0012) | 48,800 | 1,558 |
 | descriptor lowering | 93,400 | 1,350 |
 | null descriptor checks | 101,600 | 1,350 |
 | NIR optimisation, as emitted | 63,200 | 1,350 |
@@ -1072,6 +1073,8 @@ bits and the surface was not created with `EGL_PRESENT_OPAQUE_EXT`, the Metal la
 composited with the frame's alpha, and a frame with alpha 0 came out black. Mesa offered the
 extension only on Wayland, and Wine's Mac driver did not ask for it.
 
+Mesa patch 0075 offers `EGL_EXT_present_opaque` for window surfaces on a Metal layer, and Wine
+patch 0028 creates every OpenGL window surface with it, as Wine's Wayland driver does. The
 Mesa patch 0084 offers `EGL_EXT_present_opaque` for window surfaces on a Metal layer, and Wine
 patch 0027 creates every OpenGL window surface with it, as Wine's Wayland driver does. The
 swapchain is then opaque, and KosmicKrisp drops the alpha when it copies the frame to the
@@ -1819,7 +1822,7 @@ left (fixed in #75).
 Metal has a depth bounds test only on Apple GPU family 10 (`setDepthTestMinBound:maxBound:`), so
 KosmicKrisp reported `depthBounds` there only. DOOM (2016) asks for it and will not create its
 device without it (#128), and vkd3d-proton tells a D3D12 game the test is missing and fails a
-pipeline that asks for it anyway with `E_INVALIDARG`. Mesa patch 0085 implements the test
+pipeline that asks for it anyway with `E_INVALIDARG`. Mesa patch 0076 implements the test
 on the earlier families and reports the feature on all of them.
 
 The test needs the depth already stored in the attachment, which an Apple GPU keeps in tile
@@ -1836,7 +1839,7 @@ shader whose pipeline may use it, a benchmark of 200 opaque full-screen layers d
 front took 75 ms a frame where it took 1.15 ms: a discard turns off hidden surface removal, so
 every layer is shaded. Zink makes the test's enable dynamic in every pipeline, so every OpenGL
 game would have paid that. The variant is built like the one that counts fragment shader
-invocations for statistics queries (patch 0019, which 0085 generalises to the combinations of
+invocations for statistics queries (patch 0013, which 0076 generalises to the combinations of
 the two): its MSL is made with the shader, its Metal pipeline at the first draw that needs it.
 With it the benchmark takes 1.20 ms with the enable dynamic.
 
@@ -1887,7 +1890,7 @@ them on (`--buildtype=debugoptimized`, #47), so the game aborts.
 
 Turning the assertions off would only trade the abort for reads of other memory: with the range
 as given, KosmicKrisp's bounds checks let the shader read past the buffer into whatever is
-allocated after it. Mesa patch 0086 clamps the range of a buffer descriptor (and of a transform
+allocated after it. Mesa patch 0077 clamps the range of a buffer descriptor (and of a transform
 feedback buffer) to the part of the buffer from its offset, so that a read past the buffer's end
 is out of bounds and is handled as any other one: zero with robust buffer access, nothing outside
 the buffer without it. A valid range is unchanged.
@@ -1911,14 +1914,14 @@ command buffer is reset. DOOM draws that way with bounds [0, 1], thousands of ti
 Without `VK_EXT_depth_range_unrestricted` every defined value a depth attachment can hold is in
 [0, 1]: the reporter checked the specification's chapters on fragment depth, clears and copies,
 where values outside [0, 1] are either clamped, not allowed, or leave the result undefined. So
-bounds that cover [0, 1] cannot reject a sample, and Mesa patch 0088 skips the emulation for them: no break of the render pass, no copy, no
+bounds that cover [0, 1] cannot reject a sample, and Mesa patch 0078 skips the emulation for them: no break of the render pass, no copy, no
 shader variant. Depth written by such a draw still counts as changed, so a later draw with
 narrower bounds reads it from memory again. The reporter's version of the same check held DOOM at
 6.4 GB in the scene that grew to 30 GB.
 
 `tests/mac/vk-depth-bounds-memory.sh` records 128 such draws on a 1024×1024 depth buffer and then
 checks bounds of [0.4, 0.6] (which must draw) and [0.6, 0.9] (which must not). With the 0.3.2
-driver the process grew by 597 MB, with 0088 by 18 MB; both draw correctly. The 26,830 depth
+driver the process grew by 597 MB, with 0078 by 18 MB; both draw correctly. The 26,830 depth
 bounds cases of the Vulkan CTS give the same 1,986 pass and 24,844 not supported with and without
 it, case for case, and `tests/mac/vk-depth-bounds-msaa.sh` passes.
 
@@ -2266,6 +2269,174 @@ Seen while testing: about one run in four of the test hung at process exit, afte
 with one thread left waiting (`NtWaitForAlertByThreadId`); the test now ends with
 `TerminateProcess`. Not looked into.
 
+## Mesa moved to main of 2026-11-23 (#74)
+
+The Mesa pin moves from `30da39187d` (2026-09-30) to `b7f76842460`, Mesa main on 2026-11-23:
+3,975 commits later, 45 of them in KosmicKrisp. The queue goes from 89 patches to 79.
+
+Ten patches left it, because upstream has the same change or its own fix of the same bug:
+
+| Old | What | Upstream |
+|---|---|---|
+| 0004-0009 | The geometry shader merge request !44786, by its author | merged as `9a40f0c6150`, `5c145789399`, `531e208d92e`, `14f59d06388`, `2d817e53680`, `d9d36e788e8`, in their reviewed form |
+| 0037 | Zink looks the pipeline up again when only the vertex layout changed, on a driver without dynamic vertex input | `fd12422cce0` (vertex input as a draw atom, which marks the pipeline dirty in that case) |
+| 0083 | Zink's races between a batch's submission and waits on its usage | merge request 45147: `aa6740cae14` (broadcast under the usage mutex), `c103abf4193` (wait in a loop on the condition), `5c3c8e94c0c` (read `unflushed` before `usage`, both atomic), `ac3c0d9870a`, `ca96e474477` |
+| 0087, 0089 | Cherry-picks of upstream fixes | `bb172922a46`, `1d396c4031a` |
+
+One more left because a later patch had undone it: 0070, the first workaround for the indirect
+dispatch bug, which 0076 (now 0068) replaced line for line (below). One is new: 0079, a fix in the
+Metal emitter that upstream's scalarized tessellation outputs needed (below).
+
+The rest were rebased with `git am -3`. Where upstream had changed the code they touch, they now
+follow upstream's version:
+
+- KosmicKrisp's geometry shaders as merged moved `outputs_written` out of the vertex shader info,
+  compile the rasterization shader as the stage's own MSL, and pass a new `apply_wa19` flag to
+  `kk_compile_msl` and `kk_compile_shader`. The transform feedback, statistics, 64-bit atomics,
+  flat input and depth bounds patches (0008, 0013, 0022, 0059, 0076) take their place in that
+  code; the count and transform feedback passes of the geometry shader and the fragment shader
+  variants pass the flag on as the stage they come from would.
+- Timestamp pools (0003) split their counter heaps inside upstream's new guard for GPU captures,
+  which use no counter heaps.
+- Sampler min/max emulation and the 32-bit LOD bias (0012, 0073) sit beside upstream's native LOD
+  bias from Apple family 10 on (`4d1b5322870`): the bias is still lowered in the shader below
+  family 10, now in 32 bits, and is 0 in the descriptor above it, as upstream has it.
+- Compute shader derivatives (0020): NIR's texture lowering now passes its options to the
+  gradient helpers (`80431817a40`, for drivers whose texture size query needs a callback), so the
+  exported `nir_tex_gradient_lod` takes them too; KosmicKrisp passes empty options.
+- 64-bit image atomics, residency views, 3D render views (0023, 0026, 0053, 0061): upstream
+  replaced `mtl_new_texture_view_with_no_swizzle` with a flag, gave format table entries a GPU
+  family, moved the input attachment view into its own usage-gated block and computes usage per
+  aspect; the patches use all of that.
+- The EGL window surfaces on a Metal layer (0030) follow EGL's rework: no `_EGL*` typedefs, loader
+  interfaces as `struct dri_loader_funcs` without an extension base, no `get_dri_drawable` in the
+  platform table, and `swap_buffers` with damage rectangles, which go to `kopperSwapBuffers` as on
+  X11 and Wayland.
+- libkk kernels (0059, 0049, 0066) pass the alignment that `poly_heap_alloc` now takes (16, what it
+  used to apply itself) and the read-only sink address `poly_index_buffer` now takes.
+- Depth bounds (0076) use upstream's `kk_gpu_supports_depth_bounds` instead of a second helper of
+  their own, and report `depthBounds` on every family. Upstream added `kk_fake_depth_bounds`, a
+  driconf option that reports the feature without the test for idTech games (`5ecabeae837`); with
+  the real test reported everywhere it does nothing here.
+
+Upstream also found the mechanism behind the Metal bug that 0068 works around (and 0063 did
+before it): under `dispatchThreadsWithIndirectBuffer`, registers that the compiler spills to
+threadgroup memory read back as zero beyond the first few bytes, on M1 and M2 only (Apple
+feedback FB25516856). Its workaround, `KK_WORKAROUND_19` (`a8ea6555e28`), adds an unused
+threadgroup argument to the shaders that feed a geometry shader, which stops the spilling. 0068 is
+kept; the old 0063, which 0068 had undone line for line, is dropped (the queue's tree is the same
+without it). Checked on the M2 Pro (Apple family 8, where `KK_WORKAROUND_19` is on), with Mesa's
+shader cache off, since its key does not include the workarounds (a cached shader from a run with
+other workarounds is reused, which made one comparison look fixed when it was not):
+
+- With neither (0063 and 0068 reverted, `MESA_KK_DISABLE_WORKAROUNDS=19`), the tests the two
+  patches cite fail again: Vulkan `clipping.user_defined.*.vert_tess_geom` (6 fail) and
+  `tessellation.geometry_interaction.limits.output_required_max_geometry` (timeout); ES 3.1
+  `per_patch_block_array` (9) and `tessellation_geometry_interaction.feedback` (6) fail and its two
+  `limits` tests time out; OpenGL 4.6 `geometry_shader.primitive_counter.*_rp` (8) and
+  `gpu_shader_fp64.fp64.varyings` fail and `.max_uniform_components` times out.
+- With upstream's workaround alone, all of them pass (82 Vulkan, 40 ES 3.1, 21 OpenGL 4.6).
+- An indirect tessellation draw is not covered by it. `tests/mac/gl-tess-indirect.sh` draws 1,024
+  patches with `glDrawArraysIndirect` and with `glDrawArrays`, with vertex and control shaders
+  that hold N floats live, and compares the two. With upstream's workaround
+  alone, 676 of 1,024 patches differ at 60 and 64 floats and 1,004 at 72 (none up to 56); with
+  0068, none at any count. Applying `KK_WORKAROUND_19` to those two passes as well (the threadgroup
+  argument, and `setThreadgroupMemoryLength` in the tessellation launch; a local experiment) also
+  gives none, which confirms the mechanism. The indirect path of a tessellation draw dispatches its
+  vertex and control shaders with `dispatchThreadsWithIndirectBuffer` in upstream's code too, so
+  the gap is upstream's as well.
+
+With 0068 the driver no longer makes that call at all, so on M1 and M2 `KK_WORKAROUND_19` costs a
+threadgroup argument and a branch that never runs in the shaders before a geometry shader. It is
+left as upstream has it rather than removed by another patch. Offering 0068 upstream, or
+`KK_WORKAROUND_19` for the tessellation passes, would close upstream's gap.
+
+Build requirements did not change: the same meson options, LLVM 23, libclc, SPIR-V tools and
+Python modules configure and build both KosmicKrisp and Zink.
+
+Checked on an M2 Pro with macOS 27.0.1, against the installed 0.4 test build:
+
+- Every commit of the queue builds on its own: KosmicKrisp for each, and Zink as well for each one
+  that touches code Zink shares.
+- `vulkaninfo`, with and without `MESA_KK_EXPERIMENTAL=dgc,xfb,sparse`: the same extensions,
+  features and limits, except `storageInputOutput16`, which upstream reports now (`26e66124a0b`).
+  (The heap budget differs too, but it follows the memory the system has free at the time.)
+- Vulkan CTS lists that touch what the move changed, 1 in 10 of transform feedback and sparse
+  resources, everything else in full: geometry, tessellation, clipping and transform feedback
+  (14,979 tests: 1,885 pass, no failure); `dgc.ext` (266 pass, the 6 known `_lib` crashes); a third
+  of the query pool list with every timestamp test (6,050 pass); every LOD bias, min/max reduction,
+  compute derivative, border colour and `max_varyings` test (154 pass); format properties (the
+  same 111 failures as `vk-full-r4`, test for test); half of the 64-bit atomic tests (316 pass); input attachments
+  (857 pass); the 26,830 depth bounds cases of `dbounds-full-range-all` (1,986 pass, the rest not
+  supported, the same case for case).
+- The depth bounds emulation first drew wrong: draws that do not write depth read zeros for the
+  depth (`tests/mac/vk-depth-bounds-msaa.sh` and `-memory.sh` failed, and one CTS case). Upstream
+  now makes an input attachment view only for images that are used as input attachments
+  (`181fc89ccab`), and the emulation reads the depth attachment through that view. 0076 now makes
+  it for depth views that are attachments too, when the test is emulated; both scripts and
+  `tests/mac/vk-ubo-range-past-end.sh` pass.
+- OpenGL on Zink: `tools/zink-test` gets 4.6 core and compatibility contexts and draws its
+  triangle right. One test in 20 of the OpenGL 4.6 (744 pass), ES 3 (2,126 pass, 1 warning) and
+  ES 3.1 suites (1,746 pass, 2 fail).
+
+Found by that ES 3.1 sample, and fixed by 0079: all 18 `tessellation.user_defined_io.per_vertex_block`
+tests failed (in the evaluation shader, the check of `teBlock[0].blockS.y`). They passed with
+upstream's `26e66124a0b` reverted, which turns the inputs and outputs of the tessellation control
+shader into scalars. The scalars were not the bug; they exposed one in the Metal emitter:
+
+- Zink packs varyings: here it put the control shader's per-vertex block into `VAR0` and into the
+  components of `gl_Position`, which the stages do not use otherwise (`ZINK_DEBUG=spirv`: the
+  output `blockS` is decorated `BuiltIn Position`), and writes the block a piece at a time, each a
+  read-modify-write of the slot. The Vulkan versions of the tests have no such packing, so they
+  passed.
+- The NIR before and after scalarization is the same program, and so is the NIR handed to the
+  Metal emitter (printed before `nir_to_msl`, a local change): every store and load goes to the
+  right address of the control shader's output buffer.
+- The MSL is not (`MESA_KK_DEBUG=msl`): the emitter typed each global load and store after its
+  value, so the scalar code stored `*(device float*)p = v` and then read `*(device uint*)p`.
+  Metal's compiler applies C++'s type-based aliasing rules: a store through a `float` pointer
+  cannot change what a `uint` pointer reads, so it reused the value read before the store, and the
+  shader wrote the old contents back over `blockS.y`. A ten-line kernel shows it with `xcrun metal
+  -O2 -S -emit-llvm`: the second load is gone; with `-fno-strict-aliasing`, or with both accesses
+  typed `uint`, it stays. This is the language's rule (the Metal shading language is based on C++),
+  not a Metal bug. The vector code before `26e66124a0b` also mixed `packed_uint2` and
+  `packed_float2` at one address and was right by luck.
+- 0079 makes the emitter's type inference give every `load_global` and `store_global` an unsigned
+  integer type of its size, as it already did for shared and scratch memory: values are bitcast
+  into and out of memory, and all accesses to device memory have one type.
+
+With 0079 the 18 pass. The ES 3.1 tessellation and geometry groups (655 pass, 149 not supported),
+OpenGL 4.6 `tessellation_shader` and `geometry_shader` (278 pass), the Khronos ES 3.1 tessellation
+and geometry tests (275 pass, 1 fail, below) and the Vulkan geometry, tessellation, clipping and
+transform feedback lists (1,885 pass, the rest not supported, as before) have no other failure.
+Since every shader that touches device memory changes, also one ES 3.1 test in 10 (3,485 pass, no
+failure) and one in 50 of the Vulkan `ssbo`, `compute`, `spirv_assembly`, `memory_model` and
+`binding_model` lists (3,531 pass, nothing new against `vk-full-r4`). The full suites are still to
+run on it.
+
+Khronos ES 3.1 `geometry_shader.layered_fbo.fb_texture_invalid_level_number` fails with the new
+Zink, with or without 0079. The suite's test is wrong, and Mesa's new behaviour is right. The test
+makes 3D and 2D array textures with two levels by `glTexStorage3D`, attaches level 2 of each with
+`glFramebufferTexture` and expects `GL_INVALID_VALUE`. Zink on KosmicKrisp gives an ES 3.1 context
+(it does not reach 3.2). With the Zink of the 0.3.3 runtime, the call gives `GL_INVALID_VALUE`;
+with the new one it gives no error, and `glCheckFramebufferStatus` gives
+`GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT` (a short EGL program, both against the new KosmicKrisp).
+The change is upstream's `384eddfdbf7` ("mesa: check right levels depending on the context"):
+Mesa used to require level < `TEXTURE_IMMUTABLE_LEVELS` for an immutable texture in every API,
+and now does so only on desktop OpenGL and ES 3.2. ES 3.1's section 9.2.8 asks only that the level
+be no larger than log2 of `MAX_3D_TEXTURE_SIZE` (3D) or `MAX_TEXTURE_SIZE` (2D array); the
+`TEXTURE_IMMUTABLE_LEVELS` condition first appears in ES 3.2's 9.2.8, and `OES_geometry_shader`
+refers to 9.2.8's "supported texture level". On ES 3.1 such an attachment is legal and leaves the
+framebuffer incomplete. The commit names this test as one it breaks; VK-GL-CTS fixed the test on
+2026-11-06 (`b62f70f03ae4`, Khronos issue 7122), on its main branch only, after the 1.4.6.2 that
+Hadron builds and in no release yet. The fixed test expects exactly what the new Zink does. Mesa's
+main of 2026-11-25 has the same `fbobject.c`. Nothing to fix in Mesa; the failure goes away with a
+CTS that has the fix.
+
+Old numbers to new: 0001-0003 stay; 0010-0036 are now 0004-0030 (six less); 0038-0069 are
+0031-0062 (seven less); 0070 is dropped; 0071-0082 are 0063-0074 (eight less); 0084-0086 are
+0075-0077; 0088 is 0078. 0079 is new. The documents now use the new numbers; the few dated notes
+that name a range of the queue as it was then say so.
 ## Node and Electron stopped with "open EBADF" when their output was a pipe (fixed, #70)
 
 Riot Client, and any Node or Electron program, stopped at once with `open EBADF` when Hadron logged

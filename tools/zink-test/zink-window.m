@@ -1,5 +1,5 @@
 /* Zink on KosmicKrisp in a window: an EGL window surface on a CAMetalLayer, which Mesa's
- * surfaceless platform accepts on macOS (Mesa 0035). Opens a window, draws a triangle on a
+ * surfaceless platform accepts on macOS (Mesa 0029). Opens a window, draws a triangle on a
  * background that changes colour for a few seconds, and reports what was read back from the
  * back buffer before each swap. usage: zink-window [seconds] */
 #import <Cocoa/Cocoa.h>

@@ -6,7 +6,7 @@ than something each new game discovers. Regenerate the first table with `tools/d
 missing extensions come from comparing vkd3d-proton's `VK_EXTENSION` list with
 `kk_physical_device.c`.
 
-State on 2026-10-01 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0033).
+State on 2026-10-01 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0033 as numbered then, 0001-0027 now).
 
 ## What D3D12 reports
 
@@ -39,8 +39,8 @@ State on 2026-10-01 (M2 Pro, macOS 27.0.1, Mesa patches 0001-0033).
 
 | Gap | Vulkan side | Metal | Seen in |
 |---|---|---|---|
-| ~~Reserved (sparse) textures with UAV usage~~ done in Mesa 0030, 0032 | sparse residency images with `STORAGE` usage | reads and writes work; residency queries don't, so a read-only twin answers them (findings #23) | Subnautica 2: `CreateReservedResource` 16384x768x2 `R32_UINT`, fatal |
-| ~~Shaders Metal's compiler runs out of memory on~~ done in Mesa 0031 | none: a driver bug in the shape of the generated MSL | - | Subnautica 2: compute pipelines fail to build, fatal |
+| ~~Reserved (sparse) textures with UAV usage~~ done in Mesa 0024, 0026 | sparse residency images with `STORAGE` usage | reads and writes work; residency queries don't, so a read-only twin answers them (findings #23) | Subnautica 2: `CreateReservedResource` 16384x768x2 `R32_UINT`, fatal |
+| ~~Shaders Metal's compiler runs out of memory on~~ done in Mesa 0025 | none: a driver bug in the shape of the generated MSL | - | Subnautica 2: compute pipelines fail to build, fatal |
 | Shaders that take a minute each to compile | none: the driver's emulations inflate large shaders about tenfold (findings #23 has the list) | - | Subnautica 2: stays on the loading screen |
 | Wireframe fill mode | `fillModeNonSolid` | `setTriangleFillMode` has lines; points would need emulation | DXVK refuses the device for D3D9/10/11 without it |
 
@@ -86,7 +86,7 @@ vkd3d-proton also lists vendor extensions (AMD, NVIDIA, Valve) and Windows-only 
   has sparse images for single-sampled 2D only.
 - A shader write to an unmapped tile of a sparse texture reads back for the rest of the kernel
   (Metal keeps it until the command buffer ends), where `residencyNonResidentStrict` wants it
-  discarded. Buffers have a guard for this (Mesa 0024); storage images do not yet.
+  discarded. Buffers have a guard for this (Mesa 0018); storage images do not yet.
 - vkd3d-proton's own tiled resource tests: `test_update_tile_mappings` and its remap variants,
   `test_texture_feedback_instructions`, `test_sparse_default_mapping`, three checks of
   `test_execute_indirect_state`.
