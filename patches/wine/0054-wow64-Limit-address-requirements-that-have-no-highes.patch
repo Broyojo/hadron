@@ -1,0 +1,42 @@
+From 4e5065cc0a5bfb2ede633415cfbc67cd87a8389c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Wed, 25 Nov 2026 15:19:51 -0500
+Subject: [PATCH] wow64: Limit address requirements that have no highest
+ address.
+
+A 32-bit caller of NtAllocateVirtualMemoryEx or NtMapViewOfSectionEx
+whose MEM_ADDRESS_REQUIREMENTS leave HighestEndingAddress at zero, as
+snmalloc's reservations do (they set only an alignment), had its
+requirements passed on with no upper limit. The 64-bit ntdll then
+allocated anywhere, and the caller was handed the low 32 bits of an
+address above 4GB, where nothing of it is mapped. A requirements
+parameter that is absent already gets the 32-bit limit.
+
+Bottom-up allocations used to find the reserved area below 4GB first.
+Since the reserved areas grow when they run out of space, they start
+in the area reserved last: a WoW64 process takes 64-bit memory above
+4GB for each thread's data, and once that grows the low area, all such
+reservations land above 4GB. Top-down ones always did.
+
+Apply the process's limit, as an empty HighestEndingAddress means no
+limit other than the highest user address.
+---
+ dlls/wow64/virtual.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/dlls/wow64/virtual.c b/dlls/wow64/virtual.c
+index 605abe1804c..e0b3ec204c4 100644
+--- a/dlls/wow64/virtual.c
++++ b/dlls/wow64/virtual.c
+@@ -120,6 +120,8 @@ static NTSTATUS mem_extended_parameters_32to64( MEM_EXTENDED_PARAMETER **ret_par
+         req->LowestStartingAddress = ULongToPtr( req32->LowestStartingAddress );
+         req->HighestEndingAddress  = ULongToPtr( req32->HighestEndingAddress );
+         req->Alignment             = req32->Alignment;
++        if (!req->HighestEndingAddress && set_limit)
++            req->HighestEndingAddress = (void *)highest_user_address;
+     }
+     else if (set_limit)
+     {
+-- 
+2.54.0 (Apple Git-157)
+

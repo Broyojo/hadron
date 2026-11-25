@@ -2415,3 +2415,59 @@ Not known yet: what the main thread does after the last line. A new log with
 `DllMain` is running (`+module` traces each call and return), and a `sample` of the game's process
 taken while it hangs shows where each thread is on the native side: a server wait, the Cocoa main
 thread, or FEX.
+
+## 32-bit D3D9 games ran out of memory with Wine 11.22: snmalloc's reservations went above 4 GB (fixed, #78)
+
+With Wine 11.22 (#73), Five Nights at Freddy's, Portal 2 and Ultimate Custom Night, all 32-bit
+D3D9 on mtld3d 0.15.5, failed from Steam: mtld3d refused every texture (`the resource's
+system-memory copy cannot be allocated → E_OUTOFMEMORY`) or stopped on `PageBox alloc failed`.
+mtld3d v0.11 and the 11.18-based Wine of 0.3.3 did not fail. It looked like the overlay's: with the
+game's overlay disabled in Steam, FNaF ran. Run directly with the overlay's libraries inserted as
+`scripts/play` does (a copy of the executable, a scratch prefix), it failed in 3 of 6 starts, but
+without them in 2 of 6 too, also as `memory allocation of 2048 bytes failed` and snmalloc's `Failed
+to initialise thread local allocator`. The overlay changes the odds, not the cause.
+
+Nothing of the host was in the 32-bit range. In a `+virtual` trace of a failing start, snmalloc
+(the Rust allocator in mtld3d's `d3d9.dll`) reserved 4 MB with `VirtualAlloc2` and an address
+requirement that gives only an alignment, `{NULL, NULL, size}`, and Wine placed it at
+0x7200800000. The WoW64 layer converts such a requirement as it is: a highest address of zero went
+to the 64-bit ntdll, which takes it as no limit (`mem_extended_parameters_32to64` adds the 32-bit
+limit only when there is no requirement at all). The game got the low 32 bits, 0x800000, which
+was not its reservation, and the trace shows the same 4 MB commit at 0x800000 again and again.
+
+Wine 11.18 placed such a request in the low reserve below 4 GB, as bottom-up searches started at
+the bottom. 11.22 grows the reserved areas when they run out (3480ed6ff1) and starts bottom-up
+searches in the part reserved last (a `static hint`). ntdll takes each thread's 64-bit data above
+4 GB (`virtual_alloc_thread_data`, `limit_4g`), first from the part of the page zero above 4 GB
+(#75, 0 to 80 MB by the loader's slide, about 1 MB a thread). When that is used up, the low range
+grows past the shared cache and the host's guard at 0x1000000000–0x7000000000 (#28), 113 steps of
+4 GB to 0x7200000000 in that trace, and from then on every such request lands there. So a game
+fails when it has started enough threads before snmalloc reserves its first chunk, which depends on
+the slide and on the threads Steam and the overlay add. Without 0052 the page zero above 4 GB was
+not in the low reserve and it failed every time. A top-down request with no highest address went
+above 4 GB with the old Wine as well.
+
+On 64-bit Windows a WoW64 process gets memory only below its own highest address. Wine patch 0054
+applies the process's limit (2 GB or 4 GB) when a requirement leaves the highest address at zero,
+in `NtAllocateVirtualMemoryEx` and `NtMapViewOfSectionEx` from 32-bit code in the same process,
+as it already did with no requirement. Upstream's master (2026-11-24) has the same code.
+`tests/win/wow64-address-requirements.c` (i686) starts 128 threads, then reserves with an alignment
+only, with an empty requirement, and top-down, and checks that Wine has each block where the
+returned pointer says.
+
+2026-11-25, M2 Pro, macOS 27.0.1, a scratch prefix and copy of FNaF's executable, mtld3d 0.15.5:
+
+| Test | Before (queue 0001–0053) | After (0001–0054) |
+|---|---|---|
+| wow64-address-requirements | fail, all four (0EC00000 and so on, nothing reserved there); with 1 thread only top-down fails; 0.3.3's Wine: only top-down fails | pass, 3 of 3 (aligned at 0x9000000, top-down at 0xFFEE0000) |
+| FNaF, 15 s, overlay libraries inserted | 3 of 6 starts failed | 0 of 6 |
+| FNaF, 15 s, without them | 2 of 6 failed | 0 of 3 |
+| FNaF traced with the overlay | 4 MB reservation at 0x7200800000 | 179 reserving steps, all 13 of the game's `VirtualAlloc2` reservations below 0xf000000 |
+| as32 free space and 1 GB reservations, VirtualAlloc2 aligned and top-down, 64 threads | pass | pass |
+| d3d9tex: 300 managed 1024² textures through mtld3d | pass | pass |
+| fixed-base, normal, Wukong's size and at 4 GB, 20 starts each | not run | 0 failed each |
+| hello x64, i386 and arm64, is-ec-code, thread-allocation x64 and arm64 | not run | pass |
+| d3d11tri x64 (DXMT) | not run | 121 fps |
+
+Not tested: the games from Steam, Portal 2 and UCN, and a 32-bit program that asks for memory in
+another process with such a requirement (left as it was).
