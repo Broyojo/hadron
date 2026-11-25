@@ -36,45 +36,13 @@ and drag Hadron to Applications.
 
 Then open Hadron once and choose **Set up Steam**. macOS stops the first attempt, because Hadron
 is changing another app: allow Hadron under System Settings, Privacy & Security, App Management,
-and set up again. That adds Hadron to Steam as a Steam Play tool (Uninstall takes it out again).
-After that Hadron does not need to be open: install and play Windows games from your Steam
-library as usual.
+and set up again. After that Hadron does not need to be open: install and play Windows games from
+your Steam library as usual.
 
-**A game that also has a Mac version** is installed as that Mac version unless you say
-otherwise. Many older Mac versions are 32-bit and no longer run at all; a 64-bit Intel one still
-runs, through Rosetta. To play the Windows version through Hadron instead, right-click the game
-in your library, open **Properties**, go to **Compatibility**, and tick **Force the use of a
-specific Steam Play compatibility tool**. Hadron is selected for you, and Steam then downloads
-the Windows build. This is the same setting Proton uses on Linux, and the Portal games in the
-[table below](#status) were played this way. Games that only exist for Windows need nothing:
-they use Hadron on their own.
-
-Everything the window does is also a command: `hadron setup`, `hadron uninstall`, `hadron status`
-(`hadron help` lists them). Homebrew installs the `hadron` command. With the disk image, Hadron's
-window offers to add it; it goes into `/usr/local/bin`, so macOS asks for your password.
-
-**Windows programs that are not on Steam.** Open an `.exe` with Hadron (right-click it, **Open
-With**, **Hadron**; or drop it on Hadron's icon, or use **File, Open a Windows Program…**), or run
-`hadron run program.exe`. Steam is not needed for these. They all share one Wine prefix in
-`~/Library/Application Support/Hadron/programs`, so a program an installer puts there runs from
-there too. Hadron does not make itself the app for `.exe` files; **Get Info**, **Open with**,
-**Change All…** does that.
-
-**Updating.** Hadron updates itself. When you open its window and a newer version exists, it
-shows what is new and asks; **Hadron, Check for Updates…** looks at once, and `hadron update`
-does the same from a terminal. The download is checked against a signature before anything is
-installed, and nothing is installed unasked. With Homebrew, `brew upgrade --cask hadron` also
-works; a plain `brew upgrade` leaves Hadron to update itself.
-
-Updating is safe while a game is running: games run from a copy of Hadron's runtime kept in your
-Library, so the running game is left as it is, and the next game you start uses the new version.
-Hadron's window asks for **Repair** only when a version changes the part of Hadron that sits
-inside Steam.
-
-
-To remove Hadron, take it out of Steam first (Uninstall in the window, or `hadron uninstall`),
-then delete the app or run `brew uninstall --cask hadron`. If you had the window add the `hadron`
-command, remove that link too: `sudo rm /usr/local/bin/hadron`.
+**The user guide at [docs.hadrondb.com](https://docs.hadrondb.com)** has the rest: games that
+also have a Mac version, launch options and per-game settings, Windows programs that are not on
+Steam, the `hadron` command, updates, Retina mode and MetalFX, troubleshooting and saving a
+report, and uninstalling. Its pages are in [docs/guide](docs/guide).
 
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it. Questions,
 and which games work for you, go to
@@ -89,7 +57,7 @@ To build it yourself instead, see [Building](#building).
   any of the projects it builds on.
 - **It changes Steam.** Setting up adds a library to `/Applications/Steam.app` and signs that app
   again, which replaces Valve's signature on it. That is how Steam for Mac learns to offer
-  Windows games. Uninstall in Hadron takes it out, and reinstalling Steam from Valve restores
+  Windows games. Remove from Steam in Hadron takes it out, and reinstalling Steam from Valve restores
   Valve's signature. A Steam update can undo the setup; open Hadron and choose Repair. Valve has
   said nothing about tools like this on the Mac either way, so use it at your own risk.
 - **It is early.** A handful of games play well ([Status](#status)). Many do not start yet.
