@@ -199,8 +199,11 @@ once, cause unknown, and not known to be tied to this build.
 
 On 2026-11-23 the queue moved to Mesa main (findings #74). Samples of the suites on that build
 match this table; 18 ES 3.1 `tessellation.user_defined_io.per_vertex_block` tests that failed
-on it pass with 0079, and one Khronos ES 3.1 test fails with the new Zink (open, findings #74).
-The full runs are still to be made again.
+on it pass with 0079. One Khronos ES 3.1 test,
+`geometry_shader.layered_fbo.fb_texture_invalid_level_number`, fails with the new Zink: Mesa now
+follows ES 3.1 on levels of immutable textures (upstream `384eddfdbf7`), and the test, which
+expected ES 3.2's error, was fixed after CTS 1.4.6.2 (findings #74). It is expected to fail until
+the suites are built from a CTS with that fix. The full runs are still to be made again.
 
 What is left, and what was decided about it with the project owner on 2026-10-04. "Left" means
 left for the alpha with the reason written here, not forgotten. The one gap that was ours and was

@@ -2274,10 +2274,24 @@ failure) and one in 50 of the Vulkan `ssbo`, `compute`, `spirv_assembly`, `memor
 `binding_model` lists (3,531 pass, nothing new against `vk-full-r4`). The full suites are still to
 run on it.
 
-Open: Khronos ES 3.1 `geometry_shader.layered_fbo.fb_texture_invalid_level_number` fails with the
-new Zink ("Error different than GL_INVALID_VALUE was generated"), with or without 0079, and passes
-with the installed Zink on the new KosmicKrisp: an API error check in Mesa's OpenGL code, not
-looked into yet.
+Khronos ES 3.1 `geometry_shader.layered_fbo.fb_texture_invalid_level_number` fails with the new
+Zink, with or without 0079. The suite's test is wrong, and Mesa's new behaviour is right. The test
+makes 3D and 2D array textures with two levels by `glTexStorage3D`, attaches level 2 of each with
+`glFramebufferTexture` and expects `GL_INVALID_VALUE`. Zink on KosmicKrisp gives an ES 3.1 context
+(it does not reach 3.2). With the Zink of the 0.3.3 runtime, the call gives `GL_INVALID_VALUE`;
+with the new one it gives no error, and `glCheckFramebufferStatus` gives
+`GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT` (a short EGL program, both against the new KosmicKrisp).
+The change is upstream's `384eddfdbf7` ("mesa: check right levels depending on the context"):
+Mesa used to require level < `TEXTURE_IMMUTABLE_LEVELS` for an immutable texture in every API,
+and now does so only on desktop OpenGL and ES 3.2. ES 3.1's section 9.2.8 asks only that the level
+be no larger than log2 of `MAX_3D_TEXTURE_SIZE` (3D) or `MAX_TEXTURE_SIZE` (2D array); the
+`TEXTURE_IMMUTABLE_LEVELS` condition first appears in ES 3.2's 9.2.8, and `OES_geometry_shader`
+refers to 9.2.8's "supported texture level". On ES 3.1 such an attachment is legal and leaves the
+framebuffer incomplete. The commit names this test as one it breaks; VK-GL-CTS fixed the test on
+2026-11-06 (`b62f70f03ae4`, Khronos issue 7122), on its main branch only, after the 1.4.6.2 that
+Hadron builds and in no release yet. The fixed test expects exactly what the new Zink does. Mesa's
+main of 2026-11-25 has the same `fbobject.c`. Nothing to fix in Mesa; the failure goes away with a
+CTS that has the fix.
 
 Old numbers to new: 0001-0003 stay; 0010-0036 are now 0004-0030 (six less); 0038-0069 are
 0031-0062 (seven less); 0070 is dropped; 0071-0082 are 0063-0074 (eight less); 0084-0086 are
