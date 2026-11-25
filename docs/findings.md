@@ -1811,7 +1811,8 @@ image is mapped (the first thread's data, the ARM64EC code map). With it the tes
 loaded 30 of 30 direct starts and 40 of 40 as a child, the way the game's bootstrap starts it.
 Upstream Wine's rework of the reserved areas (#120) may offer a fuller fix at the next rebase. The
 report's minor case, an x64 `infinst.exe` with base 0x100000000 from DirectX's June 2010
-redistributable, is not covered: its range starts below 4 GB, in the page zero.
+redistributable, is not covered: its range starts at 4 GB, in the part of the page zero the loader
+left (fixed in #75).
 
 ## Depth bounds before Apple family 10 (fixed, #57, issue #128)
 
@@ -2407,6 +2408,83 @@ winemac draws window surfaces through IOSurfaces, sends IME updates from the mai
 (8b2f29dfc2) and updates the clipboard asynchronously; win32u creates OpenGL compatibility contexts
 by default (72a296b688) and gives macOS extra root contexts (cc91be7b65); ARM64EC gained XSTATE in
 its contexts (fc0d79cf5b and the commits around it), which FEX's x64 code sees.
+
+## An executable based at 4 GB never loaded: the page zero reaches past 4 GB (fixed, #75)
+
+Forza Horizon 4's first start runs DirectX's June 2010 redistributable, whose x64 `infinst.exe` has
+base 0x100000000 and no relocations. It never loaded: `wine: 100000000-100010000 still in use after
+32 restarts`, then `failed to create main module ... infinst.exe, status c0000018`. #56 put that
+down to the range starting below 4 GB; it starts at 4 GB. `tests/win/fixed-base.c` linked with
+`--image-base,0x100000000` (and `-DBULK_SIZE=0x10000`, 0x27000 bytes in all) fails the same way.
+
+At `main()` of the loader (lldb with ASLR on, the bundle's own signature), `mach_vm_region` at
+0x100000000 returns one PROT_NONE region from 0x4000 to the loader's image, 0x100dd8000,
+0x102740000 and 0x102104000 in three starts. With the cross-architecture entitlement the page zero
+is that region: it does not end at 4 GB but at the executable, which the kernel slides. Over 2000
+starts of a plain probe the slide was 0x8000 to 0x4ff8000, about evenly spread, so the region
+always holds 4 GB itself. The loader replaced it below 4 GB only (`low_reserve`), so its rest stayed
+mapped and nothing could be mapped there; patch 0042 saw it at every start and started again in
+vain. Without the entitlement the kernel raises the lowest address instead, and a mapping there
+fails as well.
+
+Wine patch 0052 makes all of the region, rounded down to 64 KB, the loader's low reserve, which
+ntdll uses like the rest of the low memory: an image based there is mapped into it. 0042 leaves that
+part of an executable's range out of its check. What is left is the loader itself, at 4 GB plus the
+slide: an executable based at 4 GB loads when the slide is larger than the image, and the loader
+starts again otherwise (by the slide's spread, a third of starts for a 16 MB image, two thirds for
+64 MB). One larger than 80 MB cannot load at 4 GB here. On Linux the preloader reserves the low
+8 GB, and Windows maps nothing there before the executable; an arm64 macOS executable must be
+position-independent, and `ld` ignores `-image_base` for it and caps `-pagezero_size` at 4 GB, so
+the loader cannot be put elsewhere.
+
+With the release runtime's loader rebuilt and signed as its bundle is, 2026-11-24:
+
+| Test | Before | After |
+|---|---|---|
+| fixed-base at 4 GB, 0x27000 bytes (infinst.exe's case), direct starts | 0 of 5 loaded (32 restarts each) | 20 of 20 |
+| the same, 30 starts as a child | not run | 0 of 30 failed |
+| fixed-base at 4 GB, 16 MB / 64 MB, direct, and 30 as a child | 16 MB: 0 of 5 | 20 of 20, 0 of 30 failed, each |
+| fixed-base, Hogwarts' size (#56), direct / as a child | 5 of 5 / not run | 20 of 20 / 0 of 30 failed |
+| fixed-base, Wukong's size (#71), the same | not run | 20 of 20 / 0 of 30 failed |
+| hello x64, i386 and arm64, is-ec-code, thread-allocation (#28), `cmd /c ver`, syswow64 `cmd` | not run | pass |
+| `wineboot -u` in a new prefix | the same 8 `err` lines | the same 8 |
+
+In a running process `vmmap` shows the reserved region from 0x7ffe4000 to 0x102950000, 16 KB below
+the loader's image. ntdll places each thread's data and the ARM64EC emulator stacks bottom-up above
+4 GB (`virtual_alloc_thread_data`, `limit_4g`), so these now go there too, after the image: in a
+trace of the 16 MB test the main thread's data went to 0x101020000, where it was at 0x7000000000
+before. That moves the allocations of a program without ASLR as well. 64 MB reservations by such a
+program went to 0x7001060000 and up before, as ntdll's bottom-up search started where it had
+reserved room for the thread data, and to 0x4040000 only from the 65th; now they start at 0xc80000
+and fill the 4 GB first, as Windows places them. Not tested: the game itself, Steam's DirectX
+install, the `--dev` build.
+
+## Forza Horizon 4 stops while its DLLs initialize, holding the loader lock (open, #76)
+
+Two reports (Hadron 0.3.3, M4 Pro, macOS 27.3) end the same way three times: the main thread loads
+the game's imports (the last ones `libcef.dll` and `xrnm.dll`), runs their initialization
+(`__telemetry_main_invoke_trigger` for `commonEventLoggingLibrary_Release.dll`; ETW registrations
+from code in `PartyWin.dll` and `xrnm.dll`, by address), loads `winemac.drv`, calls
+`GetPackagesByPackageFamily("Microsoft.VCLibs.140.00_8wekyb3d8bbwe")` and prints nothing more.
+Another thread, 13 thread ids after the main one in every run, then reports every minute that it
+waits for `loader_section`, held by the main thread. The loader lock is held while a DLL is loaded
+and while `DllMain`s run, so the main thread is in one of those.
+
+The waiting thread is very likely a bystander: winemac.drv starts one in its own `DllMain` when
+`SteamGameId` is set (patch 0025, the overlay's input), and a new thread waits for the loader lock
+before it runs. `tests/win/dllmain-display.c` has a `DllMain` that loads the display driver (screen
+size, a screen DC, a window); with `SteamGameId=1` and `DM_SLEEP=1` the same message comes from that
+thread, and without `SteamGameId` none. The first message comes 5 seconds into the wait, later ones
+every 60 (`RtlpWaitForCriticalSection`), and the main thread's last line comes after the first, so
+it was still running then. No other thread reports waiting for the loader lock, and the main thread
+reports no critical section wait of its own: whatever it waits for, if it waits, is something else.
+Loading the display driver in a `DllMain` is not it by itself: the test finishes in about a second.
+
+Not known yet: what the main thread does after the last line. A new log with
+`WINEDEBUG=err+all,+loaddll,+module,+timestamp,+pid` in the game's launch options says which
+`DllMain` is running (`+module` traces each call and return), and a `sample` of the game's process
+taken while it hangs shows where each thread is on the native side: a server wait, the Cocoa main
+thread, or FEX.
 ## vkd3d-proton moved to 3.1 (#72, issue #125)
 
 vkd3d-proton is pinned to the v3.1 tag (2026-10-28) instead of v3.0.1. Patches 0005 and 0006 were

@@ -6,7 +6,9 @@
  *        -Wl,--image-base,0x140000000 -Wl,--disable-dynamicbase -Wl,--disable-reloc-section
  * With -DBULK_SIZE=0x2c3c0000 the image ends past 0x16c3d0000, as Black Myth: Wukong's
  * b1-Win64-Shipping.exe (708 MB) does: that range takes in where macOS puts the main thread's
- * stack (findings #71). */
+ * stack (findings #71). With -Wl,--image-base,0x100000000 (and a small BULK_SIZE such as
+ * 0x10000) it is based at 4 GB, as the x64 infinst.exe of DirectX's redistributable is: that
+ * range is in the page zero until the loader takes it over (findings #75). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
