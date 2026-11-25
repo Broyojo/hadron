@@ -2115,8 +2115,40 @@ bytes a second instead of its 4003 decodes to 0 samples with 15 to 17 errors, an
 stream declared with FAudio's flags (`0x1f`, bit reservoir and variable block length) to 0 with
 242. FAudio declares fixed codec flags for xWMA and corrects `nAvgBytesPerSec` to a table of
 rates (`fixup_wma_bitrate`); a format of the game's that does not match either would give this.
-The next step is to log the `WAVEFORMATEX` the game passes to `CreateSourceVoice` and decode one
-of its buffers with the test.
+
+Wine patch 0053 logs what is needed to find out. When a buffer of an xWMA voice gives no output by
+the end of its stream, or a decoder call fails, FAudio writes four `err:faudio:report_failure`
+lines, once per voice (FAudio's voice, not the game's `IXAudio2SourceVoice`): what failed and how
+much of the buffer was pushed; the format the game passed to `CreateSourceVoice`, with `cbSize`
+and its extra bytes in hex, which FAudio drops when it turns `WAVE_FORMAT_WMAUDIO2` into an
+extensible format; the media type FAudio gave the decoder, with the corrected bytes a second and
+the codec data; and the buffer's packets, decoded sizes, play and loop range and first 16 bytes.
+A buffer that decodes costs one comparison after the decode loop and logs nothing.
+`tests/win/xwma-voice.c` plays packets on two voices through XAudio2 2.9, each with the buffer
+queued twice and a volume meter on it. `wmaencdata.bin` declared as what it is (22050 Hz stereo,
+1487-byte packets, 4003 bytes a second) sounds and logs nothing, on i686 under FEX and on aarch64.
+Declared as 44100 Hz it is silent, with the game's pattern (libavcodec's `next_block_len_bits 5
+out of range`, 214 `NOTIFY_START_OF_STREAM` fixmes a voice over two buffers) and one report for
+each voice (i686):
+
+```
+err:faudio:report_failure voice 007AEAE0: no output at the end of the stream, 4461 of 4461 bytes pushed.
+err:faudio:report_failure voice 007AEAE0: the game's format: tag 0x161, 2 channels, 44100 Hz, 4003 bytes/s, block align 1487, 16 bits, cbSize 0, extra bytes none.
+err:faudio:report_failure voice 007AEAE0: given to decoder 007AB8FC: {00000161-0000-0010-8000-00aa00389b71}, 2 channels, 44100 Hz, 4000 bytes/s, block align 1487, 16 bits, codec data 000000001f0000000000000000000000.
+err:faudio:report_failure voice 007AEAE0: buffer 007ACE50: 3 packets, decoded bytes 31400 after the first, 94208 in all, play 0+0, loop 0+0 x0, starts 09000177e9480c8444884a4064222443.
+```
+
+An FFmpeg stream (44100 Hz stereo, 278-byte packets, 6000 bytes a second, codec flags `0x0001`)
+played the same way is silent and reported too, its codec data given to the decoder as
+FAudio's `0x1f`.
+
+What to ask the reporter, with a build that has 0053: a report (Save a report in the app) of a
+session that reaches a silent voice line, and the four lines for each silent voice from it. If
+the game's format and what the decoder was given differ (bytes a second, or extra bytes in
+place of which FAudio declares its flags), that is the candidate. `xwma-voice.exe` takes the
+game's rate, channels, block align and bytes a second, `wma-decoder-drain.exe` also codec data in
+place of FAudio's. Both need the game's own packets, cut from its sound files, which the buffer's
+first 16 bytes can find.
 
 No call in the path blocks. Measured in the test (i686 under FEX, then aarch64), before and after
 the patch alike: `ProcessOutput` at most 0.6 ms (0.2), `ProcessInput` 0.1 ms (0.2 on i686 with
