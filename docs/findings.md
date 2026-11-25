@@ -2356,3 +2356,30 @@ program went to 0x7001060000 and up before, as ntdll's bottom-up search started 
 reserved room for the thread data, and to 0x4040000 only from the 65th; now they start at 0xc80000
 and fill the 4 GB first, as Windows places them. Not tested: the game itself, Steam's DirectX
 install, the `--dev` build.
+
+## Forza Horizon 4 stops while its DLLs initialize, holding the loader lock (open, #76)
+
+Two reports (Hadron 0.3.3, M4 Pro, macOS 27.3) end the same way three times: the main thread loads
+the game's imports (the last ones `libcef.dll` and `xrnm.dll`), runs their initialization
+(`__telemetry_main_invoke_trigger` for `commonEventLoggingLibrary_Release.dll`; ETW registrations
+from code in `PartyWin.dll` and `xrnm.dll`, by address), loads `winemac.drv`, calls
+`GetPackagesByPackageFamily("Microsoft.VCLibs.140.00_8wekyb3d8bbwe")` and prints nothing more.
+Another thread, 13 thread ids after the main one in every run, then reports every minute that it
+waits for `loader_section`, held by the main thread. The loader lock is held while a DLL is loaded
+and while `DllMain`s run, so the main thread is in one of those.
+
+The waiting thread is very likely a bystander: winemac.drv starts one in its own `DllMain` when
+`SteamGameId` is set (patch 0025, the overlay's input), and a new thread waits for the loader lock
+before it runs. `tests/win/dllmain-display.c` has a `DllMain` that loads the display driver (screen
+size, a screen DC, a window); with `SteamGameId=1` and `DM_SLEEP=1` the same message comes from that
+thread, and without `SteamGameId` none. The first message comes 5 seconds into the wait, later ones
+every 60 (`RtlpWaitForCriticalSection`), and the main thread's last line comes after the first, so
+it was still running then. No other thread reports waiting for the loader lock, and the main thread
+reports no critical section wait of its own: whatever it waits for, if it waits, is something else.
+Loading the display driver in a `DllMain` is not it by itself: the test finishes in about a second.
+
+Not known yet: what the main thread does after the last line. A new log with
+`WINEDEBUG=err+all,+loaddll,+module,+timestamp,+pid` in the game's launch options says which
+`DllMain` is running (`+module` traces each call and return), and a `sample` of the game's process
+taken while it hangs shows where each thread is on the native side: a server wait, the Cocoa main
+thread, or FEX.
