@@ -767,6 +767,9 @@ not see those writes here. Not verified. The next experiment is the same `jjs` t
 `FEX_SMCCHECKS=full`, and with `FEX_DISKCACHE=0`; `scripts/wine-run` passes only `FEX_DISKCACHE`
 on, so run `dist/bin/wine` with its environment by hand.
 
+FEX-2611.1 (#67) keeps a guest load whose value is unused, which C1's null checks rely on: the
+likeliest cause so far. Repeat the `jjs` test, and the game's own `java.exe`, on it first.
+
 ## Wine: native host mappings stall thread creation on macOS (fixed, #28)
 
 Astroneer froze for 2.7–2.9 seconds on mission completion on an Apple M5 Max with
@@ -1433,7 +1436,7 @@ The Paradox Launcher's GPU process died creating a compute pipeline whose receiv
 0xbaadf00dbaadf00d, Wine's fill for uninitialized heap memory. `ClearUAV`'s constructor compiles
 its pipelines through `ArgumentEncodingContext::device_`, which was declared, and so initialized,
 after it. Upstream DXMT fixed the order in fb4515681d (2026-09-30), after our pin; DXMT patch
-0003 is that commit, to drop when the pin moves past it. Found by Lennard Zehner (#80).
+0003 was that commit until the pin moved past it (#68). Found by Lennard Zehner (#80).
 
 ## Writable shared sections on 16 KB pages (fixed, #43)
 
@@ -2073,6 +2076,105 @@ virtual visible rect's, in `get_surface_rect`). Whether such a window reaches th
 fullscreen at all is unchecked. In the GDI-only test the window's last pixel row is off-colour at the screen's
 shape, before and after: win32u's scaled surface, not the letterbox.
 
+## FEX moved to FEX-2611.1 (#67)
+
+FEX moved from `0df84d384` (2026-09-28) to the FEX-2611.1 release (`4f9c1f1e3`, 2026-11-11),
+which is FEX-2611 with the CPUID crash fix (FEX 0006 before) and the forced-assert fix
+(`cf2f831ad`: a FEX assert now ends the process with 0x42 instead of faulting on). One upstream
+commit from after the release is on top: `bfad5d692`, without which 2611 decodes RDPKRU and
+WRPKRU as SERIALIZE. Hadron's five patches rebased with two conflicts, both where upstream's new
+`CheckSupportsTPIDRRO_CPU` unix call sits in the same places as ours (its `PR_GET_TPIDRRO_CPU`
+define, the function enum, `__wine_unix_call_funcs`); ours follow it.
+
+What it changes for Hadron, checked with a test program in x86-64 and i386 against the old
+build (same prefix setup, `FEX_DISKCACHE=1`):
+
+- **HotSpot's null checks.** `4e1ad46b1` keeps a guest load whose value is unused. HotSpot's C1
+  checks for null with `cmp reg, [obj]` whose flags the next instruction overwrites, and relies
+  on the access violation. The old build dropped the load and no exception came; the new one
+  raises it. This may be #27: not yet tried with a JRE.
+- **SERIALIZE** is now reported (CPUID 7 EDX bit 14) and runs; RDPKRU and WRPKRU still raise
+  illegal instruction, as before.
+- **CLFLUSH** now becomes `DC CIVAC` on Wine (`7d0cf9b16` turned an inverted check around); it
+  ran without a fault on macOS, as did CLFLUSHOPT.
+- **TPIDRRO.** FEX now asks the unix side whether `TPIDRRO_EL0` holds the CPU number, to offer
+  RDTSCP and RDPID. Hadron's `prctl` stub (FEX 0001) answers no, so both stay hidden, as before.
+- **Disk cache** format 28 to 44: each game's cache is rebuilt once.
+- **Unwind information.** `ef006bdb1` builds the DLLs with `-fno-asynchronous-unwind-tables`
+  (a clash with `preserve_all` under MinGW). `libwow64fex.dll` keeps 2304 of 4015
+  `RUNTIME_FUNCTION`s (`llvm-readobj --unwind`; `llvm-objdump --unwind-info` reads only x86-64).
+  The entry points in `Source/Windows` keep theirs (`BTCpuSimulate`, `ProcessInit`,
+  `ResetToConsistentState`, the memory notifications); FEXCore's internals lose them (the JIT,
+  `ExitFunctionLink`, `InvalidateRange`, `HandleUnalignedAccess`). Wine's unwinder takes such a
+  function for a leaf, so a backtrace through it, or an exception raised inside it, unwinds
+  wrongly. Guest exceptions are not affected: they are raised from the context FEX rebuilds. Keep
+  it in mind when reading a FEX crash, as in #53.
+- **Build.** FEX's Windows `FEXOfflineCompiler` now links FEX's unix-call code through the
+  TPIDRRO check, and with it FEX 0005's `AllocateJIT`, whose `VirtualAlloc2` only the DLLs'
+  own Windows API layer provides: the link failed. `AllocateJIT` now calls
+  `NtAllocateVirtualMemoryEx` itself, with the same address requirement for WoW64.
+
+Found along the way, the same in both builds: an integer division by zero raises no exception
+under FEX (`div` by a zero register returns), where Windows raises
+`EXCEPTION_INT_DIVIDE_BY_ZERO`. Open.
+
+## Subnautica hung loading a world: FEX's x87 fallbacks returned with RBX overwritten (fixed, #79)
+
+On the 0.4.0 test build Subnautica showed its menu, and loading a save stopped for good at
+"loading scene: Essentials", one core busy (#77, on the `subnautica-hang` branch). Run by hand
+from a copy of its prefix with `WINEDEBUG=+seh FEX_SILENTLOG=0`, the main thread's last exception
+was an execute fault at `0x6500000054`, which FEX passed through: the pc was in neither its JIT nor
+its dispatcher. The native registers (logged by a debugging build of FEX) put the jump in the
+dispatcher's ABI handler for the F80 fallbacks, `blr x13` with `x13` loaded from
+`Pointers.FallbackHandlerPointers`: entries 18, 19, 42 and 43 of that table held pairs of small
+integers, the same every run, in the shape of Subnautica's `Int3` bounds. The guest had stored them
+there. At the moment the table changed, the guest's RBX held the `CpuStateFrame` pointer, and the
+code before it was Mono's `Math.Cos`: `fld qword [rsp-8]; fcos; fstp qword [rsp-8]`.
+
+The cause is in the compiler. FEX-2611 enables `preserve_all` for MinGW builds with clang 22.1 or
+newer (`c76fccf25`, with `ef006bdb1` turning asynchronous unwind tables off for it), so its ABI
+handlers keep the guest's callee-saved registers live across a fallback call. Clang 23.1.2 (our
+llvm-mingw) places a spill slot over the save slot of a callee-saved register in these functions,
+in the ARM64EC and the AArch64 builds alike, with or without unwind tables:
+
+```
+stp  x27, x30, [sp, #16]   // save RBX
+...
+str  x8, [sp, #16]         // spill the frame pointer over it
+...
+ldp  x27, x30, [sp, #16]   // "restore" RBX
+```
+
+`tests/win/x87-registers.c` runs each x87 instruction with a known value in every register: under
+FEX-2611.1 FSIN, FCOS, FPTAN, F2XM1 and FPATAN return with RBX replaced by the frame pointer, FYL2X
+and FYL2XP1 with R12; FSQRT, FPREM, FSCALE and the rest keep everything. 0.3.3's FEX (`0df84d384`
+with its queue) passes it all. Any program that uses x87 transcendentals is exposed: Subnautica's
+next store through RBX wrote its cell bounds over FEX's thread state, and the next F80 fallback
+jumped to them. In the AArch64 (WoW64) build the overlapped save slot is x28's in most of these
+handlers, which holds the same frame pointer there, but x19's in FYL2X; no 32-bit program was tried.
+
+FEX 0007 treats `preserve_all` as unavailable under MinGW again, as before 2611, which also brings
+the asynchronous unwind tables back (`libwow64fex.dll` has 4033 `RUNTIME_FUNCTION`s again, against
+2304, see #67). The ABI handlers then spill and fill around fallback calls as they did in 0.3.3; the
+cost is a few more stores per x87 transcendental, to be measured if a game spends its time there.
+The change was written by an agent, and FEX takes no AI-written code, so it stays downstream; the
+compiler bug is worth reporting to LLVM with the reduced handler.
+
+Why it hung instead of crashing is Wine's: the AV at the bad address went to the SEH handlers, and
+the ARM64EC dispatcher unwound a frame without unwind data as a leaf, `Pc = Lr` with the stack
+pointer kept, which it then unwound to itself again forever (#77 has the sample). Wine 0055 makes
+`virtual_unwind` fail a frame whose pc, sp, fp and lr come out unchanged, and the dispatchers treat
+that like an invalid frame: the stack is marked invalid and the exception goes unhandled, so the
+program ends with its code. Raising `STATUS_INVALID_DISPOSITION` instead, as for a frame without
+unwind data, recursed through `KiUserExceptionDispatcher`'s frame back to the same one until the
+stack overflowed. `tests/win/unwind-no-progress.c` hangs without the patch, as ARM64EC and as ARM64,
+and its child ends with `0xc0000005` with it. Subnautica on FEX-2611.1 with Wine 0055 quits when the
+load reaches the bad jump instead of hanging.
+
+With FEX 0007 Subnautica loads a save in about 19 seconds ("LOADING FINISHED", `'Root' took
+18.89 seconds`) and keeps its heartbeats going in the world. `tests/win/jit-unwind.c` (including
+the null check that now faults, #67), `mono-host.c` with Subnautica's Mono, `hello` (x86-64 and
+i386), `is-ec-code` and `thread-allocation` pass.
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
 Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play
@@ -2188,3 +2290,26 @@ it loses focus is #178's question (Windows minimizes it); this run did not settl
 Not tested here: games (FNaF fullscreen at 16:9 and its focus loss #178 and office edges #135,
 Portal 2's resolution change, Ultimate Custom Night, ROAM for #88), 0004's `Reset` that keeps
 fullscreen, an external display.
+## DXMT moved to upstream main; its geometry shaders drop strips restarted at odd positions (open, #68)
+
+The DXMT pin moved from e86484e to upstream main, 25ea28f (2026-11-23), 163 commits. Eleven of
+the thirteen patches were upstream commits and are gone; Hadron's own two (display sync, and
+handing other devices' swapchains to DXVK's DXGI) apply unchanged. About 120 of the commits are
+DXIL and Direct3D 12 work, built only with `enable_d3d12`, which stays off. The risk is a
+refactor of the DXBC converter (`IOHelper`, 4b255b7, and `VertexPuller`, 5c80192, the code that
+fetches vertex attributes in the shader). Two tests compare it with the old build, both run as
+x86_64 and as i686 programs: `tests/win/d3d11vfmt.c` reads back what 43 vertex formats, a
+per-instance step rate, a start instance and a base vertex give, and `tests/win/d3d11gs.c` draws
+points and an indexed strip through geometry shaders. Both printed the same numbers with either
+build, and nothing under Metal API validation. `d3d11tri`, DXMT's own cube and Blinn-Phong
+tests and `d3d11fs` (exclusive fullscreen at 1280×720) looked and reported the same, at the
+display's 120 Hz.
+
+Both builds share two gaps the tests found. A strip restarted by a cut index through a geometry
+shader: DXMT's geometry stage numbers a strip's triangles by their position in the index buffer
+(`dxbc_converter_gs.cpp`, whose comment says restarts "can be broken"), so a triangle after a cut
+at an odd position is wound the wrong way and culled (it is drawn with culling off), and
+`SV_PrimitiveID` after a cut counts positions, not primitives (5 instead of 2 in the test).
+Without a geometry shader the strip is right. And `CreateInputLayout` refuses
+`R10G10B10A2_UINT`, a format Direct3D 11 requires for vertex buffers: it has no attribute format
+in `dxmt_format.cpp`, though the vertex puller could fetch it. Neither has been seen in a game.

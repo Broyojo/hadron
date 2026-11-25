@@ -1,0 +1,40 @@
+From 17aa4d6cc4ae2653a46cdfb51bd965144a69682a Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Mon, 23 Nov 2026 17:18:51 -0500
+Subject: [PATCH] build: Find mingw-w64's __icall_helper_arm64ec before
+ winecrt0's
+
+mingw-w64's chpe.o provides the CHPE metadata and __icall_helper_arm64ec.
+Since Wine 11.21 (c0b80864362, winebuild generates the metadata),
+winecrt0's arm64ec.o holds only its own __icall_helper_arm64ec. winemetal
+links winecrt0, so the ARM64X link pulled both and failed with a
+duplicate symbol. Linking libmingwex first resolves the helper from the
+CRT that also supplies the metadata.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01YWjP4mL8vjVQJiqrCXHbNm
+---
+ build-arm64ec.txt | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/build-arm64ec.txt b/build-arm64ec.txt
+index e9ac3b4..113cb52 100644
+--- a/build-arm64ec.txt
++++ b/build-arm64ec.txt
+@@ -11,8 +11,11 @@ needs_exe_wrapper = true
+ [built-in options]
+ c_args = ['-marm64x']
+ cpp_args = ['-marm64x']
+-c_link_args = ['-marm64x']
+-cpp_link_args = ['-marm64x']
++# -lmingwex: mingw-w64's chpe.o has the CHPE metadata and __icall_helper_arm64ec. Since Wine
++# 11.21 winecrt0 has its own __icall_helper_arm64ec (winebuild makes the metadata), and
++# winemetal links winecrt0, so the two collide unless mingw-w64's is found first.
++c_link_args = ['-marm64x', '-lmingwex']
++cpp_link_args = ['-marm64x', '-lmingwex']
+ 
+ [host_machine]
+ system = 'windows'
+-- 
+2.54.0 (Apple Git-157)
+
