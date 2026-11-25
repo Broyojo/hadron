@@ -44,6 +44,8 @@ also have a Mac version, launch options and per-game settings, Windows programs 
 Steam, the `hadron` command, updates, Retina mode and MetalFX, troubleshooting and saving a
 report, and uninstalling. Its pages are in [docs/guide](docs/guide).
 
+**[HadronDB](https://hadrondb.com)** lists how games run with Hadron, from players' reports. Tried a game? Add a report there.
+
 If something does not work, [CONTRIBUTING.md](CONTRIBUTING.md) says how to report it. Questions,
 and which games work for you, go to
 [Discussions](https://github.com/Broyojo/hadron/discussions) or the
