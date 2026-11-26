@@ -1,0 +1,61 @@
+From 4d73e42ad9aabb9938f5b0d5d84503501f1d3c2c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 26 Nov 2026 13:38:06 -0500
+Subject: [PATCH] JIT: Don't link to a block that was invalidated during the
+ lookup
+
+ExitFunctionLink looks up or compiles the target block, then takes the
+code invalidation lock again to patch the caller. An invalidation in
+between erases the target and severs the links to it, but the link made
+afterwards is to the erased block: the caller keeps running the stale
+code until the target address is invalidated again. A program that
+patches a function, flushes the instruction cache and calls it through
+an already compiled caller could still run the old version.
+
+Check under the lock that the target is still mapped to the block that
+was found, and otherwise return to the dispatcher, which looks the
+target up again.
+---
+ FEXCore/Source/Interface/Core/JIT/JIT.cpp   | 8 ++++++++
+ FEXCore/Source/Interface/Core/LookupCache.h | 6 ++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index fb51b14516..0c7ef4162b 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -581,6 +581,14 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+   // Lock here is necessary to prevent simultaneous linking and delinking
+   auto lk = Thread->LookupCache->AcquireWriteLock();
+ 
++  // The target was looked up or compiled before the invalidation lock was taken again, so it may have been invalidated
++  // since. Linking to it then would keep this caller running the stale block until the target is invalidated again.
++  // Let the dispatcher look the target up instead.
++  if (!Thread->LookupCache->Shared->IsBlockMapped(GuestRip, HostCode, lk)) {
++    Frame->State.rip = GuestRip;
++    return Frame->Pointers.DispatcherLoopTop;
++  }
++
+   // The callsite and link record are in the CodeBuffer
+   FEXCore::Allocator::ScopedJITWrite JITWrite;
+ 
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index 531fc26c30..3ec2fa1913 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -114,6 +114,12 @@ struct GuestToHostMap {
+     return &HostCode->second;
+   }
+ 
++  // Returns true if Address is still mapped to HostCode, for a lookup made without this lock held
++  bool IsBlockMapped(uint64_t Address, uintptr_t HostCode, const LookupCacheWriteLockToken&) const {
++    auto It = BlockList.find(Address);
++    return It != BlockList.end() && It->second.HostCode == HostCode;
++  }
++
+   bool Erase(uint64_t Address, const LookupCacheWriteLockToken&) {
+     // Sever any links to this block
+     auto lower = BlockLinks->lower_bound({Address, nullptr});
+-- 
+2.54.0 (Apple Git-157)
+

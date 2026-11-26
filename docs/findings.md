@@ -1757,6 +1757,11 @@ scripts (steam-run follows the Wine already in the prefix). Geode is disabled on
 (its `XInput1_4.dll` renamed) until it supports 2.209; if launches still hang then, FEX's lock
 order is the place to start.
 
+On 0.4.0, with Geode 6.0.0, about one start in ten fails, as an exit from a thread in FEX's
+dispatcher. #80 reproduces both failures without the game and fixes three races in FEX: the hang is
+a fault in a compilation, on a lookup cache whose range another thread's exit had unmarked, waiting
+for `ThreadCreationMutex` while a memory notification holds it; not yet confirmed with the game.
+
 ## A mode whose size shares no factor with the screen's aborted the game (fixed, #54)
 
 Teardown, opened on a Sidecar iPad (2628×1970), stopped as it resized its swapchain to 1025×768:
@@ -2182,6 +2187,81 @@ With FEX 0007 Subnautica loads a save in about 19 seconds ("LOADING FINISHED", `
 18.89 seconds`) and keeps its heartbeats going in the world. `tests/win/jit-unwind.c` (including
 the null check that now faults, #67), `mono-host.c` with Subnautica's Mono, `hello` (x86-64 and
 i386), `is-ec-code` and `thread-allocation` pass.
+## Geode's hooks met three races in FEX: torn compiles, stale links, a lost lookup cache range (fixed, #80, issue #208)
+
+On 0.4.0 about one start of Geometry Dash with Geode in ten failed (issue #208, #53): Geode had
+logged only "Setting up internal mod", where it writes its hooks into the game's code while the
+game's other threads run, and Wine's log ended with `frame at pc 00007FF5082B0228 sp
+00007FF4F5590000 does not unwind` and `Exception frame is not in stack limits`. That pc is not
+where the thread faulted but a return address 0x228 into FEX's dispatcher, which runs on the
+emulator stack (the sp): the thread had called from the dispatcher into FEX code that faulted, and
+FEX passed the fault on. Before 0.4.0 most failures were hangs.
+
+`tests/win/smc-hook-race.c` does what a hook installer does, without the game: the main thread
+makes a function's page writable with `VirtualProtect`, writes a jump over its first instruction as
+one aligned 8-byte store, restores the protection and flushes the instruction cache, while six
+threads call the 1,024 functions directly and through callers that call them with direct calls,
+two threads start short-lived threads and one allocates, runs and frees code. Each function returns
+an address only one version can produce. It found three races; each fix below is a FEX patch.
+
+**Code compiled from half-written bytes (FEX 0008).** FEX traps writes to a page of code only once
+it holds compiled blocks, and compiling the first block from a page protected it after the block
+was decoded. `VirtualProtect` lifts the trap and invalidates the page, a thread compiles from it
+unprotected, and the store lands while the decoder is in the instruction: it reads the first byte
+of the old 8-byte NOP and the rest from the new `jmp`, and builds a block from that mix. (Every block
+FEX handed back matched the guest address it was asked for; the blocks themselves were wrong.) The
+disk cache then stored the block under a hash of the bytes read after compiling, the finished
+jump, and loaded it again whenever those bytes came back, later in the run and in later runs; real
+hardware runs either the old or the new instruction. On 0.4.0 with the disk cache on, as
+`scripts/play` runs games, 26 of 30 runs of 10 to 20 s ran garbage and crashed, 5 of 6 with a
+fresh cache; with the cache off, 1 of 24. 0008 has the decoder write-protect each page that holds
+no compiled code when it first reaches it, before reading from it: a racing write then faults, its
+invalidation waits for the compilation, which holds the code invalidation lock, and discards the
+block, and the cache hashes the bytes the block was built from. In one build with a switch for it,
+0 of 10 runs failed with it, 3 of 4 without. The count of protection changes is the one per page
+there was, made earlier, plus a lookup under the lookup cache's read lock per page and compile.
+
+**A link to an invalidated block (FEX 0009).** With its stale-code check on, every run on 0.4.0
+caught a caller still running a function's old version after the patch and its
+`FlushInstructionCache`, within the first two patches, cache on or off. `ExitFunctionLink` looks up
+or compiles the target of a branch, releases the invalidation lock, and takes it again to patch the
+caller; an invalidation in between erased the target, and the link made after it was to the erased
+block (a debugging build counted 82,463 such links in 20 s). 0009 checks under the lock that the
+target is still mapped, and otherwise returns to the dispatcher.
+
+**A lookup cache that lost its range (FEX 0010): Geometry Dash's message, and #53's hang.** With
+0008 and 0009 about one run in 25 still ended in Wine's exact message, `does not unwind` at a
+return address into the dispatcher, or hung with threads waiting for FEX's `ThreadCreationMutex`
+(`RtlpWaitForCriticalSection` names it by address). A thread's lookup cache reserves its L1 and L2
+memory, and the frontend commits it page by page on access violations, for the range the cache
+marks. Its destructor freed the memory and then unmarked the range. A debugging build logged the
+interleaving: an exiting thread freed its range and logged its unmark, a new thread was given the
+same addresses and marked them, the exiting thread's unmark then removed them, and the new thread's
+first L1 access in `FindBlock`, inside `CompileBlock`, faulted with nothing to commit it. That
+fault is passed on, the process ends with Wine's message, and the return address is the
+dispatcher's call of `CompileBlock`. Or, when another thread is in a memory notification, holding
+`ThreadCreationMutex` and waiting for the code invalidation lock that the compiling thread holds,
+the fault handler waits for `ThreadCreationMutex` and both hang: the main thread holding it and a
+thread in `ResetToConsistentStateImpl`, as #53 saw. 0010 unmarks before freeing.
+
+With the three, 200 runs of 10 s passed (100 with each layout of the test, both with the
+stale-code check on and with thread and allocation churn), where on 0.4.0 the same runs failed at
+once. `hello` (x86-64 and i386), `is-ec-code`, `thread-allocation`,
+`x87-registers` and `jit-unwind` (with the HotSpot-style null check) pass as before, and
+`tests/win/bench.c` runs in the same time. The test makes fewer patches with 0008 (about 39,000
+against 57,000 in 20 s), because more of its writes now fault, as they should. The three races are
+in upstream FEX's shared code as well.
+
+Not done: disk caches written before 0008 can still hold mixed blocks, and FEX's cache format did
+not change, so a game's cache is not rebuilt; deleting a prefix's
+`drive_c/users/<user>/AppData/Local/fex-emu/DiskCache` discards them. The cache's lookup hashes the
+guest bytes before the page is protected, which can still load an old version for a moment, not a
+mixed one. The trap is per 4K page and does not cover 16K host-page neighbours (PR #94). The lock
+order that turns a fault during a compilation into a hang remains, for any other such fault. #53's
+other suspect, `CompileBlock`'s `NtProtectVirtualMemory` reaching `NotifyMemoryProtect`, does not
+happen: the dispatcher sets `InSyscallCallback` around compiles and Wine skips the notification.
+Not yet tried with Geometry Dash.
+
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
 Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play
