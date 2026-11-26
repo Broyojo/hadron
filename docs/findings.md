@@ -1762,7 +1762,8 @@ dispatcher. #80 reproduces both failures without the game and fixes three races 
 a fault in a compilation, on a lookup cache whose range another thread's exit had unmarked, waiting
 for `ThreadCreationMutex` while a memory notification holds it. With those the game still failed 3
 starts in 30, as a native branch to a non-code address from FEX's JIT; #80 has what that is and
-one cause of it, a branch to address 0.
+one cause of it, a branch to address 0. With that fixed too, 2 in 30 failed, one as a native branch
+to the start of an x86 function in Geode.dll; its cause is open (#80).
 
 ## A mode whose size shares no factor with the screen's aborted the game (fixed, #54)
 
@@ -2323,7 +2324,49 @@ With 0008 to 0011 (and the review fixes), 200 runs of `smc-hook-race` of 10 s pa
 layout, with the stale-code check, thread and allocation churn, the disk cache cleared once at the
 start; `null-branch` passes 20 times in 20; `hello` (x86-64 and i386), `is-ec-code`,
 `thread-allocation`, `x87-registers` and `jit-unwind` pass, and `tests/win/bench.c` runs in the same
-time (int 0.745 s against 0.752 s). Not yet tried with Geometry Dash.
+time (int 0.745 s against 0.752 s).
+
+**Geometry Dash with 0008 to 0011: an x86 function run as host code (open).** 30 starts with FEX's
+log on (`FEX_SILENTLOG=0 FEX_OUTPUTLOG=stderr`) gave 28 ok and 2 failed, about the rate before 0011 (3 in 30). One
+failing log ends with the only two exceptions of thread 0x190: an alignment fault in JIT code at
+`7FF522E40864`, handled ("Handled unaligned atomic: new pc" the same address), then an illegal
+instruction at `6FBE7C416010`, Geode.dll + 0x756010, the first instruction of a function (`push
+r15`) that Geode calls only with direct calls, run as ARM64 code; Wine then reports `invalid frame
+7ff47eb50008`. That frame is 64K-aligned + 8 and off the thread's stack, as in the earlier failures:
+the branch to the guest address came from JIT code or the dispatcher, with sp at the emulator stack
+base. The diagnostic build's `DBG` report didn't appear: it wrote to the process's standard error
+handle, which a game started from Steam need not have.
+
+The alignment faults are FEX's emulation of x86 memory ordering. Loads and stores are emitted as
+load-acquire or store-release (`LDAPR`, `LDAPUR`, `STLR`, `STLUR`) with a `nop` after the load or
+before the store; one that crosses 16 bytes faults, and `HandleUnalignedAccess` (`Arm64.cpp`)
+rewrites it in the shared code into a plain load or store with a barrier in the `nop`'s place, then
+resumes at the load (new pc = pc) or at the barrier before the store (new pc = pc - 4). So a new pc
+equal to the fault address is a load, not a site found patched already; thread 0x154 logged 177 of
+both kinds in the same run. Each step of the rewrite is one aligned 4-byte store that leaves valid
+code (the barrier first, then the access), under a spin lock in the block's tail, and a thread that
+faults on a site another thread has rewritten finds the new instruction and runs it again.
+
+`tests/win/unaligned-atomic-race.c` makes that race as hard as it can: 256 functions that load,
+store and add across 16-byte and cache line boundaries and make a locked add across a line, run by
+workers while a patcher hooks and unhooks them as `smc-hook-race` does (each recompile brings fresh
+sites), and copied with their callers into new memory each round, where a batch of new threads,
+released together, runs all of them in the same order before the copy is freed. A build that logs
+each rewrite logged 56,800 in 3 s, 8,800 of them by a thread that had faulted on a site another
+thread had just rewritten. With 0008 to 0011 it passed 15 runs of 10 s (4 workers, rounds of 8
+threads), 15 with 16 workers and rounds of 24, and 15 of rounds of 32 threads without the patcher,
+and 20 of an earlier version whose rounds copied only the functions: no wrong result, hang or crash. Nothing shows the rewrite going wrong; that thread 0x190's fault came
+right before its crash may only be what FEX's log records, exceptions, both of them its first.
+
+A new diagnostic build (scratch, not in the queue) writes through Wine's debug output, so its lines
+reach the game's log with FEX's log off. For an exception FEX passes on with sp on its emulator stack,
+or with a pc outside ARM64EC code and sp off the thread's stack, `DBG pass:` gives the native
+registers, which of x9 to x13 holds the pc (the registers the dispatcher, the jump thunks and the
+indirect branches branch through), the code around pc and lr, the call-ret stack, the guest stack
+top, the block the thread last entered and the L1 entry for pc; `DBG bp:` gives every rewrite of an
+unaligned access (thread, site, the instructions before and after, where it resumes, the block);
+and `DBG compile`, `DBG link-map` and `DBG link-ret` report a lookup, compile or link that returns a
+host address outside the code buffer.
 
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
