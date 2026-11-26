@@ -73,6 +73,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <dict>
             <key>CFBundleTypeName</key>
             <string>Windows program</string>
+            <key>CFBundleTypeIconSystemGenerated</key>
+            <integer>1</integer>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
