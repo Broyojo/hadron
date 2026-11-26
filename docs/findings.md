@@ -1760,7 +1760,9 @@ order is the place to start.
 On 0.4.0, with Geode 6.0.0, about one start in ten fails, as an exit from a thread in FEX's
 dispatcher. #80 reproduces both failures without the game and fixes three races in FEX: the hang is
 a fault in a compilation, on a lookup cache whose range another thread's exit had unmarked, waiting
-for `ThreadCreationMutex` while a memory notification holds it; not yet confirmed with the game.
+for `ThreadCreationMutex` while a memory notification holds it. With those the game still failed 3
+starts in 30, as a native branch to a non-code address from FEX's JIT; #80 has what that is and
+one cause of it, a branch to address 0.
 
 ## A mode whose size shares no factor with the screen's aborted the game (fixed, #54)
 
@@ -2187,7 +2189,7 @@ With FEX 0007 Subnautica loads a save in about 19 seconds ("LOADING FINISHED", `
 18.89 seconds`) and keeps its heartbeats going in the world. `tests/win/jit-unwind.c` (including
 the null check that now faults, #67), `mono-host.c` with Subnautica's Mono, `hello` (x86-64 and
 i386), `is-ec-code` and `thread-allocation` pass.
-## Geode's hooks met three races in FEX: torn compiles, stale links, a lost lookup cache range (fixed, #80, issue #208)
+## Geode's hooks met three races in FEX: torn compiles, stale links, a lost lookup cache range; and a branch to 0 (#80, issue #208)
 
 On 0.4.0 about one start of Geometry Dash with Geode in ten failed (issue #208, #53): Geode had
 logged only "Setting up internal mod", where it writes its hooks into the game's code while the
@@ -2226,8 +2228,8 @@ caught a caller still running a function's old version after the patch and its
 `FlushInstructionCache`, within the first two patches, cache on or off. `ExitFunctionLink` looks up
 or compiles the target of a branch, releases the invalidation lock, and takes it again to patch the
 caller; an invalidation in between erased the target, and the link made after it was to the erased
-block (a debugging build counted 82,463 such links in 20 s). 0009 checks under the lock that the
-target is still mapped, and otherwise returns to the dispatcher.
+block (a debugging build counted 82,463 such links in 20 s). 0009 links, under the lock, to the
+block the target is mapped to then, and returns to the dispatcher if it isn't mapped.
 
 **A lookup cache that lost its range (FEX 0010): Geometry Dash's message, and #53's hang.** With
 0008 and 0009 about one run in 25 still ended in Wine's exact message, `does not unwind` at a
@@ -2254,13 +2256,74 @@ in upstream FEX's shared code as well.
 
 Not done: disk caches written before 0008 can still hold mixed blocks, and FEX's cache format did
 not change, so a game's cache is not rebuilt; deleting a prefix's
-`drive_c/users/<user>/AppData/Local/fex-emu/DiskCache` discards them. The cache's lookup hashes the
-guest bytes before the page is protected, which can still load an old version for a moment, not a
-mixed one. The trap is per 4K page and does not cover 16K host-page neighbours (PR #94). The lock
-order that turns a fault during a compilation into a hang remains, for any other such fault. #53's
-other suspect, `CompileBlock`'s `NtProtectVirtualMemory` reaching `NotifyMemoryProtect`, does not
-happen: the dispatcher sets `InSyscallCallback` around compiles and Wine skips the notification.
-Not yet tried with Geometry Dash.
+`drive_c/users/<user>/AppData/Local/fex-emu/DiskCache` discards them. The trap is per 4K page and
+does not cover 16K host-page neighbours (PR #94). The lock order that turns a fault during a
+compilation into a hang remains, for any other such fault. #53's other suspect, `CompileBlock`'s
+`NtProtectVirtualMemory` reaching `NotifyMemoryProtect`, does not happen: the dispatcher sets
+`InSyscallCallback` around compiles and Wine skips the notification.
+
+**Review fixes.** An independent review of the three patches found two gaps, both real. 0009
+required the target to still be mapped to the block that was found, which fails whenever two
+threads compiled the same address or a disk cache hit raced a compile: that exit then never linked
+and took the lookup cache's write lock each time it ran. It now links, under the lock, to the block
+the target is mapped to then, and returns to the dispatcher only when the target isn't mapped.
+0008 protected a disk cache hit's pages only after the lookup had hashed them (except those the
+decoder had reached), so a write in between installed the old version. The hit's other pages are
+now protected first, those without code, and the block is looked up again from a fresh decode,
+which also reads the guest data patched into cached code with every page protected; a hit that
+spans pages the decoder hadn't reached costs a second lookup.
+
+**Geometry Dash still failed: FEX's JIT branched to a non-code address on its own stack.** With
+0008 to 0010, 30 starts of Geometry Dash with Geode (the prefix's disk cache cleared first) gave 27
+ok and 3 failed, about 0.4.0's rate, each while Geode logged "Setting up internal mod" and each on
+the 13th thread the game starts (the one that loads `rsaenh.dll` and `wininet.dll` in a good start):
+`call_seh_handlers invalid frame 7ff511fd0008`, `7ff4ead50008`, `7ff4fbac0008`, then "Exception
+frame is not in stack limits". The frame is the base of the thread's FEX emulator stack plus 8.
+`ThreadInit` allocates the 256K emulator stack top-down, so its base is 64K-aligned, and the
+dispatcher sets sp to it whenever it enters JIT code; `is_valid_arm64ec_frame` accepts the thread's
+stack and the emulator stack up to its base. Wine unwinds a native context whose pc is not ARM64EC
+code as x86-64, and without a function table entry as a leaf: its frame is rsp, the base, which
+passes; it pops the 8 bytes above the stack as the next rip, rsp becomes base + 8, and that frame
+fails. So each was a native fault with a pc outside ARM64EC code and sp at the emulator stack base,
+which FEX passed on: JIT code had branched natively to something that isn't code. (The call-ret
+stack's default position is 64K-aligned too, but nothing sets sp there.) #53's crashes of
+2026-10-24 on the older FEX had the same message, and one log with `+seh` shows the fault directly:
+an execute fault at `97FD0889FC39B4D4`, rsp at the emulator stack base.
+
+**A branch to address 0 through an empty lookup entry (FEX 0011).** FEX's lookup caches mark an
+empty entry with a guest address of 0: a zeroed L1 entry or call-ret stack entry is {0, 0}, and an
+invalidated L1 entry keeps its host code with a guest address of 0. The JIT's fast paths compare
+only the guest address with the target, so an indirect call or jump to 0 through the first L1
+entry, and a return to 0 predicted from an empty call-ret stack entry, branched to the entry's host
+code, 0 or a stale block, where Windows raises an access violation at 0 that the program can handle.
+`tests/win/null-branch.c` makes the three branches from a new thread and from one that has run code,
+with a vectored handler that resumes at the caller. On 0.4.0 and with 0008 to 0010 each case ends
+the process with Wine's message (`invalid frame 7ff5889d0008`); a diagnostic build that prints the
+native context of faults on the emulator stack shows pc 0, sp the emulator stack base, the branch
+register 0, and lr in JIT code (the call) or at the dispatcher's +0x228 (the jump and the return), as
+in 0.4.0's message. 0011 sends a branch to 0 to the dispatcher, which compiles a block that raises
+the fault, does the same for a native caller entering the JIT at 0 (ARM64EC's call-ret shortcut on
+entry; the test can't reach it, as Wine's call checker faults first on a null target from native
+code), and keeps `FindBlock` from looking address 0 up in L1. It costs a `cbz` per indirect branch.
+
+Whether Geometry Dash branches to 0 was not shown; on Windows that only works if something handles
+the fault. Probes that add more of what a game does to the hook race found no other cause, 3 to 5
+runs of 10 to 15 s each with no failure: fresh code filling the JIT buffer (813,000 new functions
+in 15 s, so the 16 MB buffer was replaced several times) while other threads take guest access
+violations; x86 callbacks from native code (qsort) that fault; loading and freeing `rsaenh.dll`,
+`cryptnet.dll`, `wininet.dll` and `schannel.dll` in a loop; split-lock atomics; suspending threads
+and reading their context. Reading found one more way to the same message: when the op dispatcher
+can't translate the first instruction of a block, `CompileBlock` returns 0 and the dispatcher
+branches to it; not changed, as nothing points at it yet. The diagnostic build (scratch, not in the
+queue) prints `DBG pass:` with the native registers, the code around pc and lr, the call-ret stack
+around x17 and the guest stack top whenever such a fault reaches the frontend, so a failing start
+with it shows which one it is.
+
+With 0008 to 0011 (and the review fixes), 200 runs of `smc-hook-race` of 10 s pass, 100 with each
+layout, with the stale-code check, thread and allocation churn, the disk cache cleared once at the
+start; `null-branch` passes 20 times in 20; `hello` (x86-64 and i386), `is-ec-code`,
+`thread-allocation`, `x87-registers` and `jit-unwind` pass, and `tests/win/bench.c` runs in the same
+time (int 0.745 s against 0.752 s). Not yet tried with Geometry Dash.
 
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
