@@ -1,8 +1,8 @@
-From b10dd81a9dd574f3ac9305e067baa9fcce0b3714 Mon Sep 17 00:00:00 2001
+From 6bce671056c172b58d9d1dcb544d6e8257ff4d6a Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 26 Nov 2026 14:30:30 -0500
-Subject: [PATCH] FEXCore: Stop tracking a lookup cache's range before freeing
- it
+Subject: [PATCH 10/11] FEXCore: Stop tracking a lookup cache's range before
+ freeing it
 
 A thread's lookup cache only reserves the memory for its L1 and L2
 caches, and the frontend commits it page by page on access violations,

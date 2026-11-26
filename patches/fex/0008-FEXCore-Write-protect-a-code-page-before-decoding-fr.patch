@@ -1,7 +1,8 @@
-From 9a4330bda753661245102c45613afbb1ed317399 Mon Sep 17 00:00:00 2001
+From ca025e9b75e3826deb343e63511b9de42450a476 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 26 Nov 2026 13:37:52 -0500
-Subject: [PATCH] FEXCore: Write-protect a code page before decoding from it
+Subject: [PATCH 08/11] FEXCore: Write-protect a code page before decoding from
+ it
 
 Writes to an executable page are only trapped for SMC detection once the
 page holds compiled code: CompileBlock protected a page that had none
@@ -22,22 +23,73 @@ it, before reading from it. A racing write then faults, its invalidation
 waits for the compilation, which holds the code invalidation lock, and
 discards the block, and the bytes the disk cache hashes are the ones the
 block was built from. The protection after compiling is now redundant.
+
+A disk cache hit had the same gap: the lookup hashes the guest code of
+all the cached block's pages, but only the pages the decoder had reached
+were protected by then. Protect the hit's other pages that hold no code,
+then look the block up again from a fresh decode, so that the hash and
+the guest data patched into the cached code are read with every page
+protected.
+
 A page that already holds code is protected already and is not
 protected again, so a page still costs one protection change the first
-time code is compiled from it, as before, only earlier, and each page a
-compilation reaches costs a lookup under the lookup cache's read lock.
+time code is compiled from it, as before, only earlier. Each page a
+compilation reaches costs a lookup under the lookup cache's read lock,
+and a disk cache hit that spans pages the decoder hadn't reached costs a
+second lookup.
 ---
- FEXCore/Source/Interface/Core/Core.cpp      |  8 +++-----
- FEXCore/Source/Interface/Core/Frontend.cpp  | 22 ++++++++++++++++++---
+ FEXCore/Source/Interface/Core/Core.cpp      | 38 ++++++++++++++++-----
+ FEXCore/Source/Interface/Core/Frontend.cpp  | 22 ++++++++++--
  FEXCore/Source/Interface/Core/Frontend.h    |  2 ++
- FEXCore/Source/Interface/Core/LookupCache.h |  7 +++++++
- 4 files changed, 31 insertions(+), 8 deletions(-)
+ FEXCore/Source/Interface/Core/LookupCache.h |  7 ++++
+ 4 files changed, 58 insertions(+), 11 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
-index 1946dc946f..f695b9f94b 100644
+index 1946dc946f..a27e5621c5 100644
 --- a/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/FEXCore/Source/Interface/Core/Core.cpp
-@@ -983,15 +983,13 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+@@ -889,13 +889,37 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+   {
+     FEXCORE_PROFILE_ACCUMULATION(Thread, AccumulatedDiskCacheLookupTime);
+     Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
++
++    // The lookup hashed the guest code before the hit's pages were known to be write-protected, other than those the
++    // decoder had reached, so a write in between would go unnoticed and the hit would be stale. Protect the pages that
++    // hold no code yet, then look the block up again from a fresh decode: a racing write now faults, and its
++    // invalidation waits for this compilation.
++    if (Hit && !DiskCache.IsValidating()) {
++      const auto* BlockInfo = Thread->FrontendDecoder->GetDecodedBlockInfo();
++      fextl::set<uint64_t> ProtectedPages(BlockInfo->CodePages.begin(), BlockInfo->CodePages.end());
++      while (Hit) {
++        bool LookUpAgain = false;
++        for (auto CodePage : Hit->GuestPages) {
++          if (ProtectedPages.insert(CodePage).second) {
++            if (!Thread->LookupCache->HasCodeInPage(CodePage)) {
++              SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
++            }
++            LookUpAgain = true;
++          }
++        }
++        if (!LookUpAgain) {
++          break;
++        }
++        Thread->FrontendDecoder->SetupDecodeInstructionsAtEntry(Thread, GuestRIP, MaxInst);
++        Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
++      }
++    }
++
+     if (Hit && !DiskCache.IsValidating()) {
+       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode);
+       if (LoadedCode.BlockBegin) {
+         for (auto& CodePage : Hit->GuestPages) {
+-          if (Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
+-            SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+-          }
++          Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+         }
+ 
+         LOGMAN_THROW_A_FMT(Hit->EntryPointRIPs.size() == Hit->EntryPointHostOffsets.size(), "Mismatched Disk Cache entrypoint pairs!");
+@@ -983,15 +1007,13 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
    fextl::vector<uint64_t> CodePages;
  
    if (NeedsAddGuestCodeRanges) {
