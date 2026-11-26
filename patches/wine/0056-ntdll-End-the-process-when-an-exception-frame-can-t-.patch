@@ -1,0 +1,108 @@
+From 9fedb457565aff5c6c36a31feba9cc0ee6a47833 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 26 Nov 2026 18:38:57 -0500
+Subject: [PATCH] ntdll: End the process when an exception frame can't be
+ written to a stack outside the thread's.
+
+An exception raised on a stack outside the thread's stack limits, such
+as an x86 emulator's own stack, had its frame written below the stack
+pointer by the signal handler without any check. When the stack had run
+out, that write faulted inside the handler. On macOS a fault with the
+handler's own signal, which is blocked while it runs, isn't delivered
+but taken again at the same instruction: the thread spun there for good,
+and the process hung. With another signal, the nested fault was caught
+and only the thread was ended, which left the other threads waiting for
+it.
+
+Check that the frame's pages are committed and writable first, making
+write-watched and executable pages writable as a write fault would. When
+they aren't, end the process with the exception's code, as Windows does
+when it can't write an exception frame to the stack.
+---
+ dlls/ntdll/unix/virtual.c | 56 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 55 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 9a774baea7..871efb803f 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -4930,6 +4930,46 @@ done:
+ }
+ 
+ 
++/***********************************************************************
++ *           make_exception_frame_writable
++ *
++ * Check that an exception frame can be written at [base, base + size), making its pages writable
++ * the way a write fault would. The caller is a signal handler: a fault in its write of the frame
++ * couldn't be handled, and on macOS one with the handler's own signal, which is blocked, is never
++ * delivered but taken again and again. virtual_mutex must be held.
++ */
++static BOOL make_exception_frame_writable( char *base, size_t size )
++{
++    char *addr, *end = base + size;
++    BYTE vprot;
++
++    for (addr = ROUND_ADDR( base, page_mask ); addr < end; addr += page_size)
++    {
++        vprot = get_page_vprot( addr );
++        if (!(vprot & VPROT_COMMITTED) || (vprot & VPROT_GUARD) || !(vprot & (VPROT_WRITE | VPROT_WRITECOPY)))
++            return FALSE;
++    }
++    for (addr = ROUND_ADDR( base, host_page_mask ); addr < end; addr += host_page_size)
++    {
++        vprot = get_host_page_vprot( addr );
++        if (get_unix_prot( vprot ) & PROT_WRITE) continue;
++#ifdef WX_EXCLUSIVE_HOST
++        if (jit_view_count)
++        {
++            /* only the thread's own write window makes these writable */
++            struct file_view *view = find_view( addr, 0 );
++            if (view && is_jit_view( view )) return FALSE;
++        }
++        if (vprot & VPROT_EXECMODE) set_page_vprot_bits( addr, host_page_size, 0, VPROT_EXECMODE );
++#endif
++        if (vprot & VPROT_WRITEWATCH) set_page_vprot_bits( addr, host_page_size, 0, VPROT_WRITEWATCH );
++        if (mprotect_range( addr, host_page_size, 0, 0 )) return FALSE;
++        if (!(get_unix_prot( get_host_page_vprot( addr )) & PROT_WRITE)) return FALSE;
++    }
++    return TRUE;
++}
++
++
+ /***********************************************************************
+  *           virtual_setup_exception
+  */
+@@ -4940,6 +4980,8 @@ void *virtual_setup_exception( struct thread_data *data, void *stack_ptr, size_t
+ 
+     if (!is_inside_thread_stack( data, stack, &stack_info ))
+     {
++        BOOL writable;
++
+         if (is_inside_signal_stack( data, stack ))
+         {
+             ERR( "nested exception on signal stack addr %p stack %p\n", rec->ExceptionAddress, stack );
+@@ -4948,7 +4990,19 @@ void *virtual_setup_exception( struct thread_data *data, void *stack_ptr, size_t
+         WARN( "exception outside of stack limits addr %p stack %p (%p-%p-%p)\n",
+               rec->ExceptionAddress, stack, data->teb->DeallocationStack,
+               data->teb->Tib.StackLimit, data->teb->Tib.StackBase );
+-        return stack - size;
++        stack -= size;
++        mutex_lock( &virtual_mutex );  /* no need for signal masking inside signal handler */
++        writable = (char *)stack_ptr >= (char *)size && make_exception_frame_writable( stack, size );
++        mutex_unlock( &virtual_mutex );
++        if (!writable)
++        {
++            /* Windows ends the process when it can't write an exception frame to the stack */
++            ERR( "no room for the exception frame of %x at %p, stack %p, terminating the process\n",
++                 rec->ExceptionCode, rec->ExceptionAddress, stack_ptr );
++            NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
++            abort_process( rec->ExceptionCode );
++        }
++        return stack;
+     }
+ 
+     stack -= size;
+-- 
+2.54.0 (Apple Git-157)
+
