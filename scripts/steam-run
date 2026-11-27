@@ -275,6 +275,10 @@ case "$program" in
     "$install_path"/*) ;;
     *)  # a helper Steam runs outside the game (installer scripts, redistributables)
         echo "helper: $*" >> "$log"
+        # What scripts/play passes a game, so that a helper that loads Steam's client library
+        # isn't left with signals blocked either (scripts/openssl-armcap.sh).
+        . "$ROOT/scripts/openssl-armcap.sh"
+        export OPENSSL_armcap
         exec "$wine" "$@" >> "$log" 2>&1 ;;
 esac
 

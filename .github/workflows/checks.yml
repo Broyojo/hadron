@@ -25,6 +25,7 @@ jobs:
             esac
           done
           bash -n scripts/env.sh || status=1
+          sh -n scripts/openssl-armcap.sh || status=1
           sh -n scripts/paths.sh || status=1
           sh -n scripts/hadron-procs.sh || status=1
           sh -n scripts/runtime-versions.sh || status=1

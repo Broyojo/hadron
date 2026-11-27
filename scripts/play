@@ -270,30 +270,9 @@ set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"
 # prepares, stays at its lowest clock: Teardown ran at 16 fps so, and at 60 one frame ahead
 # (docs/findings.md #33). 1 gives a game exactly the latency it asks for.
 set -- "VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES=${VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES:-2}" "$@"
-# OpenSSL 1.1, which steamclient.dylib has built in, finds out what the CPU can do when it loads by
-# blocking signals with sigprocmask() and trying instructions. On macOS sigprocmask() sets the mask
-# of every thread in the process, so a Wine thread that saved its own mask meanwhile sets the
-# probe's back afterwards and keeps SIGUSR1 and SIGUSR2 blocked (docs/findings.md #80). Given
-# OPENSSL_armcap, OpenSSL takes the features from it and doesn't probe: NEON, AES, SHA-1, SHA-256 and
-# PMULL as the kernel reports them, which is what the probe finds (it doesn't try SHA-512 on a Mac).
-if [ -z "${OPENSSL_armcap:-}" ]; then
-    armcap=0
-    features=$(sysctl hw.optional.arm.AdvSIMD hw.optional.arm.FEAT_AES hw.optional.arm.FEAT_SHA1 \
-        hw.optional.arm.FEAT_SHA256 hw.optional.arm.FEAT_PMULL 2>/dev/null)
-    while read -r name value; do
-        [ "$value" = 1 ] || continue
-        case $name in
-            hw.optional.arm.AdvSIMD:) armcap=$((armcap | 0x1)) ;;
-            hw.optional.arm.FEAT_AES:) armcap=$((armcap | 0x4)) ;;
-            hw.optional.arm.FEAT_SHA1:) armcap=$((armcap | 0x8)) ;;
-            hw.optional.arm.FEAT_SHA256:) armcap=$((armcap | 0x10)) ;;
-            hw.optional.arm.FEAT_PMULL:) armcap=$((armcap | 0x20)) ;;
-        esac
-    done <<EOF
-$features
-EOF
-    OPENSSL_armcap=$(printf '0x%x' "$armcap")
-fi
+# OpenSSL in steamclient.dylib leaves Wine's threads with signals blocked unless OPENSSL_armcap
+# tells it the CPU's features (scripts/openssl-armcap.sh, docs/findings.md #80).
+. "$ROOT/scripts/openssl-armcap.sh"
 set -- "OPENSSL_armcap=$OPENSSL_armcap" "$@"
 
 # Steam's overlay hooks Metal's present calls and the event loop when its library is loaded, so it
