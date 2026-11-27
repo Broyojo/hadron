@@ -1,0 +1,57 @@
+From 1114f11bfa7a9b692b7d90c73b1249fcc4ef0d7a Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Fri, 27 Nov 2026 12:35:15 -0500
+Subject: [PATCH] FEXCore: Rebuild disk caches written before the decode
+ write-protection
+
+A disk cache written before code pages were write-protected ahead of
+decoding can hold blocks built from a mix of old and new bytes, stored
+under the hash of the new ones, and loads them again whenever those
+bytes come back. The codegen didn't change, so FormatVersion and the
+bucket stayed the same and such caches were kept.
+
+Hash a DownstreamVersion into the machine bucket next to FormatVersion.
+A cache from before it is in another bucket: it isn't loaded, and
+PruneStaleEntries removes it at the next start (unless stale entries
+are kept), so each cache is rebuilt once. Because the field is part of
+the hashed data, its buckets differ from those of any upstream build,
+whatever upstream's FormatVersion becomes.
+---
+ FEXCore/Source/Interface/Core/DiskCache.cpp | 3 ++-
+ FEXCore/Source/Interface/Core/DiskCache.h   | 5 +++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/FEXCore/Source/Interface/Core/DiskCache.cpp b/FEXCore/Source/Interface/Core/DiskCache.cpp
+index 3c78b22dad..58d187e460 100644
+--- a/FEXCore/Source/Interface/Core/DiskCache.cpp
++++ b/FEXCore/Source/Interface/Core/DiskCache.cpp
+@@ -406,8 +406,9 @@ namespace DiskCache {
+ 
+     struct __attribute__((packed)) {
+       uint16_t FormatVersion;
++      uint16_t DownstreamVersion;
+       uint64_t HostFeaturesHash;
+-    } MachineBucketData = {FormatVersion, HostFeatureHash.HostFeaturesHash};
++    } MachineBucketData = {FormatVersion, DownstreamVersion, HostFeatureHash.HostFeaturesHash};
+ 
+     uint8_t ProcessFeaturesHash {};
+     memcpy(&ProcessFeaturesHash, &HostFeatureHash.ProcessFeaturesHash, sizeof(ProcessFeaturesHash));
+diff --git a/FEXCore/Source/Interface/Core/DiskCache.h b/FEXCore/Source/Interface/Core/DiskCache.h
+index 67f837b2bf..bbd5faa3f5 100644
+--- a/FEXCore/Source/Interface/Core/DiskCache.h
++++ b/FEXCore/Source/Interface/Core/DiskCache.h
+@@ -250,6 +250,11 @@ namespace DiskCache {
+   // This must be changed any time codegen changes occur!
+   // Be aware of the impact of changing this frequently!
+   static constexpr uint16_t FormatVersion = 44;
++  // Changed by a downstream fix that makes blocks cached before it unsafe to load, when the
++  // codegen, and so FormatVersion, stays the same. It is hashed into the bucket next to
++  // FormatVersion, so the buckets written with it differ from an upstream build's.
++  // 1: blocks compiled from half-written code could be cached (write-protect before decoding).
++  static constexpr uint16_t DownstreamVersion = 1;
+ 
+   static constexpr uint32_t LOOKUP_KEY_MAX_BUCKET_DEPTH = 500;
+ 
+-- 
+2.54.0 (Apple Git-157)
+

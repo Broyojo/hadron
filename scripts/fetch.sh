@@ -24,6 +24,14 @@ fetch() {
         log "applying ${#patches[@]} patch(es) to $name"
         git -C "$dir" -c user.name=hadron -c user.email=dev@hadron.invalid am -q --3way "${patches[@]}"
     fi
+    # A submodule's queue is in the directory of its path: patches/fex/External/rpmalloc/.
+    local queue path
+    while IFS= read -r queue; do
+        path=${queue#"$ROOT/patches/$name/"}
+        patches=("$queue"/*.patch)
+        log "applying ${#patches[@]} patch(es) to $name/$path"
+        git -C "$dir/$path" -c user.name=hadron -c user.email=dev@hadron.invalid am -q --3way "${patches[@]}"
+    done < <(find "$ROOT/patches/$name" -mindepth 2 -name '*.patch' -exec dirname {} \; | sort -u)
 }
 
 want=("$@")

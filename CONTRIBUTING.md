@@ -33,7 +33,8 @@ Two rules shape every fix:
 
 1. Make the change in `src/<component>` and commit it there.
 2. Export the commits into the queue: `git format-patch` into `patches/<component>/`, numbered
-   after the last patch.
+   after the last patch. A change to a submodule of the component is committed in the submodule
+   and has its own queue in the directory of its path, as `patches/fex/External/rpmalloc/`.
 3. Run `scripts/check-patches.sh`: every queue has to apply cleanly to its pinned revision and
    match the source tree. The checks on a pull request run the same thing.
 

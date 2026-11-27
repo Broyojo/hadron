@@ -1,0 +1,75 @@
+From 464450e0d48d296274196f574ec7f16b0f74f8c2 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 26 Nov 2026 13:38:06 -0500
+Subject: [PATCH 09/11] JIT: Don't link to a block that was invalidated during
+ the lookup
+
+ExitFunctionLink looks up or compiles the target block, then takes the
+code invalidation lock again to patch the caller. An invalidation in
+between erases the target and severs the links to it, but the link made
+afterwards is to the erased block: the caller keeps running the stale
+code until the target address is invalidated again. A program that
+patches a function, flushes the instruction cache and calls it through
+an already compiled caller could still run the old version.
+
+Under the lock, link to the block the target is mapped to now, and
+return to the dispatcher, which looks the target up again, only when it
+isn't mapped at all. That block may be another thread's compilation of
+the same address: requiring the one that was found would refuse to link
+whenever two threads compiled the target, and that exit would then go
+through the dispatcher and take this lock every time it ran.
+---
+ FEXCore/Source/Interface/Core/JIT/JIT.cpp   | 12 +++++++++++-
+ FEXCore/Source/Interface/Core/LookupCache.h |  6 ++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index fb51b14516..22a63302bc 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -569,7 +569,6 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+   // See ExitFunction in BranchOps.cpp for an assembly level view of the handled cases.
+   uintptr_t JumpThunkStartAddress = reinterpret_cast<uintptr_t>(Record) - 0x10;
+   uintptr_t CallerAddress = JumpThunkStartAddress + Record->CallerOffset;
+-  auto BranchOffset = HostCode / 4 - CallerAddress / 4;
+ 
+   uint32_t ExpectedKnownCallMarkerInst = 0;
+   ARMEmitter::Emitter ExpectedKnownCallMarkerEmit(reinterpret_cast<uint8_t*>(&ExpectedKnownCallMarkerInst), 4);
+@@ -581,6 +580,17 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+   // Lock here is necessary to prevent simultaneous linking and delinking
+   auto lk = Thread->LookupCache->AcquireWriteLock();
+ 
++  // The target was looked up or compiled before the invalidation lock was taken again, so it may have been invalidated
++  // since, and linking to that block would keep this caller running it until the target is invalidated again. Link to
++  // the block the target is mapped to now, which may also be another thread's compilation of it, and if it isn't mapped
++  // any more let the dispatcher look it up.
++  HostCode = Thread->LookupCache->Shared->MappedHostCode(GuestRip, lk);
++  if (!HostCode) {
++    Frame->State.rip = GuestRip;
++    return Frame->Pointers.DispatcherLoopTop;
++  }
++  auto BranchOffset = HostCode / 4 - CallerAddress / 4;
++
+   // The callsite and link record are in the CodeBuffer
+   FEXCore::Allocator::ScopedJITWrite JITWrite;
+ 
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index 531fc26c30..5f0499a3b4 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -114,6 +114,12 @@ struct GuestToHostMap {
+     return &HostCode->second;
+   }
+ 
++  // Returns the host code Address is mapped to now, or 0, for a lookup made without this lock held
++  uintptr_t MappedHostCode(uint64_t Address, const LookupCacheWriteLockToken&) const {
++    auto It = BlockList.find(Address);
++    return It != BlockList.end() ? It->second.HostCode : 0;
++  }
++
+   bool Erase(uint64_t Address, const LookupCacheWriteLockToken&) {
+     // Sever any links to this block
+     auto lower = BlockLinks->lower_bound({Address, nullptr});
+-- 
+2.54.0 (Apple Git-157)
+

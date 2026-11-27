@@ -1,0 +1,195 @@
+From ca025e9b75e3826deb343e63511b9de42450a476 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 26 Nov 2026 13:37:52 -0500
+Subject: [PATCH 08/11] FEXCore: Write-protect a code page before decoding from
+ it
+
+Writes to an executable page are only trapped for SMC detection once the
+page holds compiled code: CompileBlock protected a page that had none
+after compiling the block. A write that raced the decode went unnoticed,
+and the block was built from a mix of old and new bytes. With the disk
+cache on, CompileBlock then stored that block under the hash of the
+guest bytes as they were after the write, so the mixed code was loaded
+again whenever those bytes came back, later in the process and in later
+runs.
+
+This happens when a program patches code that other threads run, such as
+a mod loader installing hooks: VirtualProtect makes the page writable,
+which also lifts the trap, and a thread that compiles from the page
+before the write lands decodes part of it.
+
+Protect a page that holds no compiled code as the decoder first reaches
+it, before reading from it. A racing write then faults, its invalidation
+waits for the compilation, which holds the code invalidation lock, and
+discards the block, and the bytes the disk cache hashes are the ones the
+block was built from. The protection after compiling is now redundant.
+
+A disk cache hit had the same gap: the lookup hashes the guest code of
+all the cached block's pages, but only the pages the decoder had reached
+were protected by then. Protect the hit's other pages that hold no code,
+then look the block up again from a fresh decode, so that the hash and
+the guest data patched into the cached code are read with every page
+protected.
+
+A page that already holds code is protected already and is not
+protected again, so a page still costs one protection change the first
+time code is compiled from it, as before, only earlier. Each page a
+compilation reaches costs a lookup under the lookup cache's read lock,
+and a disk cache hit that spans pages the decoder hadn't reached costs a
+second lookup.
+---
+ FEXCore/Source/Interface/Core/Core.cpp      | 38 ++++++++++++++++-----
+ FEXCore/Source/Interface/Core/Frontend.cpp  | 22 ++++++++++--
+ FEXCore/Source/Interface/Core/Frontend.h    |  2 ++
+ FEXCore/Source/Interface/Core/LookupCache.h |  7 ++++
+ 4 files changed, 58 insertions(+), 11 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 1946dc946f..a27e5621c5 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -889,13 +889,37 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+   {
+     FEXCORE_PROFILE_ACCUMULATION(Thread, AccumulatedDiskCacheLookupTime);
+     Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
++
++    // The lookup hashed the guest code before the hit's pages were known to be write-protected, other than those the
++    // decoder had reached, so a write in between would go unnoticed and the hit would be stale. Protect the pages that
++    // hold no code yet, then look the block up again from a fresh decode: a racing write now faults, and its
++    // invalidation waits for this compilation.
++    if (Hit && !DiskCache.IsValidating()) {
++      const auto* BlockInfo = Thread->FrontendDecoder->GetDecodedBlockInfo();
++      fextl::set<uint64_t> ProtectedPages(BlockInfo->CodePages.begin(), BlockInfo->CodePages.end());
++      while (Hit) {
++        bool LookUpAgain = false;
++        for (auto CodePage : Hit->GuestPages) {
++          if (ProtectedPages.insert(CodePage).second) {
++            if (!Thread->LookupCache->HasCodeInPage(CodePage)) {
++              SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
++            }
++            LookUpAgain = true;
++          }
++        }
++        if (!LookUpAgain) {
++          break;
++        }
++        Thread->FrontendDecoder->SetupDecodeInstructionsAtEntry(Thread, GuestRIP, MaxInst);
++        Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
++      }
++    }
++
+     if (Hit && !DiskCache.IsValidating()) {
+       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode);
+       if (LoadedCode.BlockBegin) {
+         for (auto& CodePage : Hit->GuestPages) {
+-          if (Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
+-            SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+-          }
++          Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+         }
+ 
+         LOGMAN_THROW_A_FMT(Hit->EntryPointRIPs.size() == Hit->EntryPointHostOffsets.size(), "Mismatched Disk Cache entrypoint pairs!");
+@@ -983,15 +1007,13 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+   fextl::vector<uint64_t> CodePages;
+ 
+   if (NeedsAddGuestCodeRanges) {
+-    // Track in the guest to host map all entrypoints for all pages the compiled block touches, if any page didn't previously
+-    // contain code, inform the frontend so it can setup SMC detection.
++    // Track in the guest to host map all entrypoints for all pages the compiled block touches. The frontend already set up
++    // SMC detection for any page that didn't previously contain code, before decoding from it.
+     auto BlockInfo = Thread->FrontendDecoder->GetDecodedBlockInfo();
+     CodePages.reserve(BlockInfo->CodePages.size());
+     CodePages.insert(CodePages.end(), BlockInfo->CodePages.begin(), BlockInfo->CodePages.end());
+     for (auto CodePage : BlockInfo->CodePages) {
+-      if (Thread->LookupCache->AddBlockExecutableRange(Thread, BlockInfo->EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
+-        SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+-      }
++      Thread->LookupCache->AddBlockExecutableRange(Thread, BlockInfo->EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+     }
+   }
+ 
+diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
+index 94e4ac5226..d4c40c2be5 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.cpp
++++ b/FEXCore/Source/Interface/Core/Frontend.cpp
+@@ -1634,12 +1634,12 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
+ 
+       if (OpMinPage != CurrentCodePage) {
+         CurrentCodePage = OpMinPage;
+-        BlockInfo.CodePages.insert(CurrentCodePage);
++        AddCodePage(CurrentCodePage);
+       }
+ 
+       if (OpMaxPage != CurrentCodePage) {
+         CurrentCodePage = OpMaxPage;
+-        BlockInfo.CodePages.insert(CurrentCodePage);
++        AddCodePage(CurrentCodePage);
+       }
+ 
+       LastFieldReadSize = 0;
+@@ -1779,6 +1779,21 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
+   }
+ }
+ 
++void Decoder::AddCodePage(uint64_t Page) {
++  if (!BlockInfo.CodePages.insert(Page).second) {
++    return;
++  }
++
++  // Writes to a page are only trapped for SMC detection once it holds compiled code. If it holds
++  // none yet, protect it before decoding from it: a write racing the decode would otherwise leave
++  // a block built from a mix of old and new bytes, which the disk cache would then store under the
++  // hash of the new ones. Once the page is protected, a racing write faults, and its invalidation
++  // waits for this compilation to finish and then discards the block.
++  if (!Thread->LookupCache->HasCodeInPage(Page)) {
++    CTX->SyscallHandler->MarkGuestExecutableRange(Thread, Page, FEXCore::Utils::FEX_PAGE_SIZE);
++  }
++}
++
+ void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thread, uint64_t PC, uint64_t MaxInst) {
+   FEXCORE_PROFILE_SCOPED("DecodeInstructions");
+   BlockInfo.TotalInstructionCount = 0;
+@@ -1827,7 +1842,8 @@ void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState*
+ 
+   CurrentCodePage = PC & FEXCore::Utils::FEX_PAGE_MASK;
+ 
+-  BlockInfo.CodePages = {CurrentCodePage};
++  BlockInfo.CodePages.clear();
++  AddCodePage(CurrentCodePage);
+ 
+   EntryBlock = true;
+   FinalInstruction = false;
+diff --git a/FEXCore/Source/Interface/Core/Frontend.h b/FEXCore/Source/Interface/Core/Frontend.h
+index ade14bc445..50a46e9c43 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.h
++++ b/FEXCore/Source/Interface/Core/Frontend.h
+@@ -143,6 +143,8 @@ private:
+   size_t DecodedSize {};
+   uint64_t TotalInstructions {};
+   uint64_t CurrentCodePage {};
++  // Adds a page to the block's code pages, write-protecting it for SMC detection before it is decoded from.
++  void AddCodePage(uint64_t Page);
+   bool EntryBlock {};
+   bool FinalInstruction {};
+   uint64_t MaxInst {};
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index 5c22b3ced6..531fc26c30 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -285,6 +285,13 @@ public:
+ 
+   GuestToHostMap* Shared = nullptr;
+ 
++  // Returns true if blocks are registered in the page, which means it is write-protected for SMC detection
++  bool HasCodeInPage(uint64_t Page) {
++    auto lk = Shared->AcquireReadLock();
++    auto It = Shared->CodePages.find(Page >> 12);
++    return It != Shared->CodePages.end() && !It->second.empty();
++  }
++
+   // Appends a list of Block {Address} to CodePages [Start, Start + Length)
+   // Returns true if new pages are marked as containing code
+   bool AddBlockExecutableRange(FEXCore::Core::InternalThreadState* Thread, auto& Addresses, uint64_t Start, uint64_t Length) {
+-- 
+2.54.0 (Apple Git-157)
+

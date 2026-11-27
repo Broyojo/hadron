@@ -1757,6 +1757,14 @@ scripts (steam-run follows the Wine already in the prefix). Geode is disabled on
 (its `XInput1_4.dll` renamed) until it supports 2.209; if launches still hang then, FEX's lock
 order is the place to start.
 
+On 0.4.0, with Geode 6.0.0, about one start in ten fails, as an exit from a thread in FEX's
+dispatcher. #80 reproduces both failures without the game and fixes three races in FEX: the hang is
+a fault in a compilation, on a lookup cache whose range another thread's exit had unmarked, waiting
+for `ThreadCreationMutex` while a memory notification holds it. With those the game still failed 3
+starts in 30, as a native branch to a non-code address from FEX's JIT; #80 has what that is and
+one cause of it, a branch to address 0. With that fixed too, 2 in 30 failed, one as a native branch
+to the start of an x86 function in Geode.dll; its cause is open (#80).
+
 ## A mode whose size shares no factor with the screen's aborted the game (fixed, #54)
 
 Teardown, opened on a Sidecar iPad (2628×1970), stopped as it resized its swapchain to 1025×768:
@@ -2182,6 +2190,503 @@ With FEX 0007 Subnautica loads a save in about 19 seconds ("LOADING FINISHED", `
 18.89 seconds`) and keeps its heartbeats going in the world. `tests/win/jit-unwind.c` (including
 the null check that now faults, #67), `mono-host.c` with Subnautica's Mono, `hello` (x86-64 and
 i386), `is-ec-code` and `thread-allocation` pass.
+## Geometry Dash with Geode: FEX's call-ret stack pointer lost to Wine's NtContinue, and races in FEX's SMC handling (#80, issue #208)
+
+In short: Geometry Dash's failures (crashes with `invalid frame ...0008`, an x86 function run as host
+code, FEX's heap handing out JIT memory, and hangs) all came from one thing, found last: FEX's ARM64EC
+JIT keeps its call-ret stack pointer in x17, FEX resumes from its own exceptions (most often the
+rewrite of an unaligned atomic access) with NtContinue, and Wine's return from it sometimes left x17 =
+sp, because the SIGUSR2 that sets the full context didn't reach the thread in time: steamclient.dylib's
+OpenSSL, probing the CPU when lsteamclient loads it, had left the thread with SIGUSR2 blocked, since
+on macOS `sigprocmask` sets every thread's mask. `scripts/play` now passes `OPENSSL_armcap` so the
+probe isn't made, and Wine 0057 no longer depends on the signal arriving at once (the last part of
+this entry). On the way, Geode's hooks turned up three real races in FEX's
+handling of self-modifying code (0008, 0009, 0010), a branch to address 0 through empty lookup entries
+(0011), a heap owner race in rpmalloc (rpmalloc 0001) and a hang when an exception frame doesn't fit
+(Wine 0056); each is fixed below, with its test, though none was what Geometry Dash hit.
+
+On 0.4.0 about one start of Geometry Dash with Geode in ten failed (issue #208, #53): Geode had
+logged only "Setting up internal mod", where it writes its hooks into the game's code while the
+game's other threads run, and Wine's log ended with `frame at pc 00007FF5082B0228 sp
+00007FF4F5590000 does not unwind` and `Exception frame is not in stack limits`. That pc is not
+where the thread faulted but a return address 0x228 into FEX's dispatcher, which runs on the
+emulator stack (the sp): the thread had called from the dispatcher into FEX code that faulted, and
+FEX passed the fault on. Before 0.4.0 most failures were hangs.
+
+`tests/win/smc-hook-race.c` does what a hook installer does, without the game: the main thread
+makes a function's page writable with `VirtualProtect`, writes a jump over its first instruction as
+one aligned 8-byte store, restores the protection and flushes the instruction cache, while six
+threads call the 1,024 functions directly and through callers that call them with direct calls,
+two threads start short-lived threads and one allocates, runs and frees code. Each function returns
+an address only one version can produce. It found three races; each fix below is a FEX patch.
+
+**Code compiled from half-written bytes (FEX 0008).** FEX traps writes to a page of code only once
+it holds compiled blocks, and compiling the first block from a page protected it after the block
+was decoded. `VirtualProtect` lifts the trap and invalidates the page, a thread compiles from it
+unprotected, and the store lands while the decoder is in the instruction: it reads the first byte
+of the old 8-byte NOP and the rest from the new `jmp`, and builds a block from that mix. (Every block
+FEX handed back matched the guest address it was asked for; the blocks themselves were wrong.) The
+disk cache then stored the block under a hash of the bytes read after compiling, the finished
+jump, and loaded it again whenever those bytes came back, later in the run and in later runs; real
+hardware runs either the old or the new instruction. On 0.4.0 with the disk cache on, as
+`scripts/play` runs games, 26 of 30 runs of 10 to 20 s ran garbage and crashed, 5 of 6 with a
+fresh cache; with the cache off, 1 of 24. 0008 has the decoder write-protect each page that holds
+no compiled code when it first reaches it, before reading from it: a racing write then faults, its
+invalidation waits for the compilation, which holds the code invalidation lock, and discards the
+block, and the cache hashes the bytes the block was built from. In one build with a switch for it,
+0 of 10 runs failed with it, 3 of 4 without. The count of protection changes is the one per page
+there was, made earlier, plus a lookup under the lookup cache's read lock per page and compile.
+
+**A link to an invalidated block (FEX 0009).** With its stale-code check on, every run on 0.4.0
+caught a caller still running a function's old version after the patch and its
+`FlushInstructionCache`, within the first two patches, cache on or off. `ExitFunctionLink` looks up
+or compiles the target of a branch, releases the invalidation lock, and takes it again to patch the
+caller; an invalidation in between erased the target, and the link made after it was to the erased
+block (a debugging build counted 82,463 such links in 20 s). 0009 links, under the lock, to the
+block the target is mapped to then, and returns to the dispatcher if it isn't mapped.
+
+**A lookup cache that lost its range (FEX 0010): Geometry Dash's message, and #53's hang.** With
+0008 and 0009 about one run in 25 still ended in Wine's exact message, `does not unwind` at a
+return address into the dispatcher, or hung with threads waiting for FEX's `ThreadCreationMutex`
+(`RtlpWaitForCriticalSection` names it by address). A thread's lookup cache reserves its L1 and L2
+memory, and the frontend commits it page by page on access violations, for the range the cache
+marks. Its destructor freed the memory and then unmarked the range. A debugging build logged the
+interleaving: an exiting thread freed its range and logged its unmark, a new thread was given the
+same addresses and marked them, the exiting thread's unmark then removed them, and the new thread's
+first L1 access in `FindBlock`, inside `CompileBlock`, faulted with nothing to commit it. That
+fault is passed on, the process ends with Wine's message, and the return address is the
+dispatcher's call of `CompileBlock`. Or, when another thread is in a memory notification, holding
+`ThreadCreationMutex` and waiting for the code invalidation lock that the compiling thread holds,
+the fault handler waits for `ThreadCreationMutex` and both hang: the main thread holding it and a
+thread in `ResetToConsistentStateImpl`, as #53 saw. 0010 unmarks before freeing.
+
+With the three, 200 runs of 10 s passed (100 with each layout of the test, both with the
+stale-code check on and with thread and allocation churn), where on 0.4.0 the same runs failed at
+once. `hello` (x86-64 and i386), `is-ec-code`, `thread-allocation`,
+`x87-registers` and `jit-unwind` (with the HotSpot-style null check) pass as before, and
+`tests/win/bench.c` runs in the same time. The test makes fewer patches with 0008 (about 39,000
+against 57,000 in 20 s), because more of its writes now fault, as they should. The three races are
+in upstream FEX's shared code as well.
+
+Disk caches written before 0008 can still hold mixed blocks, and FEX's cache format did not change,
+so a game's cache was not rebuilt; FEX 0012 rebuilds each once (the end of this entry). The trap is
+per 4K page and does not cover 16K host-page neighbours (PR #94). The lock order that turns a fault
+during a compilation into a hang remains, for any other such fault. #53's other suspect,
+`CompileBlock`'s `NtProtectVirtualMemory` reaching `NotifyMemoryProtect`, does not happen: the
+dispatcher sets `InSyscallCallback` around compiles and Wine skips the notification.
+
+**Review fixes.** An independent review of the three patches found two gaps, both real. 0009
+required the target to still be mapped to the block that was found, which fails whenever two
+threads compiled the same address or a disk cache hit raced a compile: that exit then never linked
+and took the lookup cache's write lock each time it ran. It now links, under the lock, to the block
+the target is mapped to then, and returns to the dispatcher only when the target isn't mapped.
+0008 protected a disk cache hit's pages only after the lookup had hashed them (except those the
+decoder had reached), so a write in between installed the old version. The hit's other pages are
+now protected first, those without code, and the block is looked up again from a fresh decode,
+which also reads the guest data patched into cached code with every page protected; a hit that
+spans pages the decoder hadn't reached costs a second lookup.
+
+**Geometry Dash still failed: FEX's JIT branched to a non-code address on its own stack.** With
+0008 to 0010, 30 starts of Geometry Dash with Geode (the prefix's disk cache cleared first) gave 27
+ok and 3 failed, about 0.4.0's rate, each while Geode logged "Setting up internal mod" and each on
+the 13th thread the game starts (the one that loads `rsaenh.dll` and `wininet.dll` in a good start):
+`call_seh_handlers invalid frame 7ff511fd0008`, `7ff4ead50008`, `7ff4fbac0008`, then "Exception
+frame is not in stack limits". The frame is the base of the thread's FEX emulator stack plus 8.
+`ThreadInit` allocates the 256K emulator stack top-down, so its base is 64K-aligned, and the
+dispatcher sets sp to it whenever it enters JIT code; `is_valid_arm64ec_frame` accepts the thread's
+stack and the emulator stack up to its base. Wine unwinds a native context whose pc is not ARM64EC
+code as x86-64, and without a function table entry as a leaf: its frame is rsp, the base, which
+passes; it pops the 8 bytes above the stack as the next rip, rsp becomes base + 8, and that frame
+fails. So each was a native fault with a pc outside ARM64EC code and sp at the emulator stack base,
+which FEX passed on: JIT code had branched natively to something that isn't code. (The call-ret
+stack's default position is 64K-aligned too, but nothing sets sp there.) #53's crashes of
+2026-10-24 on the older FEX had the same message, and one log with `+seh` shows the fault directly:
+an execute fault at `97FD0889FC39B4D4`, rsp at the emulator stack base.
+
+**A branch to address 0 through an empty lookup entry (FEX 0011).** FEX's lookup caches mark an
+empty entry with a guest address of 0: a zeroed L1 entry or call-ret stack entry is {0, 0}, and an
+invalidated L1 entry keeps its host code with a guest address of 0. The JIT's fast paths compare
+only the guest address with the target, so an indirect call or jump to 0 through the first L1
+entry, and a return to 0 predicted from an empty call-ret stack entry, branched to the entry's host
+code, 0 or a stale block, where Windows raises an access violation at 0 that the program can handle.
+`tests/win/null-branch.c` makes the three branches from a new thread and from one that has run code,
+with a vectored handler that resumes at the caller. On 0.4.0 and with 0008 to 0010 each case ends
+the process with Wine's message (`invalid frame 7ff5889d0008`); a diagnostic build that prints the
+native context of faults on the emulator stack shows pc 0, sp the emulator stack base, the branch
+register 0, and lr in JIT code (the call) or at the dispatcher's +0x228 (the jump and the return), as
+in 0.4.0's message. 0011 sends a branch to 0 to the dispatcher, which compiles a block that raises
+the fault, does the same for a native caller entering the JIT at 0 (ARM64EC's call-ret shortcut on
+entry; the test can't reach it, as Wine's call checker faults first on a null target from native
+code), and keeps `FindBlock` from looking address 0 up in L1. It costs a `cbz` per indirect branch.
+
+Whether Geometry Dash branches to 0 was not shown; on Windows that only works if something handles
+the fault. Probes that add more of what a game does to the hook race found no other cause, 3 to 5
+runs of 10 to 15 s each with no failure: fresh code filling the JIT buffer (813,000 new functions
+in 15 s, so the 16 MB buffer was replaced several times) while other threads take guest access
+violations; x86 callbacks from native code (qsort) that fault; loading and freeing `rsaenh.dll`,
+`cryptnet.dll`, `wininet.dll` and `schannel.dll` in a loop; split-lock atomics; suspending threads
+and reading their context. Reading found one more way to the same message: when the op dispatcher
+can't translate the first instruction of a block, `CompileBlock` returns 0 and the dispatcher
+branches to it; not changed, as nothing points at it yet. The diagnostic build (scratch, not in the
+queue) prints `DBG pass:` with the native registers, the code around pc and lr, the call-ret stack
+around x17 and the guest stack top whenever such a fault reaches the frontend, so a failing start
+with it shows which one it is.
+
+With 0008 to 0011 (and the review fixes), 200 runs of `smc-hook-race` of 10 s pass, 100 with each
+layout, with the stale-code check, thread and allocation churn, the disk cache cleared once at the
+start; `null-branch` passes 20 times in 20; `hello` (x86-64 and i386), `is-ec-code`,
+`thread-allocation`, `x87-registers` and `jit-unwind` pass, and `tests/win/bench.c` runs in the same
+time (int 0.745 s against 0.752 s).
+
+**Geometry Dash with 0008 to 0011: an x86 function run as host code (open).** 30 starts with FEX's
+log on (`FEX_SILENTLOG=0 FEX_OUTPUTLOG=stderr`) gave 28 ok and 2 failed, about the rate before 0011 (3 in 30). One
+failing log ends with the only two exceptions of thread 0x190: an alignment fault in JIT code at
+`7FF522E40864`, handled ("Handled unaligned atomic: new pc" the same address), then an illegal
+instruction at `6FBE7C416010`, Geode.dll + 0x756010, the first instruction of a function (`push
+r15`) that Geode calls only with direct calls, run as ARM64 code; Wine then reports `invalid frame
+7ff47eb50008`. That frame is 64K-aligned + 8 and off the thread's stack, as in the earlier failures:
+the branch to the guest address came from JIT code or the dispatcher, with sp at the emulator stack
+base. The diagnostic build's `DBG` report didn't appear: it wrote to the process's standard error
+handle, which a game started from Steam need not have.
+
+The alignment faults are FEX's emulation of x86 memory ordering. Loads and stores are emitted as
+load-acquire or store-release (`LDAPR`, `LDAPUR`, `STLR`, `STLUR`) with a `nop` after the load or
+before the store; one that crosses 16 bytes faults, and `HandleUnalignedAccess` (`Arm64.cpp`)
+rewrites it in the shared code into a plain load or store with a barrier in the `nop`'s place, then
+resumes at the load (new pc = pc) or at the barrier before the store (new pc = pc - 4). So a new pc
+equal to the fault address is a load, not a site found patched already; thread 0x154 logged 177 of
+both kinds in the same run. Each step of the rewrite is one aligned 4-byte store that leaves valid
+code (the barrier first, then the access), under a spin lock in the block's tail, and a thread that
+faults on a site another thread has rewritten finds the new instruction and runs it again.
+
+`tests/win/unaligned-atomic-race.c` makes that race as hard as it can: 256 functions that load,
+store and add across 16-byte and cache line boundaries and make a locked add across a line, run by
+workers while a patcher hooks and unhooks them as `smc-hook-race` does (each recompile brings fresh
+sites), and copied with their callers into new memory each round, where a batch of new threads,
+released together, runs all of them in the same order before the copy is freed. A build that logs
+each rewrite logged 56,800 in 3 s, 8,800 of them by a thread that had faulted on a site another
+thread had just rewritten. With 0008 to 0011 it passed 15 runs of 10 s (4 workers, rounds of 8
+threads), 15 with 16 workers and rounds of 24, and 15 of rounds of 32 threads without the patcher,
+and 20 of an earlier version whose rounds copied only the functions: no wrong result, hang or crash. Nothing shows the rewrite going wrong; that thread 0x190's fault came
+right before its crash may only be what FEX's log records, exceptions, both of them its first.
+
+A new diagnostic build (scratch, not in the queue) writes through Wine's debug output, so its lines
+reach the game's log with FEX's log off. For an exception FEX passes on with sp on its emulator stack,
+or with a pc outside ARM64EC code and sp off the thread's stack, `DBG pass:` gives the native
+registers, which of x9 to x13 holds the pc (the registers the dispatcher, the jump thunks and the
+indirect branches branch through), the code around pc and lr, the call-ret stack, the guest stack
+top, the block the thread last entered and the L1 entry for pc; `DBG bp:` gives every rewrite of an
+unaligned access (thread, site, the instructions before and after, where it resumes, the block);
+and `DBG compile`, `DBG link-map` and `DBG link-ret` report a lookup, compile or link that returns a
+host address outside the code buffer.
+
+**A hang with the diagnostic build: FEX's heap gave out JIT memory, and Wine's signal handler spun on
+an exception frame it couldn't write (Wine 0056, rpmalloc patch).** 30 starts with 0008 to 0011 and
+the diagnostic build gave 29 ok; the 30th hung while Geode logged "Setting up internal mod", with no
+`DBG pass` and no `err:seh`. A 3 s `sample` of it has one busy thread, Geode's `arc-worker-0`
+(0x188): all 1,814 samples at `setup_raise_exception + 156` (`signal_arm64.c:812`, the store of the
+exception record into the new frame), under `_sigtramp` and `segv_handler`. Below the signal frame
+its frame pointer chain is in `xtajit64.dll` (symbolized with the build's own symbols):
+`CompileBlock`, `DiskCache::Lookup`, then 46 pairs of `ResetToConsistentState` and
+`ResetToConsistentStateImpl` calling the diagnostic `DbgReport`, the last in `LogMan::Msg::MFmtImpl`.
+No other thread is in FEX: the others wait in `NtWaitForAlertByThreadId` or the server, the main
+thread called from libcocos2d's code, with no frame of FEX's on any of their stacks (FEX keeps frame
+pointers, as thread 0x188's stack shows). There is no lock cycle: the main thread waits at game level
+for the worker that spins.
+
+The log has how it started. Thread 0x188's first access violation is at `xtajit64.dll + 0x815c`, with
+Wine's "write fault at 0x7ff4dfc26170 in MAP_JIT memory, written outside a JIT write window": the
+store of the first element into the new buffer of `GuestPages.push_back` in `DiskCache::Lookup`, so
+`FEXCore::Allocator::aligned_alloc` (rpmalloc) had just returned a block inside FEX's code buffer,
+19K past the block the thread had last patched. The next fault is in `memmove`, then 44 at one
+`ldr x8, [x0]` in rpmalloc's `heap_allocate_block_aligned`, which pops the heap's free list: the
+diagnostic `DbgReport` allocates from the same heap for each fault FEX passes on, and its own fault
+is passed on again, each a frame deeper on the 256K emulator stack. When the stack had run out, the
+fault came in `MFmtImpl`, and Wine's signal handler wrote the next exception frame below the stack.
+That store faulted with the same signal, which is blocked while its handler runs; macOS leaves a
+blocked synchronous signal pending and runs the faulting instruction again, so the thread spun on it
+(96.6% CPU in the reproduction below). Without the diagnostic report the first fault would have been
+passed on and ended like the other failures; the heap that gave out code buffer memory is what may be
+common to them.
+
+**Wine's half (0056).** `virtual_setup_exception` writes the frame below the stack pointer, unchecked,
+for a stack outside the thread's stack limits, which FEX's emulator stack is for every exception FEX
+handles. When the frame's store faulted with another signal than the first fault's, Wine caught the
+nested fault ("nested exception on signal stack") and ended only the thread, and the others waited for
+it. Windows ends the process when it can't write an exception frame to the stack. 0056 checks, under
+the virtual mutex, that the frame's pages are committed, writable and not guard pages (making
+write-watched and W^X-executable ones writable as a write fault would, and refusing MAP_JIT views),
+and otherwise ends the process with the exception's code. `tests/win/fault-off-stack.c` (native
+ARM64, as FEX's frontend is) runs code on a stack of its own with reserved memory below it, in a
+child with a second, idle thread: a fault with sp 256 bytes above the bottom, a vectored handler that
+faults again until the stack runs out (as FEX's handler did), and recursion off the bottom. Without
+0056 all three hang, the last with Geometry Dash's exact stack, `setup_raise_exception + 156` under
+`segv_handler`, at full CPU; the first two in a thread ended alone. With 0056 each child ends with
+`0xc0000005`, 200 runs of 200. An x86-64 program whose own stack can't take the frame takes other
+paths, FEX's `NtRaiseException` of the guest exception and Wine's writes of an emulated context in
+`restore_context`, and still hangs: a build of the test for x86-64 hung in both cases before and
+after 0056. That is open.
+
+**The heap (rpmalloc patch 0001).** rpmalloc frees a block without atomics when its heap's
+`owner_thread` is the current thread's id, and through atomic deferred lists otherwise, and in FEX's
+Windows modules the id is the TEB address (`get_thread_id` reads x18). A thread that exits releases
+its heap to a queue for the next thread (`DeinitCRTThread`, `rpmalloc_thread_finalize`) and kept its
+id as the owner. Wine frees an exited thread's TEB when the next thread exits and gives it to a later
+thread, which may take another heap from the queue: that thread then freed the released heap's blocks
+as its own, onto the page's local list and with the heap's page lists changed without atomics, while
+the thread that took the heap allocated from the same pages. The exiting thread itself did the same
+with the frees it still made after the release (FEX's own threads run `ThreadTerm` after
+`DeinitCRTThread`). `tests/win/rpmalloc-thread-heaps.c` builds FEX's rpmalloc with FEX's settings and
+runs threads that start, allocate, free each other's blocks and exit, 8 at a time, checking each free
+against rpmalloc's state: 862,133 frees in 10 s (77,609 threads) were taken as local into another
+thread's heap. No block was overwritten in those runs; with a short spin added where such a free
+starts, 3 runs of 3 crashed on a bad free list pointer at once. The patch clears the owner when a heap
+is released, so its blocks go through the deferred lists until a thread takes it: 0 such frees in
+75,183 threads, and with the same spin no crash in two runs of 115,000 threads. Whether this race is
+what put a code buffer address on thread 0x188's free list isn't shown, but it corrupts exactly those
+lists, and it needs what Geode's start has: threads ending and starting (its async runtime starts its
+workers then) while others free what they allocated. rpmalloc is a submodule of FEX, so the patch is
+in `patches/fex/External/rpmalloc/`; `scripts/fetch.sh` and `scripts/check-patches.sh` now take a
+submodule's queue in the directory of its path.
+
+With 0056 and the rpmalloc patch on 0008 to 0011 (scratch runtime `dist-fsx2`): `smc-hook-race`
+20 of 20 runs of 10 s in each layout, `null-branch` 20 of 20, `unaligned-atomic-race` 10 of 10,
+`unwind-no-progress` (ARM64EC and ARM64), `hello` (x86-64 and i386), `is-ec-code`,
+`thread-allocation`, `x87-registers` and `jit-unwind` pass; `tests/win/bench.c` runs in the same time
+(int 0.762 to 0.814 s against 0.752 to 0.804 s, three runs each, interleaved). An independent review of
+0056 found no serious problem; its two small gaps, a stack pointer below the frame size and an
+`mprotect` failure, are handled, and 50 more runs of `fault-off-stack` and short runs of the others
+passed with that. What stays open: the x86-64 paths above; the frame check is made under the lock but
+the store after it isn't, so a stack in executable and writable memory that another thread flips back
+to executable in between still faults; and Geometry Dash itself has not been run with these. The
+diagnostic build with both fixes is the scratch `dist-fsx2-diag`.
+
+**The cause of all three: Wine's NtContinue came back with x17 = sp, and x17 is FEX's call-ret stack
+pointer (Wine 0057).** With 0056 and the rpmalloc patch, 40 starts gave 39 ok and one crash with the
+hang's signature: on thread 0x18C, right after two unaligned-atomic rewrites, `aligned_alloc` returned
+an address in the code buffer (`write fault at 0x7ff4d2d67480 in MAP_JIT memory`), then about 200 faults
+popping garbage from rpmalloc's free list, ended by 0056. A scratch FEX build traps (`brk #0xfe0d`) at
+the first sign of the heap handing out or linking memory outside its spans (every block returned, every
+free list next pointer followed or pushed, every pointer freed, checked against rpmalloc's reservations;
+every code buffer allocation against them and the reverse; any other `NtFreeVirtualMemory` of either),
+and keeps a ring of those events for a debugger. Geometry Dash was run with it under lldb (from
+Steam, in a loop that stops on the trap, an illegal instruction or an execute fault). The heap checks
+never fired. The first two captures were the illegal-instruction kind: Geode.dll + 0x756010 (`push r15;
+push r14`) run as ARM64, reached through the JIT's return path (`ldp x10, x11, [x17], #16`, the
+guest return address matched, `ret x11`) from a call-ret entry {Geode + 0x756339, Geode + 0x756010},
+which no JIT push writes. x17, the ARM64EC JIT's call-ret stack pointer (`REG_CALLRET_SP`, spilled to
+`State.callret_sp`), was the emulator stack base - 0x40: the JIT had been pushing and popping its
+call-ret entries on the top of its own 256K emulator stack, where FEX's frames and Wine's exception
+frames overwrite them, and its 4 MB call-ret stack had no dirty page. That accounts for all three
+failures:
+
+- an x86 function run as host code (with `invalid frame ...0008` after it), and in one capture a jump
+  onto the stack: a `ret` whose popped entry matched the guest return address, with a host half that was
+  a guest or a stack address;
+- the heap's JIT addresses: Wine maps rpmalloc's 4K heap structure for a thread (its first allocation)
+  right above the emulator stack that `ThreadInit` allocates next, and a push from just above the base
+  overwrites the heap's owner and `local_free[]` heads with a guest address and a host return address
+  (lldb read {Geode RIP, code buffer address} in the heap's first 16 bytes). The next allocation of that
+  size class returned code buffer memory. So it wasn't rpmalloc's owner race, which is real but not this;
+- the 64K-aligned `invalid frame ...0008` of the first failures: the same emulator stack base.
+
+A second build traps when a C++ entry of the JIT (`CompileBlock`, `ExitFunctionLink`, an exception in
+JIT code) sees x17 or `State.callret_sp` outside the call-ret stack, and logs every exception with its
+x17 and sp. It caught it within a block: x17 valid at an unaligned-atomic fault, and at the next
+`CompileBlock` the emulator stack base + 0x10, which is the JIT's sp plus one pop. FEX resumes from such
+a fault with `NtContinueNative`, a direct NtContinue with the native context. Wine's arm64 syscall
+dispatcher can only restore x16 and x17 through a signal: when they differ from the pc and sp it calls
+`syscall_dispatcher_return_slowpath`, which raises SIGUSR2, and usr2_handler switches to the frame's
+context; if that returns, the fast return runs and ends with `ldp x30, x17, [sp, #0xf0]; mov sp, x17;
+ret x16`, so x16 = pc and x17 = sp. Instrumented (scratch `wtrap/signal_arm64.c`), the failing starts
+logged exactly that: `pthread_kill(pthread_self(), SIGUSR2)` (what `raise()` does, falling back to a
+signal for the whole process on ENOTSUP) returned 0, usr2_handler had run 0 times for it, SIGUSR2
+wasn't blocked, and the frame held the right x17; in one of these starts another thread had fallen
+through the same way in native code, where x16 and x17 are scratch and nothing breaks. In a start that
+didn't crash, a SIGUSR2 reached a thread in JIT code, outside any syscall, where the handler returns
+without doing anything. These captures were made with lldb attached, which receives each signal first
+(`EXC_SOFT_SIGNAL`) and passes it on, and loses some of them itself (below). It wasn't reproduced
+outside Geometry Dash: `tests/win/ntcontinue-x16-x17.c` (native ARM64, NtContinue to contexts whose x16 and x17
+aren't their pc and sp; 100 runs of 2 s with 4 threads, 52M continues, before 0057 and as many after,
+and about 7,000 continues under lldb) never sees it,
+nor does it with threads that suspend others, read their context, make syscalls or call
+`FlushProcessWriteBuffers` in a loop, nor does an x86 program that runs 35,000 fresh functions a second
+with unaligned accesses under FEX while another thread suspends it.
+
+0057 doesn't depend on when the signal arrives: the slowpath marks the thread as waiting and calls
+`pthread_kill` (not `raise`, so the signal can't go to another thread) and `sched_yield` in a loop
+until the handler has switched to the frame's context, which doesn't return to it; the handler acts
+only on a waiting thread, so a late SIGUSR2 no longer switches a thread to the frame of whatever
+syscall it is in by then. An independent review found no way for it to apply a wrong frame; its one
+risk is a thread that reaches the slowpath with SIGUSR2 blocked (which the fault path of a blocked
+section, `handle_syscall_fault`, could do), which would loop instead of returning wrongly. The
+instrumented starts read the mask right after pthread_kill had returned and found SIGUSR2 unblocked;
+0057 unblocks it all the same before each try (code returned to doesn't run with it blocked), and logs
+an `err` if 1,000 tries haven't been answered, so a lost signal shows in the log instead of as a silent
+spin. A synchronous trap (`brk` recognised by the trap handler) would not depend on delivery at all,
+but a debugger stops on every one.
+
+With 0057 (and logging where it acts, scratch `wfix/signal_arm64-diag.c`, FEX with the call-ret
+check), Geometry Dash started 20 of 20 times under lldb, where the build without it had failed about
+one start in five, and 14 of 14 without lldb, with no trap. Under lldb it showed both halves of the
+misdelivery: in three starts a thread's first pthread_kill wasn't answered and the second was
+(`SIGUSR2 delivered after 1 retries`; in two of them the frame's pc was in JIT code, its sp the
+emulator stack base and its x17 a valid call-ret pointer, so starts that would have crashed, in the
+third FEX's own code), and in another a SIGUSR2 reached a thread that wasn't waiting, inside a syscall,
+right after another thread's continue had been done normally. Before 0057 that thread would have been
+switched to its syscall frame in the middle of the syscall, another way the same signal could break a
+thread. So under lldb the signal for one thread sometimes went to another; why is the next part.
+
+**Why the signal went astray: steamclient.dylib's OpenSSL, and under lldb the debugger.** A build
+of ntdll that keeps a ring of every SIGUSR2 sent and every SIGUSR1 and SIGUSR2 handler entered
+(thread, time, whether the thread was waiting) and prints it when a send goes unanswered or a SIGUSR2
+reaches a thread that isn't waiting (scratch `wring/sring.c` with 0057, `wring/sorig2.c` with the
+original `raise`, which also prints the thread's mask and pending set and SIGUSR2's action; linked
+from main's objects, where the same link of the unchanged sources gives the tested ntdll's code byte
+for byte) was run with Geometry Dash and Geode, with and without lldb.
+
+*Without a debugger,* with the original `raise` and FEX's call-ret check (scratch `btrap3`), 6 of 75
+starts failed as on 0.4.0 (`does not unwind` at the dispatcher's +0x228, after FEX's `TRAP
+callret-sp-outside-callret-stack` on the same thread): 2 of 40, 2 of 21 and 2 of 14 in three sets.
+Each time `raise(SIGUSR2)` had returned without the handler having run, and in the four starts
+with the build that prints it SIGUSR2 was blocked and pending, `pthread_kill` had returned 0,
+SIGUSR2's action was still usr2_handler, and the thread's mask was `0xfffef867`:
+everything blocked but SIGILL, SIGTRAP, SIGFPE, SIGBUS and SIGSEGV (and the two that can't be). In
+five of the six it was the process's 206th full-context return, the first on another thread after
+the main thread's 205.
+
+That mask is OpenSSL's. A library inserted to log the calls that block most signals, with a
+backtrace (scratch `sigrepro/interpose/maskspy.c`, through `STEAM_DYLD_INSERT_LIBRARIES`, which
+`scripts/play` passes on), shows in every start the thread that loads steamclient.dylib (lsteamclient's
+`dlopen` at `SteamAPI_Init`) calling `sigprocmask(SIG_SETMASK, 0xfffff967)` from one of the library's
+initializers: OpenSSL 1.1's `OPENSSL_cpuid_setup` (`armcap.c`), which, unless `OPENSSL_armcap` is
+set, blocks every signal but those five, installs its own SIGILL handler, tries NEON, PMULL or AES,
+SHA-1, SHA-256 and the counter register under `sigsetjmp`, and sets the old handler and mask back.
+On macOS `sigprocmask` sets the mask of every thread in the process (XNU's `sigprocmask` calls
+`set_procsigmask`, which walks all the process's threads; POSIX leaves `sigprocmask` in a
+multithreaded process unspecified, and macOS's man page doesn't say). In both failing starts of the
+last set, and in one start that ran on, another thread was in `server_select` between its
+`pthread_sigmask(SIG_BLOCK, &server_block_set, &old_set)` and `pthread_sigmask(SIG_SETMASK, &old_set,
+NULL)` during the probe: it saved the probe's mask, OpenSSL set every thread back, and
+`server_select` then set the probe's mask again on that thread alone, for good. It was the thread
+whose next continue failed (the same thread id in both logs). A thread that calls `raise` during the
+probe itself has its SIGUSR2 left pending, and macOS delivers it only when that thread is signalled
+again: setting other threads' masks doesn't make them look at their pending signals. Such a thread
+also keeps SIGUSR1 (suspension), SIGQUIT (`NtTerminateThread`) and the rest of `server_block_set`
+blocked, so suspending or ending it would wait for ever; whether that is the hang at "Setting up
+internal mod" isn't known. `tests/mac/sigprocmask-all-threads.c` does the probe's two calls while one
+thread signals itself and another saves and restores its mask: with `sigprocmask` a self-signal isn't
+delivered until the end, and in two runs of three the other thread ends with the probe's mask; with
+`pthread_sigmask` neither happens (0 of about 300,000 self-signals).
+
+*Under lldb* the same ring, debugserver's log (`LLDB_DEBUGSERVER_LOG_FILE`, flags `0x8`) and lldb's
+`gdb-remote packets` log showed two more ways, both in the debugger's own handling, which is why
+the failure was more frequent under lldb. In 19 starts (about 620 SIGUSR2 each), 8 had a
+send that wasn't answered and 4 a SIGUSR2 at a thread that wasn't waiting; with 0057 every start ran
+on.
+
+- **The kernel swaps signals between threads that stop for them at the same time.** A traced
+  process's signals stop its thread with an `EXC_SOFT_SIGNAL` exception, and debugserver answers each
+  with `ptrace(PT_THUPDATE, pid, thread, signal)` and a reply. In XNU's `issignal_locked`
+  (`bsd/kern/kern_sig.c`) a thread waits in `sig_try_locked` while another is stopped, but then
+  calls `proc_signalstart`, which can sleep and drop the process lock, and doesn't check again: two
+  threads end up stopped at once, on one set of per-process fields (`p_xstat`, `sigwait_thread`,
+  `p_stat`). The first PT_THUPDATE sets the process running, the second fails with EBUSY because it
+  isn't stopped any more (`bsd/kern/mach_process.c`), and each thread then takes `signum =
+  p->p_xstat`, the signal passed for the first. debugserver logs `PT_THUPDATE ... signal = 31) err
+  = Resource busy` for the lost SIGUSR2 (starts 10 and 27), and every stray came with one for
+  signal 30: a thread wineserver had sent SIGUSR1 ran usr2_handler instead, and its SIGUSR1 was lost.
+- **lldb drops a thread's signal when it steps another thread over a breakpoint.** In start 21,
+  thread 0x194 stopped for its SIGUSR2 in the same stop as the main thread at lldb's breakpoint in
+  dyld's `lldb_image_notifier`, which a library load had hit. lldb stepped only the main thread
+  (`vCont;s:`), debugserver answered every exception of the stop and gave thread 0x194 signal 0, and
+  lldb's `C1f` for it at the next continue had no exception left to go with. Starts 4, 5, 8 and 9
+  lost a send without an EBUSY for signal 31, three of them on thread 0x194, which fits this; they
+  ran without the packet log. One more was lldb detaching at the end of start 3.
+
+Both reproduce without Wine or FEX. `tests/mac/traced-signal-swap.c` is a debugger of its own: the
+child traces itself (`PT_TRACE_ME`, `PT_SIGEXC`), one thread signals itself in a loop and another
+sends SIGUSR1 to four sleeping ones, and the parent answers each signal stop as debugserver does. In
+3 s, 1,171 of 302,345 self-signals were lost and 9,900 SIGUSR2 ran on another thread, with 11,174
+PT_THUPDATE calls failing with EBUSY, and of 37,157 SIGUSR1 sent 9,132 were handled; not traced,
+1,185,029 self-signals with none lost, and every SIGUSR1 handled. `tests/mac/lldb-signal-step.sh` runs
+a self-signalling thread under lldb while the main thread hits a breakpoint every millisecond: 460 of
+1,147 self-signals lost, none of 1,371,531 alone. Two threads signalling themselves with the same
+signal lose nothing visible (they swap the same signal). An independent review of the test and of
+the source reading agreed (with the shipped kernel possibly differing from the open source), and
+pointed out the lost SIGUSR1s, which the test now counts. `man 2 ptrace` doesn't document
+PT_THUPDATE; a draft report for Apple is in the scratch `sigrepro/feedback-draft.md`.
+
+Ruled out on the way: wineserver signals a thread with `__pthread_kill` on its port, never the
+process; hardware TSO is off by default; and a native program with signal stacks or none, threads
+toggling `MAP_JIT` write protection, `SIGBUS` from misaligned `casal`, `brk` traps and SIGUSR1 to the
+self-signalling threads lost none of 24 million self-signals, untraced and without a library calling
+`sigprocmask`.
+
+**The fix.** `scripts/play` passes `OPENSSL_armcap` (unless it is set already) with what the kernel
+reports of the features the probe tries (`hw.optional.arm.AdvSIMD`, `FEAT_AES`, `FEAT_SHA1`,
+`FEAT_SHA256`, `FEAT_PMULL`; `0x3d` on the M2 Pro), so OpenSSL takes them from there and doesn't
+touch the signal mask or the SIGILL handler. It leaves out the counter bit, which the probe also
+finds and which OpenSSL 1.1 reads only as a timer for its entropy, falling back to the clock
+without it. With it, 40 of 40 starts with the original `raise` and FEX's call-ret check ran on,
+where 6 of 75 had failed, and the logging library saw no `sigprocmask` from steamclient.dylib in
+any; with the release build of this branch (0057, the release loader, no FEX logging), 30 of 30 ran
+on, with no `err` from the slowpath. 0057 stays: it unblocks SIGUSR2 for the thread and signals until
+the handler has run, so a full-context return survives any other library's `sigprocmask` and the
+debugger's lost signals; without either it signals once. Its comment and message now give these
+causes.
+
+A review of the pull request found three gaps, now closed or stated. 0057 unblocked SIGUSR2 once,
+before its loop, so a `sigprocmask` of another thread that blocked it again after that left the loop
+signalling a thread that never takes the signal; it unblocks it before each try now.
+`tests/mac/slowpath-reblock.c` runs the loop outside Wine and blocks SIGUSR2 process-wide between
+its first unblock and its first signal: unblocked once, 20 of 20 rounds spin with the signal
+pending; before each try, 1,000 of 1,000 take it at the second. 0057 repairs SIGUSR2 only: a thread
+left with the probe's mask also keeps SIGUSR1 (suspension), SIGQUIT (`NtTerminateThread`), SIGALRM,
+SIGIO and every other signal but the probe's five blocked, so only `OPENSSL_armcap`, which keeps the
+probe from running, removes the cause. And the helpers `scripts/steam-run` starts without
+`scripts/play` (installer scripts, redistributables) didn't get it; the value is computed in
+`scripts/openssl-armcap.sh` now, which both source. Still open: another native library that calls
+`sigprocmask` while Wine's threads run would leave the same masks behind; making `sigprocmask`
+per-thread in a library of Hadron's inserted into every process would cover that.
+
+
+Without lldb, with the release's loader and no FEX logging (scratch `dist-fsx3`), 17 of the first 18
+starts were ok. The 11th hung at "Setting up internal mod" with its memory flat; it ran an earlier
+version of 0057 that spun silently when the signal wasn't answered, and no `sample` was taken, so
+whether that was the slowpath or another hang (the lock order of the earlier part of this entry) isn't
+known. Starts from the 14th on ran the final 0057, which logs after 1,000 tries.
+
+With 0057 on 0001 to 0011, the rpmalloc patch and 0056 (scratch `dist-fsx3`): `smc-hook-race` 20 of 20
+runs of 10 s in each layout, `null-branch` 20 of 20, `unaligned-atomic-race` 10 of 10,
+`fault-off-stack` 10 of 10, `rpmalloc-thread-heaps` 2 of 2, `ntcontinue-x16-x17` 100 of 100, `hello`
+(x86-64 and i386), `is-ec-code`, `thread-allocation`, `x87-registers`, `jit-unwind` and
+`unwind-no-progress` (ARM64EC and ARM64) pass, and `tests/win/bench.c` runs in the same time (int 0.759
+to 0.779 s against 0.781 to 0.814 s, three runs each, interleaved).
+
+**Caches from before 0008 are rebuilt once (FEX 0012).** FEX keeps its disk cache in a bucket
+directory named by a hash of `FormatVersion` and the host's features, and at each start
+`PruneStaleEntries` (on unless `FEX_DISKCACHEPRUNESTALEENTRIES=0`) deletes every other bucket.
+0.4.0's update of FEX moved `FormatVersion` from 28 to 44, so every cache was rebuilt then; 0008 to
+0011 leave it at 44, so a cache 0.4.0 wrote, which can hold blocks built from half-written code,
+would have been kept. Bumping `FormatVersion` to 45 would do it in one line, but its buckets would
+then be the ones an upstream FEX at 45 writes, so a later FEX update that drops the patch would load
+0.4.1's caches into another codegen. 0012 instead hashes a separate `DownstreamVersion` (1) into the
+bucket next to `FormatVersion`: an old cache is in another bucket, isn't loaded, and is deleted at
+the next start, so the disk holds one cache, not two; and no upstream build's bucket can match. Bump
+it when a downstream fix makes cached blocks unsafe without a change of upstream's version. The AOT
+image caches (`CodeCache`, from `FEXOfflineCompiler`) aren't touched; Hadron doesn't make them.
+Checked with the scratch prefix of the tests and with Geometry Dash's: each held one bucket from the
+earlier build (`fe63fce69aa1e023`); the first start removed it and made `74181c7d43e0891a`, and the
+next starts used that one.
+
+Retest of these changes (Wine 0057 with the unblock in the loop, FEX 0012, scratch `dist-fsx4`):
+`ntcontinue-x16-x17` 100 of 100 runs of 2 s with 4 threads (39M continues), `hello` x86-64 and i386.
+Through `scripts/steam-run` from this branch's scripts, Geometry Dash's process had
+`OPENSSL_armcap=0x3d`, and a helper started outside the game's folder (`cmd /c set OPENSSL`) printed
+`OPENSSL_armcap=0x3d`. The 20 starts of Geometry Dash with Geode weren't made: Mac Steam wasn't
+running, so the game ended at `SteamAPI_Init` each time.
+
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
 Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play

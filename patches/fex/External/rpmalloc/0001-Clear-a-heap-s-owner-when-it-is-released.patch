@@ -1,0 +1,45 @@
+From 28b340be3f3b51ba7bc77b4bf5919026f0db2cf8 Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 26 Nov 2026 18:48:34 -0500
+Subject: [PATCH] Clear a heap's owner when it is released
+
+heap_release() put a thread's heap on the queue for reuse with its
+owner_thread left set. A free decides between the local free list,
+without atomics, and the atomic deferred lists by comparing owner_thread
+with the current thread's id, and on Windows that id is the TEB address,
+which Wine reuses for later threads. A new thread given the old thread's
+TEB, but another heap from the queue, then took the released heap's
+blocks for its own: it freed them onto the page's local free list and
+changed the heap's page lists without atomics, while the thread that
+took the heap from the queue allocated from the same pages. The thread
+that released the heap did the same with the frees it made afterwards.
+In a test with threads that start, free each other's blocks and exit,
+most frees were of this kind, and with a short delay added where such a
+free starts, the free lists were corrupted at once.
+
+Clear owner_thread on release, so that until a thread takes the heap,
+frees of its blocks go through the deferred lists, as frees from any
+other thread do.
+---
+ rpmalloc/rpmalloc.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/rpmalloc/rpmalloc.c b/rpmalloc/rpmalloc.c
+index a697ae9..afc91b7 100644
+--- a/rpmalloc/rpmalloc.c
++++ b/rpmalloc/rpmalloc.c
+@@ -1507,6 +1507,11 @@ heap_allocate(int first_class) {
+ 
+ static inline void
+ heap_release(heap_t* heap) {
++	// A released heap has no owner until a thread takes it from the queue. Keeping the old owner's
++	// id would let a later thread with the same id, which can be another thread entirely (on Windows
++	// the id is the TEB address, and TEBs are reused), free blocks into the heap as its own, without
++	// the atomic deferred lists, while the thread that took the heap allocates from it.
++	heap->owner_thread = 0;
+ 	heap_lock_acquire();
+ 	if (heap->prev)
+ 		heap->prev->next = heap->next;
+-- 
+2.54.0 (Apple Git-157)
+

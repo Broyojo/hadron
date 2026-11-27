@@ -87,7 +87,7 @@ for tool in function_grep.pl widl winebuild winecpp winedump winegcc wineg++ win
 done
 
 mkdir -p "$OUT/scripts" "$OUT/steam" "$OUT/licenses" "$EXT"
-for script in hadron-procs.sh logcap mtld3d-prefix paths.sh play program-run report runtime-versions.sh shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
+for script in hadron-procs.sh logcap mtld3d-prefix openssl-armcap.sh paths.sh play program-run report runtime-versions.sh shortcut-icon steam-install steam-run steam-status steam-uninstall stop watchdog; do
     cp -p "$ROOT/scripts/$script" "$OUT/scripts/"
 done
 cp -p "$ROOT/scripts/watchdog-policy.sh" "$OUT/scripts/"
@@ -208,8 +208,8 @@ while IFS='|' read -r name what licence files dir source; do
     done < <(find "$dir" -maxdepth 5 -type f \( -iname 'LICEN[CS]E*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
                   \( -path '*/External/*' -o -path '*/external/*' -o -path '*/subprojects/*' -o -path '*/third_party/*' \
                      -o -path '*/vendor/*' -o -path '*/3rdparty/*' \) ! -path '*/test/*' 2>/dev/null)
-    queue=("$ROOT/patches/$name"/*.patch)
-    if [[ -e "${queue[0]}" ]]; then patches=${#queue[@]}; else patches=none; fi
+    patches=$(find "$ROOT/patches/$name" -name '*.patch' 2>/dev/null | wc -l | tr -d ' ')
+    [[ $patches == 0 ]] && patches=none
     if [[ -z "$source" ]]; then
         read -r _ url ref < <(grep -E "^$name[[:space:]]" "$ROOT/sources.conf")
         source="$url at \`$ref\`"

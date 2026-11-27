@@ -270,6 +270,10 @@ set -- "MESA_KK_FAILED_MSL_DIR=$HADRON_LOGS/failed-msl" "$@"
 # prepares, stays at its lowest clock: Teardown ran at 16 fps so, and at 60 one frame ahead
 # (docs/findings.md #33). 1 gives a game exactly the latency it asks for.
 set -- "VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES=${VKD3D_SWAPCHAIN_MIN_LATENCY_FRAMES:-2}" "$@"
+# OpenSSL in steamclient.dylib leaves Wine's threads with signals blocked unless OPENSSL_armcap
+# tells it the CPU's features (scripts/openssl-armcap.sh, docs/findings.md #80).
+. "$ROOT/scripts/openssl-armcap.sh"
+set -- "OPENSSL_armcap=$OPENSSL_armcap" "$@"
 
 # Steam's overlay hooks Metal's present calls and the event loop when its library is loaded, so it
 # has to be in the process from the start, as in a Mac game. Opened later by lsteamclient it

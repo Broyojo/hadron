@@ -1,0 +1,43 @@
+From 6bce671056c172b58d9d1dcb544d6e8257ff4d6a Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 26 Nov 2026 14:30:30 -0500
+Subject: [PATCH 10/11] FEXCore: Stop tracking a lookup cache's range before
+ freeing it
+
+A thread's lookup cache only reserves the memory for its L1 and L2
+caches, and the frontend commits it page by page on access violations,
+through the overcommit range the cache marks. The destructor freed the
+reservation and then unmarked the range. A thread created in between
+can be given the same addresses for its own lookup cache and mark them,
+and the unmark then removes that thread's range: its next access to an
+uncommitted page of its cache is no longer handled.
+
+On Windows that access comes from FindBlock, inside CompileBlock, with
+the code invalidation lock held. The frontend passes the fault on and
+the process ends, or, when a memory notification holds
+ThreadCreationMutex while it waits for the invalidation lock, the fault
+handler waits for ThreadCreationMutex and both threads hang.
+
+Unmark the range before freeing it.
+---
+ FEXCore/Source/Interface/Core/LookupCache.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.cpp b/FEXCore/Source/Interface/Core/LookupCache.cpp
+index 0b230306f0..f030a42bc1 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.cpp
++++ b/FEXCore/Source/Interface/Core/LookupCache.cpp
+@@ -71,8 +71,9 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
+ }
+ 
+ LookupCache::~LookupCache() {
+-  FEXCore::Allocator::VirtualFree(reinterpret_cast<void*>(PagePointer), TotalCacheSize);
++  // Stop tracking the range before freeing it: once it is free, another thread's lookup cache can be allocated there and mark it.
+   ctx->SyscallHandler->UnmarkOvercommitRange(PagePointer, TotalCacheSize);
++  FEXCore::Allocator::VirtualFree(reinterpret_cast<void*>(PagePointer), TotalCacheSize);
+ 
+   // No need to free BlockLinks map.
+   // These will get freed when their memory allocators are deallocated.
+-- 
+2.54.0 (Apple Git-157)
+

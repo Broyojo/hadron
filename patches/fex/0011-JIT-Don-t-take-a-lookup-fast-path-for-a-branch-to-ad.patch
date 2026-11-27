@@ -1,0 +1,94 @@
+From d58cb52da50ff5450f892bc2d7d2ee774342fa0c Mon Sep 17 00:00:00 2001
+From: Broyojo <dha@xoba.com>
+Date: Thu, 26 Nov 2026 16:00:13 -0500
+Subject: [PATCH 11/11] JIT: Don't take a lookup fast path for a branch to
+ address 0
+
+The lookup caches mark an empty entry with a guest address of 0: a
+zeroed L1 entry or call-ret stack entry reads as {0, 0}, and an
+invalidated L1 entry keeps its host code with a guest address of 0. The
+fast paths compare only the guest address with the branch target, so a
+branch to 0 matched them: an indirect call or jump through an empty or
+invalidated first L1 entry, a return predicted from an empty call-ret
+stack entry, and, on ARM64EC, a call from native code entering the JIT
+at 0 with an empty entry on top of the call-ret stack, all branched to
+the entry's host code, 0 or a stale block, instead of raising the
+guest's access violation at 0. The same held for FindBlock's L1 lookup.
+
+A call through a null function pointer from a new thread, whose caches
+are empty, ended the process: the native fault at 0 on the emulator
+stack can't be dispatched to the guest.
+
+Send a branch to 0 to the dispatcher, which compiles a block that raises
+the fault, and don't look address 0 up in L1.
+---
+ FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp | 3 ++-
+ FEXCore/Source/Interface/Core/JIT/BranchOps.cpp         | 9 +++++++++
+ FEXCore/Source/Interface/Core/LookupCache.h             | 4 ++--
+ 3 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+index 5637b8cefa..5722b8c018 100644
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -124,7 +124,8 @@ void Dispatcher::EmitDispatcher() {
+   FillSpecialRegs(TMP1, TMP2, {.SetFIZ = false, .SetPredRegs = true});
+ 
+   // As ARM64EC uses this as an entrypoint for both guest calls and host returns, opportunistically try to return
+-  // using the call-ret stack to avoid unbalancing it.
++  // using the call-ret stack to avoid unbalancing it. An empty entry's guest address is 0, so never for a target of 0.
++  (void)cbz(ARMEmitter::Size::i64Bit, EC_CALL_CHECKER_PC_REG, &LoopTop);
+   ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, REG_CALLRET_SP);
+   // EC_CALL_CHECKER_PC_REG is REG_PF which isn't touched by any of the above
+   sub(ARMEmitter::Size::i64Bit, TMP1, EC_CALL_CHECKER_PC_REG, TMP1);
+diff --git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+index c2b1d8e287..401887fc3b 100644
+--- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+@@ -193,11 +193,19 @@ DEF_OP(ExitFunction) {
+ #endif
+   } else {
+     ARMEmitter::ForwardLabel SkipFullLookup;
++    ARMEmitter::ForwardLabel FullLookup;
+     auto RipReg = GetReg(Op->NewRIP);
+ 
+     if (Op->Hint == IR::BranchHint::Return) {
+       // First try to pop from the call-ret stack, otherwise follow the normal path (but ending in a ret)
+       ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
++    }
++
++    // Empty call-ret stack and L1 entries, and invalidated L1 entries, have a guest address of 0, so a branch to 0
++    // would match them and jump to their host code. Leave it to the dispatcher, which raises the guest's fault.
++    (void)cbz(ARMEmitter::Size::i64Bit, RipReg.X(), &FullLookup);
++
++    if (Op->Hint == IR::BranchHint::Return) {
+       sub(TMP1, TMP1, RipReg.X());
+       (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
+     }
+@@ -215,6 +223,7 @@ DEF_OP(ExitFunction) {
+     // Note: sub+cbnz used over cmp+br to preserve flags.
+     sub(TMP1, TMP1, RipReg.X());
+     (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
++    (void)Bind(&FullLookup);
+     ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
+     str(RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
+ 
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index 5f0499a3b4..374e2d5536 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -186,9 +186,9 @@ public:
+   }
+ 
+   uintptr_t FindBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) {
+-    // Try L1, no lock needed
++    // Try L1, no lock needed. Empty and invalidated entries have a guest address of 0, so it can't be looked up there.
+     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1PointerMask];
+-    if (L1Entry.GuestCode == Address) {
++    if (L1Entry.GuestCode == Address && Address != 0) {
+       return L1Entry.HostCode;
+     }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

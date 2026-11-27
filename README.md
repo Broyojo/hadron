@@ -184,6 +184,7 @@ runs 64-bit programs only, through `scripts/wine-dev`.
 ```
 sources.conf          upstream repositories and the revisions Hadron builds
 patches/<component>/  Hadron's changes, as git format-patch queues applied by scripts/fetch.sh
+                      (a submodule's queue in the directory of its path)
 scripts/              build, install and launch scripts
 launcher/             hadron-steam.exe, the stand-in for Steam's Windows process, and hadron-icon
 app/                  Hadron.app: the window and the hadron command (scripts/build-app.sh)
