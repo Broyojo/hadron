@@ -1,4 +1,4 @@
-From 873e1869a6a542ba4bb2d5dd3898fc6404cd402a Mon Sep 17 00:00:00 2001
+From ff2e083798eb6f0d9e78963109cb58107be6fd49 Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 26 Nov 2026 20:58:22 -0500
 Subject: [PATCH] ntdll: Keep signaling until the full-context return has been
@@ -9,24 +9,33 @@ sp, as NtContinue does, the dispatcher calls
 syscall_dispatcher_return_slowpath(), which raises SIGUSR2; the handler
 switches to the frame's context, so the call isn't expected to return.
 If it does, the dispatcher's fast return runs instead and leaves x16 =
-pc and x17 = sp. On macOS it now and then did: pthread_kill() had
-returned 0 and the handler hadn't run for it. In another start a
-SIGUSR2 reached a thread outside any syscall, where the handler does
-nothing. Code that keeps a live value in x16 or x17 across an exception
-then resumes with the wrong one; FEX's ARM64EC JIT keeps its call-ret
-stack pointer in x17, and Geometry Dash with Geode crashed or hung.
+pc and x17 = sp. Code that keeps a live value in x16 or x17 across an
+exception then resumes with the wrong one; FEX's ARM64EC JIT keeps its
+call-ret stack pointer in x17, and Geometry Dash with Geode crashed.
 
-Mark the thread as waiting for the handler, and call pthread_kill() and
-sched_yield() until the handler has run. The handler only acts on a
-thread that is waiting, so a late signal no longer applies the frame of
-whatever syscall the thread is in by then. Use pthread_kill() instead of
-raise(), which falls back to signaling the whole process.
+On macOS it returned. There sigprocmask() sets the mask of every thread
+in the process, and steamclient.dylib's OpenSSL calls it when it is
+loaded, to block signals while it probes the CPU. A thread that saved
+its own mask meanwhile, as server_select() does, sets the probe's back
+afterwards and keeps SIGUSR2 blocked, so raise() leaves the signal
+pending; one signaled during the probe gets the signal only when it is
+signaled again. With a debugger attached the kernel also lets two
+threads stop for a signal at once and gives both the one the debugger
+answered first, and lldb drops a thread's signal when it steps another
+thread over a breakpoint.
+
+Unblock SIGUSR2, mark the thread as waiting for the handler, and call
+pthread_kill() and sched_yield() until the handler has run. The handler
+only acts on a thread that is waiting, so a SIGUSR2 that arrives late
+or at another thread no longer applies the frame of whatever syscall
+that thread is in. Use pthread_kill() instead of raise(), which falls
+back to signaling the whole process.
 ---
- dlls/ntdll/unix/signal_arm64.c | 24 +++++++++++++++++++++++-
- 1 file changed, 23 insertions(+), 1 deletion(-)
+ dlls/ntdll/unix/signal_arm64.c | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index 2ebba14110..349561858d 100644
+index 2ebba14110..3d128dc893 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -72,6 +72,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(seh);
@@ -41,7 +50,7 @@ index 2ebba14110..349561858d 100644
      struct syscall_frame *frame = get_syscall_frame( data );
      DWORD i;
  
-+    /* only the thread's own syscall_dispatcher_return_slowpath() asks for this, ignore a late duplicate */
++    /* only the thread's own syscall_dispatcher_return_slowpath() asks for this, ignore one meant for another thread */
 +    if (!arm64_thread_data( data )->set_context_pending) return;
      if (!is_inside_syscall( data, SP_sig(sigcontext) )) return;
      if (!frame) return;
@@ -49,7 +58,7 @@ index 2ebba14110..349561858d 100644
  
      if (is_emulated_code( frame->pc ))
      {
-@@ -1626,7 +1630,25 @@ void signal_init_process( TEB *teb )
+@@ -1626,7 +1630,27 @@ void signal_init_process( TEB *teb )
   */
  void syscall_dispatcher_return_slowpath(void)
  {
@@ -60,8 +69,10 @@ index 2ebba14110..349561858d 100644
 +
 +    /* usr2_handler() switches to the frame's context, so this doesn't return. Returning would make the
 +     * dispatcher restore the frame without x16 and x17, which would then hold the pc and the sp.
-+     * macOS doesn't always deliver the signal on the return from pthread_kill(), so enter the kernel
-+     * again until it has. pthread_kill(), not raise(): raise() falls back to a signal for the process. */
++     * On macOS the signal can be held back: another library's sigprocmask() sets the mask of every
++     * thread, and with a debugger attached the kernel can give this thread another thread's signal.
++     * So enter the kernel again until the handler has run. pthread_kill(), not raise(): raise()
++     * falls back to a signal for the process. */
 +    thread_data->set_context_pending = TRUE;
 +    /* a return to user code doesn't keep SIGUSR2 blocked */
 +    sigemptyset( &mask );

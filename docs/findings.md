@@ -2196,8 +2196,11 @@ In short: Geometry Dash's failures (crashes with `invalid frame ...0008`, an x86
 code, FEX's heap handing out JIT memory, and hangs) all came from one thing, found last: FEX's ARM64EC
 JIT keeps its call-ret stack pointer in x17, FEX resumes from its own exceptions (most often the
 rewrite of an unaligned atomic access) with NtContinue, and Wine's return from it sometimes left x17 =
-sp, because the SIGUSR2 that sets the full context didn't reach the thread in time. Wine 0057 fixes
-that (the last part of this entry). On the way, Geode's hooks turned up three real races in FEX's
+sp, because the SIGUSR2 that sets the full context didn't reach the thread in time: steamclient.dylib's
+OpenSSL, probing the CPU when lsteamclient loads it, had left the thread with SIGUSR2 blocked, since
+on macOS `sigprocmask` sets every thread's mask. `scripts/play` now passes `OPENSSL_armcap` so the
+probe isn't made, and Wine 0057 no longer depends on the signal arriving at once (the last part of
+this entry). On the way, Geode's hooks turned up three real races in FEX's
 handling of self-modifying code (0008, 0009, 0010), a branch to address 0 through empty lookup entries
 (0011), a heap owner race in rpmalloc (rpmalloc 0001) and a hang when an exception frame doesn't fit
 (Wine 0056); each is fixed below, with its test, though none was what Geometry Dash hit.
@@ -2502,10 +2505,9 @@ signal for the whole process on ENOTSUP) returned 0, usr2_handler had run 0 time
 wasn't blocked, and the frame held the right x17; in one of these starts another thread had fallen
 through the same way in native code, where x16 and x17 are scratch and nothing breaks. In a start that
 didn't crash, a SIGUSR2 reached a thread in JIT code, outside any syscall, where the handler returns
-without doing anything. Why the signal isn't delivered before pthread_kill returns was not found. These
-captures were made with lldb attached, which receives each signal first (`EXC_SOFT_SIGNAL`) and passes
-it on; without a debugger the same crash came about once in 40 starts. It wasn't reproduced outside
-Geometry Dash: `tests/win/ntcontinue-x16-x17.c` (native ARM64, NtContinue to contexts whose x16 and x17
+without doing anything. These captures were made with lldb attached, which receives each signal first
+(`EXC_SOFT_SIGNAL`) and passes it on, and loses some of them itself (below). It wasn't reproduced
+outside Geometry Dash: `tests/win/ntcontinue-x16-x17.c` (native ARM64, NtContinue to contexts whose x16 and x17
 aren't their pc and sp; 100 runs of 2 s with 4 threads, 52M continues, before 0057 and as many after,
 and about 7,000 continues under lldb) never sees it,
 nor does it with threads that suspend others, read their context, make syscalls or call
@@ -2534,9 +2536,109 @@ emulator stack base and its x17 a valid call-ret pointer, so starts that would h
 third FEX's own code), and in another a SIGUSR2 reached a thread that wasn't waiting, inside a syscall,
 right after another thread's continue had been done normally. Before 0057 that thread would have been
 switched to its syscall frame in the middle of the syscall, another way the same signal could break a
-thread. So the signal for one thread sometimes goes to another or comes twice; it happens far more
-often with lldb attached (it receives each signal first and passes it on), which fits 1 start in 5
-under lldb against 1 in 40 without.
+thread. So under lldb the signal for one thread sometimes went to another; why is the next part.
+
+**Why the signal went astray: steamclient.dylib's OpenSSL, and under lldb the debugger.** A build
+of ntdll that keeps a ring of every SIGUSR2 sent and every SIGUSR1 and SIGUSR2 handler entered
+(thread, time, whether the thread was waiting) and prints it when a send goes unanswered or a SIGUSR2
+reaches a thread that isn't waiting (scratch `wring/sring.c` with 0057, `wring/sorig2.c` with the
+original `raise`, which also prints the thread's mask and pending set and SIGUSR2's action; linked
+from main's objects, where the same link of the unchanged sources gives the tested ntdll's code byte
+for byte) was run with Geometry Dash and Geode, with and without lldb.
+
+*Without a debugger,* with the original `raise` and FEX's call-ret check (scratch `btrap3`), 6 of 75
+starts failed as on 0.4.0 (`does not unwind` at the dispatcher's +0x228, after FEX's `TRAP
+callret-sp-outside-callret-stack` on the same thread): 2 of 40, 2 of 21 and 2 of 14 in three sets.
+Each time `raise(SIGUSR2)` had returned without the handler having run, and in the four starts
+with the build that prints it SIGUSR2 was blocked and pending, `pthread_kill` had returned 0,
+SIGUSR2's action was still usr2_handler, and the thread's mask was `0xfffef867`:
+everything blocked but SIGILL, SIGTRAP, SIGFPE, SIGBUS and SIGSEGV (and the two that can't be). In
+five of the six it was the process's 206th full-context return, the first on another thread after
+the main thread's 205.
+
+That mask is OpenSSL's. A library inserted to log the calls that block most signals, with a
+backtrace (scratch `sigrepro/interpose/maskspy.c`, through `STEAM_DYLD_INSERT_LIBRARIES`, which
+`scripts/play` passes on), shows in every start the thread that loads steamclient.dylib (lsteamclient's
+`dlopen` at `SteamAPI_Init`) calling `sigprocmask(SIG_SETMASK, 0xfffff967)` from one of the library's
+initializers: OpenSSL 1.1's `OPENSSL_cpuid_setup` (`armcap.c`), which, unless `OPENSSL_armcap` is
+set, blocks every signal but those five, installs its own SIGILL handler, tries NEON, PMULL or AES,
+SHA-1, SHA-256 and the counter register under `sigsetjmp`, and sets the old handler and mask back.
+On macOS `sigprocmask` sets the mask of every thread in the process (XNU's `sigprocmask` calls
+`set_procsigmask`, which walks all the process's threads; POSIX leaves `sigprocmask` in a
+multithreaded process unspecified, and macOS's man page doesn't say). In both failing starts of the
+last set, and in one start that ran on, another thread was in `server_select` between its
+`pthread_sigmask(SIG_BLOCK, &server_block_set, &old_set)` and `pthread_sigmask(SIG_SETMASK, &old_set,
+NULL)` during the probe: it saved the probe's mask, OpenSSL set every thread back, and
+`server_select` then set the probe's mask again on that thread alone, for good. It was the thread
+whose next continue failed (the same thread id in both logs). A thread that calls `raise` during the
+probe itself has its SIGUSR2 left pending, and macOS delivers it only when that thread is signalled
+again: setting other threads' masks doesn't make them look at their pending signals. Such a thread
+also keeps SIGUSR1 (suspension), SIGQUIT (`NtTerminateThread`) and the rest of `server_block_set`
+blocked, so suspending or ending it would wait for ever; whether that is the hang at "Setting up
+internal mod" isn't known. `tests/mac/sigprocmask-all-threads.c` does the probe's two calls while one
+thread signals itself and another saves and restores its mask: with `sigprocmask` a self-signal isn't
+delivered until the end, and in two runs of three the other thread ends with the probe's mask; with
+`pthread_sigmask` neither happens (0 of about 300,000 self-signals).
+
+*Under lldb* the same ring, debugserver's log (`LLDB_DEBUGSERVER_LOG_FILE`, flags `0x8`) and lldb's
+`gdb-remote packets` log showed two more ways, both in the debugger's own handling, which is why
+the failure was more frequent under lldb. In 19 starts (about 620 SIGUSR2 each), 8 had a
+send that wasn't answered and 4 a SIGUSR2 at a thread that wasn't waiting; with 0057 every start ran
+on.
+
+- **The kernel swaps signals between threads that stop for them at the same time.** A traced
+  process's signals stop its thread with an `EXC_SOFT_SIGNAL` exception, and debugserver answers each
+  with `ptrace(PT_THUPDATE, pid, thread, signal)` and a reply. In XNU's `issignal_locked`
+  (`bsd/kern/kern_sig.c`) a thread waits in `sig_try_locked` while another is stopped, but then
+  calls `proc_signalstart`, which can sleep and drop the process lock, and doesn't check again: two
+  threads end up stopped at once, on one set of per-process fields (`p_xstat`, `sigwait_thread`,
+  `p_stat`). The first PT_THUPDATE sets the process running, the second fails with EBUSY because it
+  isn't stopped any more (`bsd/kern/mach_process.c`), and each thread then takes `signum =
+  p->p_xstat`, the signal passed for the first. debugserver logs `PT_THUPDATE ... signal = 31) err
+  = Resource busy` for the lost SIGUSR2 (starts 10 and 27), and every stray came with one for
+  signal 30: a thread wineserver had sent SIGUSR1 ran usr2_handler instead, and its SIGUSR1 was lost.
+- **lldb drops a thread's signal when it steps another thread over a breakpoint.** In start 21,
+  thread 0x194 stopped for its SIGUSR2 in the same stop as the main thread at lldb's breakpoint in
+  dyld's `lldb_image_notifier`, which a library load had hit. lldb stepped only the main thread
+  (`vCont;s:`), debugserver answered every exception of the stop and gave thread 0x194 signal 0, and
+  lldb's `C1f` for it at the next continue had no exception left to go with. Starts 4, 5, 8 and 9
+  lost a send without an EBUSY for signal 31, three of them on thread 0x194, which fits this; they
+  ran without the packet log. One more was lldb detaching at the end of start 3.
+
+Both reproduce without Wine or FEX. `tests/mac/traced-signal-swap.c` is a debugger of its own: the
+child traces itself (`PT_TRACE_ME`, `PT_SIGEXC`), one thread signals itself in a loop and another
+sends SIGUSR1 to four sleeping ones, and the parent answers each signal stop as debugserver does. In
+3 s, 1,171 of 302,345 self-signals were lost and 9,900 SIGUSR2 ran on another thread, with 11,174
+PT_THUPDATE calls failing with EBUSY, and of 37,157 SIGUSR1 sent 9,132 were handled; not traced,
+1,185,029 self-signals with none lost, and every SIGUSR1 handled. `tests/mac/lldb-signal-step.sh` runs
+a self-signalling thread under lldb while the main thread hits a breakpoint every millisecond: 460 of
+1,147 self-signals lost, none of 1,371,531 alone. Two threads signalling themselves with the same
+signal lose nothing visible (they swap the same signal). An independent review of the test and of
+the source reading agreed (with the shipped kernel possibly differing from the open source), and
+pointed out the lost SIGUSR1s, which the test now counts. `man 2 ptrace` doesn't document
+PT_THUPDATE; a draft report for Apple is in the scratch `sigrepro/feedback-draft.md`.
+
+Ruled out on the way: wineserver signals a thread with `__pthread_kill` on its port, never the
+process; hardware TSO is off by default; and a native program with signal stacks or none, threads
+toggling `MAP_JIT` write protection, `SIGBUS` from misaligned `casal`, `brk` traps and SIGUSR1 to the
+self-signalling threads lost none of 24 million self-signals, untraced and without a library calling
+`sigprocmask`.
+
+**The fix.** `scripts/play` passes `OPENSSL_armcap` (unless it is set already) with what the kernel
+reports of the features the probe tries (`hw.optional.arm.AdvSIMD`, `FEAT_AES`, `FEAT_SHA1`,
+`FEAT_SHA256`, `FEAT_PMULL`; `0x3d` on the M2 Pro), so OpenSSL takes them from there and doesn't
+touch the signal mask or the SIGILL handler. It leaves out the counter bit, which the probe also
+finds and which OpenSSL 1.1 reads only as a timer for its entropy, falling back to the clock
+without it. With it, 40 of 40 starts with the original `raise` and FEX's call-ret check ran on,
+where 6 of 75 had failed, and the logging library saw no `sigprocmask` from steamclient.dylib in
+any; with the release build of this branch (0057, the release loader, no FEX logging), 30 of 30 ran
+on, with no `err` from the slowpath. 0057 stays: it unblocks SIGUSR2 for the thread and signals until
+the handler has run, so a full-context return survives any other library's `sigprocmask` and the
+debugger's lost signals; without either it signals once. Its code is unchanged; its comment and
+message now give these causes. Still open: another native library that calls `sigprocmask` while
+Wine's threads run would leave the same masks behind; making `sigprocmask` per-thread in a library of
+Hadron's inserted into every process would cover that.
+
 
 Without lldb, with the release's loader and no FEX logging (scratch `dist-fsx3`), 17 of the first 18
 starts were ok. The 11th hung at "Setting up internal mod" with its memory flat; it ran an earlier
