@@ -208,7 +208,8 @@ while IFS='|' read -r name what licence files dir source; do
     done < <(find "$dir" -maxdepth 5 -type f \( -iname 'LICEN[CS]E*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
                   \( -path '*/External/*' -o -path '*/external/*' -o -path '*/subprojects/*' -o -path '*/third_party/*' \
                      -o -path '*/vendor/*' -o -path '*/3rdparty/*' \) ! -path '*/test/*' 2>/dev/null)
-    patches=$(find "$ROOT/patches/$name" -name '*.patch' 2>/dev/null | wc -l | tr -d ' ')
+    patches=0
+    [[ -d "$ROOT/patches/$name" ]] && patches=$(find "$ROOT/patches/$name" -name '*.patch' | wc -l | tr -d ' ')
     [[ $patches == 0 ]] && patches=none
     if [[ -z "$source" ]]; then
         read -r _ url ref < <(grep -E "^$name[[:space:]]" "$ROOT/sources.conf")
