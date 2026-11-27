@@ -2268,13 +2268,12 @@ once. `hello` (x86-64 and i386), `is-ec-code`, `thread-allocation`,
 against 57,000 in 20 s), because more of its writes now fault, as they should. The three races are
 in upstream FEX's shared code as well.
 
-Not done: disk caches written before 0008 can still hold mixed blocks, and FEX's cache format did
-not change, so a game's cache is not rebuilt; deleting a prefix's
-`drive_c/users/<user>/AppData/Local/fex-emu/DiskCache` discards them. The trap is per 4K page and
-does not cover 16K host-page neighbours (PR #94). The lock order that turns a fault during a
-compilation into a hang remains, for any other such fault. #53's other suspect, `CompileBlock`'s
-`NtProtectVirtualMemory` reaching `NotifyMemoryProtect`, does not happen: the dispatcher sets
-`InSyscallCallback` around compiles and Wine skips the notification.
+Disk caches written before 0008 can still hold mixed blocks, and FEX's cache format did not change,
+so a game's cache was not rebuilt; FEX 0012 rebuilds each once (the end of this entry). The trap is
+per 4K page and does not cover 16K host-page neighbours (PR #94). The lock order that turns a fault
+during a compilation into a hang remains, for any other such fault. #53's other suspect,
+`CompileBlock`'s `NtProtectVirtualMemory` reaching `NotifyMemoryProtect`, does not happen: the
+dispatcher sets `InSyscallCallback` around compiles and Wine skips the notification.
 
 **Review fixes.** An independent review of the three patches found two gaps, both real. 0009
 required the target to still be mapped to the block that was found, which fails whenever two
@@ -2522,7 +2521,7 @@ syscall it is in by then. An independent review found no way for it to apply a w
 risk is a thread that reaches the slowpath with SIGUSR2 blocked (which the fault path of a blocked
 section, `handle_syscall_fault`, could do), which would loop instead of returning wrongly. The
 instrumented starts read the mask right after pthread_kill had returned and found SIGUSR2 unblocked;
-0057 unblocks it all the same before signaling (code returned to doesn't run with it blocked), and logs
+0057 unblocks it all the same before each try (code returned to doesn't run with it blocked), and logs
 an `err` if 1,000 tries haven't been answered, so a lost signal shows in the log instead of as a silent
 spin. A synchronous trap (`brk` recognised by the trap handler) would not depend on delivery at all,
 but a debugger stops on every one.
@@ -2634,10 +2633,22 @@ where 6 of 75 had failed, and the logging library saw no `sigprocmask` from stea
 any; with the release build of this branch (0057, the release loader, no FEX logging), 30 of 30 ran
 on, with no `err` from the slowpath. 0057 stays: it unblocks SIGUSR2 for the thread and signals until
 the handler has run, so a full-context return survives any other library's `sigprocmask` and the
-debugger's lost signals; without either it signals once. Its code is unchanged; its comment and
-message now give these causes. Still open: another native library that calls `sigprocmask` while
-Wine's threads run would leave the same masks behind; making `sigprocmask` per-thread in a library of
-Hadron's inserted into every process would cover that.
+debugger's lost signals; without either it signals once. Its comment and message now give these
+causes.
+
+A review of the pull request found three gaps, now closed or stated. 0057 unblocked SIGUSR2 once,
+before its loop, so a `sigprocmask` of another thread that blocked it again after that left the loop
+signalling a thread that never takes the signal; it unblocks it before each try now.
+`tests/mac/slowpath-reblock.c` runs the loop outside Wine and blocks SIGUSR2 process-wide between
+its first unblock and its first signal: unblocked once, 20 of 20 rounds spin with the signal
+pending; before each try, 1,000 of 1,000 take it at the second. 0057 repairs SIGUSR2 only: a thread
+left with the probe's mask also keeps SIGUSR1 (suspension), SIGQUIT (`NtTerminateThread`), SIGALRM,
+SIGIO and every other signal but the probe's five blocked, so only `OPENSSL_armcap`, which keeps the
+probe from running, removes the cause. And the helpers `scripts/steam-run` starts without
+`scripts/play` (installer scripts, redistributables) didn't get it; the value is computed in
+`scripts/openssl-armcap.sh` now, which both source. Still open: another native library that calls
+`sigprocmask` while Wine's threads run would leave the same masks behind; making `sigprocmask`
+per-thread in a library of Hadron's inserted into every process would cover that.
 
 
 Without lldb, with the release's loader and no FEX logging (scratch `dist-fsx3`), 17 of the first 18
@@ -2652,6 +2663,29 @@ runs of 10 s in each layout, `null-branch` 20 of 20, `unaligned-atomic-race` 10 
 (x86-64 and i386), `is-ec-code`, `thread-allocation`, `x87-registers`, `jit-unwind` and
 `unwind-no-progress` (ARM64EC and ARM64) pass, and `tests/win/bench.c` runs in the same time (int 0.759
 to 0.779 s against 0.781 to 0.814 s, three runs each, interleaved).
+
+**Caches from before 0008 are rebuilt once (FEX 0012).** FEX keeps its disk cache in a bucket
+directory named by a hash of `FormatVersion` and the host's features, and at each start
+`PruneStaleEntries` (on unless `FEX_DISKCACHEPRUNESTALEENTRIES=0`) deletes every other bucket.
+0.4.0's update of FEX moved `FormatVersion` from 28 to 44, so every cache was rebuilt then; 0008 to
+0011 leave it at 44, so a cache 0.4.0 wrote, which can hold blocks built from half-written code,
+would have been kept. Bumping `FormatVersion` to 45 would do it in one line, but its buckets would
+then be the ones an upstream FEX at 45 writes, so a later FEX update that drops the patch would load
+0.4.1's caches into another codegen. 0012 instead hashes a separate `DownstreamVersion` (1) into the
+bucket next to `FormatVersion`: an old cache is in another bucket, isn't loaded, and is deleted at
+the next start, so the disk holds one cache, not two; and no upstream build's bucket can match. Bump
+it when a downstream fix makes cached blocks unsafe without a change of upstream's version. The AOT
+image caches (`CodeCache`, from `FEXOfflineCompiler`) aren't touched; Hadron doesn't make them.
+Checked with the scratch prefix of the tests and with Geometry Dash's: each held one bucket from the
+earlier build (`fe63fce69aa1e023`); the first start removed it and made `74181c7d43e0891a`, and the
+next starts used that one.
+
+Retest of these changes (Wine 0057 with the unblock in the loop, FEX 0012, scratch `dist-fsx4`):
+`ntcontinue-x16-x17` 100 of 100 runs of 2 s with 4 threads (39M continues), `hello` x86-64 and i386.
+Through `scripts/steam-run` from this branch's scripts, Geometry Dash's process had
+`OPENSSL_armcap=0x3d`, and a helper started outside the game's folder (`cmd /c set OPENSSL`) printed
+`OPENSSL_armcap=0x3d`. The 20 starts of Geometry Dash with Geode weren't made: Mac Steam wasn't
+running, so the game ended at `SteamAPI_Init` each time.
 
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
