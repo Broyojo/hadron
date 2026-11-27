@@ -2368,6 +2368,87 @@ unaligned access (thread, site, the instructions before and after, where it resu
 and `DBG compile`, `DBG link-map` and `DBG link-ret` report a lookup, compile or link that returns a
 host address outside the code buffer.
 
+**A hang with the diagnostic build: FEX's heap gave out JIT memory, and Wine's signal handler spun on
+an exception frame it couldn't write (Wine 0056, rpmalloc patch).** 30 starts with 0008 to 0011 and
+the diagnostic build gave 29 ok; the 30th hung while Geode logged "Setting up internal mod", with no
+`DBG pass` and no `err:seh`. A 3 s `sample` of it has one busy thread, Geode's `arc-worker-0`
+(0x188): all 1,814 samples at `setup_raise_exception + 156` (`signal_arm64.c:812`, the store of the
+exception record into the new frame), under `_sigtramp` and `segv_handler`. Below the signal frame
+its frame pointer chain is in `xtajit64.dll` (symbolized with the build's own symbols):
+`CompileBlock`, `DiskCache::Lookup`, then 46 pairs of `ResetToConsistentState` and
+`ResetToConsistentStateImpl` calling the diagnostic `DbgReport`, the last in `LogMan::Msg::MFmtImpl`.
+No other thread is in FEX: the others wait in `NtWaitForAlertByThreadId` or the server, the main
+thread called from libcocos2d's code, with no frame of FEX's on any of their stacks (FEX keeps frame
+pointers, as thread 0x188's stack shows). There is no lock cycle: the main thread waits at game level
+for the worker that spins.
+
+The log has how it started. Thread 0x188's first access violation is at `xtajit64.dll + 0x815c`, with
+Wine's "write fault at 0x7ff4dfc26170 in MAP_JIT memory, written outside a JIT write window": the
+store of the first element into the new buffer of `GuestPages.push_back` in `DiskCache::Lookup`, so
+`FEXCore::Allocator::aligned_alloc` (rpmalloc) had just returned a block inside FEX's code buffer,
+19K past the block the thread had last patched. The next fault is in `memmove`, then 44 at one
+`ldr x8, [x0]` in rpmalloc's `heap_allocate_block_aligned`, which pops the heap's free list: the
+diagnostic `DbgReport` allocates from the same heap for each fault FEX passes on, and its own fault
+is passed on again, each a frame deeper on the 256K emulator stack. When the stack had run out, the
+fault came in `MFmtImpl`, and Wine's signal handler wrote the next exception frame below the stack.
+That store faulted with the same signal, which is blocked while its handler runs; macOS leaves a
+blocked synchronous signal pending and runs the faulting instruction again, so the thread spun on it
+(96.6% CPU in the reproduction below). Without the diagnostic report the first fault would have been
+passed on and ended like the other failures; the heap that gave out code buffer memory is what may be
+common to them.
+
+**Wine's half (0056).** `virtual_setup_exception` writes the frame below the stack pointer, unchecked,
+for a stack outside the thread's stack limits, which FEX's emulator stack is for every exception FEX
+handles. When the frame's store faulted with another signal than the first fault's, Wine caught the
+nested fault ("nested exception on signal stack") and ended only the thread, and the others waited for
+it. Windows ends the process when it can't write an exception frame to the stack. 0056 checks, under
+the virtual mutex, that the frame's pages are committed, writable and not guard pages (making
+write-watched and W^X-executable ones writable as a write fault would, and refusing MAP_JIT views),
+and otherwise ends the process with the exception's code. `tests/win/fault-off-stack.c` (native
+ARM64, as FEX's frontend is) runs code on a stack of its own with reserved memory below it, in a
+child with a second, idle thread: a fault with sp 256 bytes above the bottom, a vectored handler that
+faults again until the stack runs out (as FEX's handler did), and recursion off the bottom. Without
+0056 all three hang, the last with Geometry Dash's exact stack, `setup_raise_exception + 156` under
+`segv_handler`, at full CPU; the first two in a thread ended alone. With 0056 each child ends with
+`0xc0000005`, 200 runs of 200. An x86-64 program whose own stack can't take the frame takes other
+paths, FEX's `NtRaiseException` of the guest exception and Wine's writes of an emulated context in
+`restore_context`, and still hangs: a build of the test for x86-64 hung in both cases before and
+after 0056. That is open.
+
+**The heap (rpmalloc patch 0001).** rpmalloc frees a block without atomics when its heap's
+`owner_thread` is the current thread's id, and through atomic deferred lists otherwise, and in FEX's
+Windows modules the id is the TEB address (`get_thread_id` reads x18). A thread that exits releases
+its heap to a queue for the next thread (`DeinitCRTThread`, `rpmalloc_thread_finalize`) and kept its
+id as the owner. Wine frees an exited thread's TEB when the next thread exits and gives it to a later
+thread, which may take another heap from the queue: that thread then freed the released heap's blocks
+as its own, onto the page's local list and with the heap's page lists changed without atomics, while
+the thread that took the heap allocated from the same pages. The exiting thread itself did the same
+with the frees it still made after the release (FEX's own threads run `ThreadTerm` after
+`DeinitCRTThread`). `tests/win/rpmalloc-thread-heaps.c` builds FEX's rpmalloc with FEX's settings and
+runs threads that start, allocate, free each other's blocks and exit, 8 at a time, checking each free
+against rpmalloc's state: 862,133 frees in 10 s (77,609 threads) were taken as local into another
+thread's heap. No block was overwritten in those runs; with a short spin added where such a free
+starts, 3 runs of 3 crashed on a bad free list pointer at once. The patch clears the owner when a heap
+is released, so its blocks go through the deferred lists until a thread takes it: 0 such frees in
+75,183 threads, and with the same spin no crash in two runs of 115,000 threads. Whether this race is
+what put a code buffer address on thread 0x188's free list isn't shown, but it corrupts exactly those
+lists, and it needs what Geode's start has: threads ending and starting (its async runtime starts its
+workers then) while others free what they allocated. rpmalloc is a submodule of FEX, so the patch is
+in `patches/fex/External/rpmalloc/`; `scripts/fetch.sh` and `scripts/check-patches.sh` now take a
+submodule's queue in the directory of its path.
+
+With 0056 and the rpmalloc patch on 0008 to 0011 (scratch runtime `dist-fsx2`): `smc-hook-race`
+20 of 20 runs of 10 s in each layout, `null-branch` 20 of 20, `unaligned-atomic-race` 10 of 10,
+`unwind-no-progress` (ARM64EC and ARM64), `hello` (x86-64 and i386), `is-ec-code`,
+`thread-allocation`, `x87-registers` and `jit-unwind` pass; `tests/win/bench.c` runs in the same time
+(int 0.762 to 0.814 s against 0.752 to 0.804 s, three runs each, interleaved). An independent review of
+0056 found no serious problem; its two small gaps, a stack pointer below the frame size and an
+`mprotect` failure, are handled, and 50 more runs of `fault-off-stack` and short runs of the others
+passed with that. What stays open: the x86-64 paths above; the frame check is made under the lock but
+the store after it isn't, so a stack in executable and writable memory that another thread flips back
+to executable in between still faults; and Geometry Dash itself has not been run with these. The
+diagnostic build with both fixes is the scratch `dist-fsx2-diag`.
+
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
 Reported for 0.3.3 (Steam app 10090, 32-bit, XAudio2 2.0): voice lines are silent, and play
