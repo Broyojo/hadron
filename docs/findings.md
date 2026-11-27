@@ -2190,7 +2190,17 @@ With FEX 0007 Subnautica loads a save in about 19 seconds ("LOADING FINISHED", `
 18.89 seconds`) and keeps its heartbeats going in the world. `tests/win/jit-unwind.c` (including
 the null check that now faults, #67), `mono-host.c` with Subnautica's Mono, `hello` (x86-64 and
 i386), `is-ec-code` and `thread-allocation` pass.
-## Geode's hooks met three races in FEX: torn compiles, stale links, a lost lookup cache range; and a branch to 0 (#80, issue #208)
+## Geometry Dash with Geode: FEX's call-ret stack pointer lost to Wine's NtContinue, and races in FEX's SMC handling (#80, issue #208)
+
+In short: Geometry Dash's failures (crashes with `invalid frame ...0008`, an x86 function run as host
+code, FEX's heap handing out JIT memory, and hangs) all came from one thing, found last: FEX's ARM64EC
+JIT keeps its call-ret stack pointer in x17, FEX resumes from its own exceptions (most often the
+rewrite of an unaligned atomic access) with NtContinue, and Wine's return from it sometimes left x17 =
+sp, because the SIGUSR2 that sets the full context didn't reach the thread in time. Wine 0057 fixes
+that (the last part of this entry). On the way, Geode's hooks turned up three real races in FEX's
+handling of self-modifying code (0008, 0009, 0010), a branch to address 0 through empty lookup entries
+(0011), a heap owner race in rpmalloc (rpmalloc 0001) and a hang when an exception frame doesn't fit
+(Wine 0056); each is fixed below, with its test, though none was what Geometry Dash hit.
 
 On 0.4.0 about one start of Geometry Dash with Geode in ten failed (issue #208, #53): Geode had
 logged only "Setting up internal mod", where it writes its hooks into the game's code while the
@@ -2448,6 +2458,98 @@ passed with that. What stays open: the x86-64 paths above; the frame check is ma
 the store after it isn't, so a stack in executable and writable memory that another thread flips back
 to executable in between still faults; and Geometry Dash itself has not been run with these. The
 diagnostic build with both fixes is the scratch `dist-fsx2-diag`.
+
+**The cause of all three: Wine's NtContinue came back with x17 = sp, and x17 is FEX's call-ret stack
+pointer (Wine 0057).** With 0056 and the rpmalloc patch, 40 starts gave 39 ok and one crash with the
+hang's signature: on thread 0x18C, right after two unaligned-atomic rewrites, `aligned_alloc` returned
+an address in the code buffer (`write fault at 0x7ff4d2d67480 in MAP_JIT memory`), then about 200 faults
+popping garbage from rpmalloc's free list, ended by 0056. A scratch FEX build traps (`brk #0xfe0d`) at
+the first sign of the heap handing out or linking memory outside its spans (every block returned, every
+free list next pointer followed or pushed, every pointer freed, checked against rpmalloc's reservations;
+every code buffer allocation against them and the reverse; any other `NtFreeVirtualMemory` of either),
+and keeps a ring of those events for a debugger. Geometry Dash was run with it under lldb (from
+Steam, in a loop that stops on the trap, an illegal instruction or an execute fault). The heap checks
+never fired. The first two captures were the illegal-instruction kind: Geode.dll + 0x756010 (`push r15;
+push r14`) run as ARM64, reached through the JIT's return path (`ldp x10, x11, [x17], #16`, the
+guest return address matched, `ret x11`) from a call-ret entry {Geode + 0x756339, Geode + 0x756010},
+which no JIT push writes. x17, the ARM64EC JIT's call-ret stack pointer (`REG_CALLRET_SP`, spilled to
+`State.callret_sp`), was the emulator stack base - 0x40: the JIT had been pushing and popping its
+call-ret entries on the top of its own 256K emulator stack, where FEX's frames and Wine's exception
+frames overwrite them, and its 4 MB call-ret stack had no dirty page. That accounts for all three
+failures:
+
+- an x86 function run as host code (with `invalid frame ...0008` after it), and in one capture a jump
+  onto the stack: a `ret` whose popped entry matched the guest return address, with a host half that was
+  a guest or a stack address;
+- the heap's JIT addresses: Wine maps rpmalloc's 4K heap structure for a thread (its first allocation)
+  right above the emulator stack that `ThreadInit` allocates next, and a push from just above the base
+  overwrites the heap's owner and `local_free[]` heads with a guest address and a host return address
+  (lldb read {Geode RIP, code buffer address} in the heap's first 16 bytes). The next allocation of that
+  size class returned code buffer memory. So it wasn't rpmalloc's owner race, which is real but not this;
+- the 64K-aligned `invalid frame ...0008` of the first failures: the same emulator stack base.
+
+A second build traps when a C++ entry of the JIT (`CompileBlock`, `ExitFunctionLink`, an exception in
+JIT code) sees x17 or `State.callret_sp` outside the call-ret stack, and logs every exception with its
+x17 and sp. It caught it within a block: x17 valid at an unaligned-atomic fault, and at the next
+`CompileBlock` the emulator stack base + 0x10, which is the JIT's sp plus one pop. FEX resumes from such
+a fault with `NtContinueNative`, a direct NtContinue with the native context. Wine's arm64 syscall
+dispatcher can only restore x16 and x17 through a signal: when they differ from the pc and sp it calls
+`syscall_dispatcher_return_slowpath`, which raises SIGUSR2, and usr2_handler switches to the frame's
+context; if that returns, the fast return runs and ends with `ldp x30, x17, [sp, #0xf0]; mov sp, x17;
+ret x16`, so x16 = pc and x17 = sp. Instrumented (scratch `wtrap/signal_arm64.c`), the failing starts
+logged exactly that: `pthread_kill(pthread_self(), SIGUSR2)` (what `raise()` does, falling back to a
+signal for the whole process on ENOTSUP) returned 0, usr2_handler had run 0 times for it, SIGUSR2
+wasn't blocked, and the frame held the right x17; in one of these starts another thread had fallen
+through the same way in native code, where x16 and x17 are scratch and nothing breaks. In a start that
+didn't crash, a SIGUSR2 reached a thread in JIT code, outside any syscall, where the handler returns
+without doing anything. Why the signal isn't delivered before pthread_kill returns was not found. These
+captures were made with lldb attached, which receives each signal first (`EXC_SOFT_SIGNAL`) and passes
+it on; without a debugger the same crash came about once in 40 starts. It wasn't reproduced outside
+Geometry Dash: `tests/win/ntcontinue-x16-x17.c` (native ARM64, NtContinue to contexts whose x16 and x17
+aren't their pc and sp; 100 runs of 2 s with 4 threads, 52M continues, before 0057 and as many after,
+and about 7,000 continues under lldb) never sees it,
+nor does it with threads that suspend others, read their context, make syscalls or call
+`FlushProcessWriteBuffers` in a loop, nor does an x86 program that runs 35,000 fresh functions a second
+with unaligned accesses under FEX while another thread suspends it.
+
+0057 doesn't depend on when the signal arrives: the slowpath marks the thread as waiting and calls
+`pthread_kill` (not `raise`, so the signal can't go to another thread) and `sched_yield` in a loop
+until the handler has switched to the frame's context, which doesn't return to it; the handler acts
+only on a waiting thread, so a late SIGUSR2 no longer switches a thread to the frame of whatever
+syscall it is in by then. An independent review found no way for it to apply a wrong frame; its one
+risk is a thread that reaches the slowpath with SIGUSR2 blocked (which the fault path of a blocked
+section, `handle_syscall_fault`, could do), which would loop instead of returning wrongly. The
+instrumented starts read the mask right after pthread_kill had returned and found SIGUSR2 unblocked;
+0057 unblocks it all the same before signaling (code returned to doesn't run with it blocked), and logs
+an `err` if 1,000 tries haven't been answered, so a lost signal shows in the log instead of as a silent
+spin. A synchronous trap (`brk` recognised by the trap handler) would not depend on delivery at all,
+but a debugger stops on every one.
+
+With 0057 (and logging where it acts, scratch `wfix/signal_arm64-diag.c`, FEX with the call-ret
+check), Geometry Dash started 20 of 20 times under lldb, where the build without it had failed about
+one start in five, and 14 of 14 without lldb, with no trap. Under lldb it showed both halves of the
+misdelivery: in three starts a thread's first pthread_kill wasn't answered and the second was
+(`SIGUSR2 delivered after 1 retries`; in two of them the frame's pc was in JIT code, its sp the
+emulator stack base and its x17 a valid call-ret pointer, so starts that would have crashed, in the
+third FEX's own code), and in another a SIGUSR2 reached a thread that wasn't waiting, inside a syscall,
+right after another thread's continue had been done normally. Before 0057 that thread would have been
+switched to its syscall frame in the middle of the syscall, another way the same signal could break a
+thread. So the signal for one thread sometimes goes to another or comes twice; it happens far more
+often with lldb attached (it receives each signal first and passes it on), which fits 1 start in 5
+under lldb against 1 in 40 without.
+
+Without lldb, with the release's loader and no FEX logging (scratch `dist-fsx3`), 17 of the first 18
+starts were ok. The 11th hung at "Setting up internal mod" with its memory flat; it ran an earlier
+version of 0057 that spun silently when the signal wasn't answered, and no `sample` was taken, so
+whether that was the slowpath or another hang (the lock order of the earlier part of this entry) isn't
+known. Starts from the 14th on ran the final 0057, which logs after 1,000 tries.
+
+With 0057 on 0001 to 0011, the rpmalloc patch and 0056 (scratch `dist-fsx3`): `smc-hook-race` 20 of 20
+runs of 10 s in each layout, `null-branch` 20 of 20, `unaligned-atomic-race` 10 of 10,
+`fault-off-stack` 10 of 10, `rpmalloc-thread-heaps` 2 of 2, `ntcontinue-x16-x17` 100 of 100, `hello`
+(x86-64 and i386), `is-ec-code`, `thread-allocation`, `x87-registers`, `jit-unwind` and
+`unwind-no-progress` (ARM64EC and ARM64) pass, and `tests/win/bench.c` runs in the same time (int 0.759
+to 0.779 s against 0.781 to 0.814 s, three runs each, interleaved).
 
 ## Voice lines in Call of Duty: World at War decode to nothing (open, #63)
 
