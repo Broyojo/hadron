@@ -1,4 +1,4 @@
-From ff2e083798eb6f0d9e78963109cb58107be6fd49 Mon Sep 17 00:00:00 2001
+From 269d3ce00a0a44ab8dabd6edc7346e96935d7daf Mon Sep 17 00:00:00 2001
 From: Broyojo <dha@xoba.com>
 Date: Thu, 26 Nov 2026 20:58:22 -0500
 Subject: [PATCH] ntdll: Keep signaling until the full-context return has been
@@ -24,18 +24,19 @@ threads stop for a signal at once and gives both the one the debugger
 answered first, and lldb drops a thread's signal when it steps another
 thread over a breakpoint.
 
-Unblock SIGUSR2, mark the thread as waiting for the handler, and call
-pthread_kill() and sched_yield() until the handler has run. The handler
-only acts on a thread that is waiting, so a SIGUSR2 that arrives late
-or at another thread no longer applies the frame of whatever syscall
-that thread is in. Use pthread_kill() instead of raise(), which falls
-back to signaling the whole process.
+Mark the thread as waiting for the handler, and call pthread_kill() and
+sched_yield() until the handler has run, unblocking SIGUSR2 before each
+try, since another sigprocmask() can block it again meanwhile. The
+handler only acts on a thread that is waiting, so a SIGUSR2 that
+arrives late or at another thread no longer applies the frame of
+whatever syscall that thread is in. Use pthread_kill() instead of
+raise(), which falls back to signaling the whole process.
 ---
- dlls/ntdll/unix/signal_arm64.c | 26 +++++++++++++++++++++++++-
- 1 file changed, 25 insertions(+), 1 deletion(-)
+ dlls/ntdll/unix/signal_arm64.c | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index 2ebba14110..3d128dc893 100644
+index 2ebba14110..28c37dac68 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -72,6 +72,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(seh);
@@ -58,7 +59,7 @@ index 2ebba14110..3d128dc893 100644
  
      if (is_emulated_code( frame->pc ))
      {
-@@ -1626,7 +1630,27 @@ void signal_init_process( TEB *teb )
+@@ -1626,7 +1630,29 @@ void signal_init_process( TEB *teb )
   */
  void syscall_dispatcher_return_slowpath(void)
  {
@@ -71,16 +72,18 @@ index 2ebba14110..3d128dc893 100644
 +     * dispatcher restore the frame without x16 and x17, which would then hold the pc and the sp.
 +     * On macOS the signal can be held back: another library's sigprocmask() sets the mask of every
 +     * thread, and with a debugger attached the kernel can give this thread another thread's signal.
-+     * So enter the kernel again until the handler has run. pthread_kill(), not raise(): raise()
-+     * falls back to a signal for the process. */
++     * So enter the kernel again until the handler has run, unblocking SIGUSR2 each time, since
++     * another sigprocmask() can block it again in between; a return to user code doesn't keep it
++     * blocked. pthread_kill(), not raise(): raise() falls back to a signal for the process. */
 +    thread_data->set_context_pending = TRUE;
-+    /* a return to user code doesn't keep SIGUSR2 blocked */
 +    sigemptyset( &mask );
 +    sigaddset( &mask, SIGUSR2 );
-+    pthread_sigmask( SIG_UNBLOCK, &mask, NULL );
 +    for (i = 0;; i++)
 +    {
-+        int ret = pthread_kill( pthread_self(), SIGUSR2 );
++        int ret;
++
++        pthread_sigmask( SIG_UNBLOCK, &mask, NULL );
++        ret = pthread_kill( pthread_self(), SIGUSR2 );
 +        if (i == 1000) ERR( "SIGUSR2 not delivered after %u tries, pthread_kill returned %d\n", i, ret );
 +        sched_yield();
 +    }
